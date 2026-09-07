@@ -135,7 +135,7 @@ class TestHermeticity:
     """The suite must not touch the developer's database (decision D-06)."""
 
     async def test_database_url_is_temporary(self):
-        from backend.app.core.config import settings
+        from backend.app.settings import settings
 
         assert "dwi-tests-" in settings.DATABASE_URL, (
             "tests must run against a throwaway database, got "

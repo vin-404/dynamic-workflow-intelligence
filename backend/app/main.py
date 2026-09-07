@@ -6,9 +6,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.core.config import settings
-from backend.app.core.database import engine, async_session
-from backend.app.core.database import Base
+from backend.app.settings import settings
+from backend.app.db import engine, async_session
+from backend.app.db import Base
 from backend.app.models import (  # noqa: F401 — register models with Base
     Project, Task, Dependency, Event, Requirement, RequirementConsumer,
     DepartmentCapacity,

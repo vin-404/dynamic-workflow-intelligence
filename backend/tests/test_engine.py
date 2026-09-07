@@ -6,7 +6,7 @@ with the demo scenario data. Every assertion here corresponds to
 a verified output from the original demo.
 """
 import pytest
-import engine as E
+from backend.app.core import engine as E
 
 from backend.app.services.seed import (
     TASKS, DEPS, STATUS, EVENTS, REQUIREMENTS, TODAY_DAY, PROJECT_START,

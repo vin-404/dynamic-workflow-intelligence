@@ -1,13 +1,16 @@
-fastapi==0.115.12
-uvicorn[standard]==0.34.2
-sqlalchemy[asyncio]==2.0.41
-asyncpg==0.30.0
-psycopg2-binary==2.9.10
-alembic==1.15.2
-pydantic==2.11.3
-pydantic-settings==2.9.1
-networkx==3.4.2
+# Pinned to what is actually installed in ./.venv and verified green
+# (decision D-01). SQLite only -- no Postgres driver is needed (D-04).
+fastapi==0.141.1
+uvicorn==0.52.4
+sqlalchemy[asyncio]==2.0.52
+aiosqlite==0.22.1
+alembic==1.19.2
+pydantic==2.13.5
+pydantic-settings==2.15.0
+networkx==3.6.1
+python-dotenv==1.2.3
+
+# tests
 httpx==0.28.1
-pytest==8.3.5
-pytest-asyncio==0.25.3
-python-dotenv==1.1.0
+pytest==9.1.1
+pytest-asyncio==1.4.0

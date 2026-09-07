@@ -8,7 +8,7 @@ from sqlalchemy import engine_from_config, pool
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from backend.app.core.database import Base
+from backend.app.db import Base
 from backend.app.models import (  # noqa: F401 - ensure models are registered
     Project, Task, Dependency, Event, Requirement, RequirementConsumer,
 )

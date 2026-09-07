@@ -24,7 +24,7 @@ os.environ["DATABASE_URL_SYNC"] = f"sqlite:///{_DBFILE}"
 
 import pytest  # noqa: E402
 
-import engine as E  # noqa: E402
+from backend.app.core import engine as E  # noqa: E402
 
 from backend.app.services.seed import (  # noqa: E402
     TASKS, DEPS, STATUS, EVENTS, REQUIREMENTS, TODAY_DAY, PROJECT_START,

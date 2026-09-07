@@ -22,7 +22,7 @@ from backend.app.models import (
 )
 
 # Import the untouched engine
-import engine as E
+from backend.app.core import engine as E
 
 
 async def _load_project(db: AsyncSession, project_id: uuid.UUID) -> Project:

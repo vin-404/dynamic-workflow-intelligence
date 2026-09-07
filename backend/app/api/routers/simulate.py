@@ -6,7 +6,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.app.core.database import get_db
+from backend.app.db import get_db
 from backend.app.schemas.simulation import (
     DelayRequest,
     RequirementChangeRequest,

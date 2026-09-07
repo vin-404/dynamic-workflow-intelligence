@@ -1,41 +1,30 @@
-version: "3.9"
-
+# NOT the supported way to run this project.
+#
+# The supported path is one process plus one dev server, on SQLite:
+#   .venv/Scripts/python.exe -m uvicorn backend.app.main:app --reload --port 8001
+#   cd frontend && npm run dev
+#
+# This file is kept only so an existing `docker compose up` does not silently
+# start a Postgres the application no longer uses. It requires
+# backend/Dockerfile and frontend/Dockerfile, which are deliberately not in
+# this repo (modular monolith, no container ceremony -- ARCHITECTURE A.5).
 services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: dwi
-      POSTGRES_PASSWORD: dwi_dev_password
-      POSTGRES_DB: dwi
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dwi"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
   api:
     build:
       context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "8000:8000"
+      - "8001:8001"
     environment:
-      DATABASE_URL: postgresql+asyncpg://dwi:dwi_dev_password@db:5432/dwi
-      DATABASE_URL_SYNC: postgresql://dwi:dwi_dev_password@db:5432/dwi
+      DATABASE_URL: sqlite+aiosqlite:////data/dwi.db
+      DATABASE_URL_SYNC: sqlite:////data/dwi.db
       ENVIRONMENT: development
-    depends_on:
-      db:
-        condition: service_healthy
     volumes:
       - ./backend:/app/backend
-      - ./engine.py:/app/engine.py
+      - dwidata:/data
     command: >
-      sh -c "cd /app && alembic -c backend/alembic.ini upgrade head &&
-             uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload"
+      sh -c "cd /app &&
+             uvicorn backend.app.main:app --host 0.0.0.0 --port 8001 --reload"
 
   frontend:
     build:
@@ -44,15 +33,12 @@ services:
     ports:
       - "3000:3000"
     environment:
-      # Client-side (browser) hits the host-mapped port
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-      # Server-side rewrites use Docker service name
-      API_REWRITE_URL: http://api:8000
+      NEXT_PUBLIC_API_URL: http://localhost:8001
+      API_REWRITE_URL: http://api:8001
     depends_on:
       - api
     volumes:
       - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
 
 volumes:
-  pgdata:
+  dwidata:

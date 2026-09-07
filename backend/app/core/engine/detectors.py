@@ -1,143 +1,17 @@
-"""
-Workflow Intelligence — core engine.
+"""Bottleneck detectors.
 
-Everything here is deterministic arithmetic on a DAG. No ML, no LLM.
-That is deliberate: schedule claims have to be auditable.
+Moved verbatim from the prototype `engine.py` (phase 1). Phase 2 converts
+`detect()` into a registry of pure tiered detectors; this module preserves the
+original behaviour exactly so the regression suite stays green through the
+move.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
-from datetime import date, timedelta
+from dataclasses import dataclass, asdict
 from typing import Any
 
 import networkx as nx
 
-
-# ----------------------------------------------------------------------------
-# 1. Schedule (Critical Path Method)
-# ----------------------------------------------------------------------------
-
-class CycleError(Exception):
-    def __init__(self, cycles):
-        self.cycles = cycles
-        super().__init__(f"workflow contains circular dependencies: {cycles}")
-
-
-def build_graph(tasks: dict, deps: list) -> nx.DiGraph:
-    """deps entries are (predecessor, successor, kind) with kind in
-    {'artifact', 'temporal'}.  'artifact' means the successor consumes
-    something the predecessor produces -- that distinction drives staleness."""
-    G = nx.DiGraph()
-    for tid, t in tasks.items():
-        G.add_node(tid, **t)
-    for u, v, kind in deps:
-        G.add_edge(u, v, kind=kind)
-    return G
-
-
-def schedule(G: nx.DiGraph, durations: dict[str, float]) -> dict:
-    """CPM forward + backward pass -> ES/EF/LS/LF, slack, critical path."""
-    if not nx.is_directed_acyclic_graph(G):
-        raise CycleError(list(nx.simple_cycles(G)))
-
-    order = list(nx.topological_sort(G))
-
-    ES, EF = {}, {}
-    for n in order:                                        # forward pass
-        ES[n] = max((EF[p] for p in G.predecessors(n)), default=0)
-        EF[n] = ES[n] + durations[n]
-
-    project_end = max(EF.values(), default=0)
-
-    LF, LS = {}, {}
-    for n in reversed(order):                              # backward pass
-        LF[n] = min((LS[s] for s in G.successors(n)), default=project_end)
-        LS[n] = LF[n] - durations[n]
-
-    slack = {n: LS[n] - ES[n] for n in order}
-    return {
-        "ES": ES, "EF": EF, "LS": LS, "LF": LF,
-        "slack": slack,
-        "critical": [n for n in order if abs(slack[n]) < 1e-9],
-        "project_end": project_end,
-        "durations": dict(durations),
-    }
-
-
-# ----------------------------------------------------------------------------
-# 2. Change propagation -- the before/after diff
-# ----------------------------------------------------------------------------
-
-def diff(before: dict, after: dict) -> dict:
-    moved = {}
-    for n, es in after["ES"].items():
-        prev = before["ES"].get(n)
-        if prev is not None and abs(prev - es) > 1e-9:
-            moved[n] = {"from": prev, "to": es, "delta": es - prev}
-
-    b, a = set(before["critical"]), set(after["critical"])
-    slack_consumed = {
-        n: before["slack"][n] - after["slack"][n]
-        for n in after["slack"]
-        if n in before["slack"] and after["slack"][n] < before["slack"][n] - 1e-9
-    }
-    return {
-        "project_end_before": before["project_end"],
-        "project_end_after": after["project_end"],
-        "project_end_delta": after["project_end"] - before["project_end"],
-        "tasks_moved": moved,
-        "critical_path_changed": before["critical"] != after["critical"],
-        "newly_critical": sorted(a - b),
-        "no_longer_critical": sorted(b - a),
-        "slack_consumed": slack_consumed,
-    }
-
-
-def apply_delay(durations: dict, task_id: str, extra_days: float) -> dict:
-    out = dict(durations)
-    out[task_id] = out[task_id] + extra_days
-    return out
-
-
-# ----------------------------------------------------------------------------
-# 3. Requirement staleness
-# ----------------------------------------------------------------------------
-
-def stale_tasks(G: nx.DiGraph, seeds: set[str]) -> dict:
-    """A requirement changed.  `seeds` are the tasks that consumed it.
-
-    must_redo    -- reachable from a seed along ARTIFACT edges: this work
-                    consumed something that is now wrong.
-    must_recheck -- merely downstream in time: probably fine, but a human
-                    should look.
-
-    Keeping these separate is the difference between a useful alert and
-    "your whole project is red".
-    """
-    must_redo = set(seeds)
-    frontier = set(seeds)
-    while frontier:
-        nxt = set()
-        for u in frontier:
-            for v in G.successors(u):
-                if G.edges[u, v]["kind"] == "artifact" and v not in must_redo:
-                    must_redo.add(v)
-                    nxt.add(v)
-        frontier = nxt
-
-    downstream: set[str] = set()
-    for n in must_redo:
-        downstream |= nx.descendants(G, n)
-
-    return {
-        "must_redo": sorted(must_redo),
-        "must_recheck": sorted(downstream - must_redo),
-    }
-
-
-# ----------------------------------------------------------------------------
-# 4. Bottleneck detection
-# ----------------------------------------------------------------------------
 
 @dataclass
 class Bottleneck:
@@ -345,11 +219,3 @@ def detect(G, sched, status, events, depts, today_day: float,
 
     found.sort(key=lambda b: (-b.impact_score, -b.attributed_delay_days))
     return found
-
-
-# ----------------------------------------------------------------------------
-# 5. Helpers
-# ----------------------------------------------------------------------------
-
-def day_to_date(start: date, day: float) -> str:
-    return (start + timedelta(days=float(day))).isoformat()
