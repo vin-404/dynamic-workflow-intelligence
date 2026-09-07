@@ -52,7 +52,7 @@ export default function Explainer({ projectId }: { projectId: string }) {
       )}
 
       {error && (
-        <ErrorNote onRetry={run}>
+        <ErrorNote onRetry={run} hint={error.hint} requestId={error.requestId}>
           <p>{error.userMessage}</p>
         </ErrorNote>
       )}

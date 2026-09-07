@@ -106,7 +106,9 @@ export function ProjectCreate({
 
       {error && (
         <div className="mb-3">
-          <ErrorNote>{error.userMessage}</ErrorNote>
+          <ErrorNote hint={error.hint} requestId={error.requestId}>
+            {error.userMessage}
+          </ErrorNote>
         </div>
       )}
 
@@ -233,7 +235,9 @@ export function MemberList({ projectId }: { projectId: string }) {
 
       {error && (
         <div className="mb-2">
-          <ErrorNote>{error.userMessage}</ErrorNote>
+          <ErrorNote hint={error.hint} requestId={error.requestId}>
+            {error.userMessage}
+          </ErrorNote>
         </div>
       )}
 

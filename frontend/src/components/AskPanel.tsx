@@ -162,7 +162,7 @@ export default function AskPanel({ workflow }: { workflow: Workflow }) {
       </Card>
 
       {error && (
-        <ErrorNote>
+        <ErrorNote hint={error.hint} requestId={error.requestId}>
           <p>{error.userMessage}</p>
           {error.constraint && (
             <p className="mt-2 text-xs">

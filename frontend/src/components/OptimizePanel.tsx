@@ -170,7 +170,11 @@ export default function OptimizePanel({
       </Card>
 
       {busy && <Spinner label={`${SEARCH_PHASES[phase]}…`} />}
-      {error && <ErrorNote>{error.userMessage}</ErrorNote>}
+      {error && (
+        <ErrorNote hint={error.hint} requestId={error.requestId}>
+          {error.userMessage}
+        </ErrorNote>
+      )}
 
       {result && (
         <>

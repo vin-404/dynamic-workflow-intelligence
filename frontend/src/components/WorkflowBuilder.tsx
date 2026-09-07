@@ -99,7 +99,11 @@ export default function WorkflowBuilder({
   return (
     <div className="space-y-4">
       {error && (
-        <ErrorNote onRetry={() => setError(null)}>
+        <ErrorNote
+          onRetry={() => setError(null)}
+          hint={error.hint}
+          requestId={error.requestId}
+        >
           <p>{error.userMessage}</p>
           {error.cycles && (
             <p className="mt-1 font-mono text-xs text-amber">

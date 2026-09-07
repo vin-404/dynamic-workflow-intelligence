@@ -197,7 +197,7 @@ export default function WhatIfPanel({ workflow }: { workflow: Workflow }) {
       {busy && <Spinner label="Evaluating against an in-memory copy…" />}
 
       {error && (
-        <ErrorNote>
+        <ErrorNote hint={error.hint} requestId={error.requestId}>
           <p>{error.userMessage}</p>
           {error.constraint && (
             <p className="mt-2 text-xs">
