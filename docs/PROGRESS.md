@@ -2136,9 +2136,13 @@ Not reasoned about — run:
    callbacks are exercised by the Credentials path — but the Google leg itself
    is untested. Register the redirect URI as
    `<NEXTAUTH_URL>/api/auth/callback/google` or it will fail on first contact.
-2. **Nobody has looked at light mode in a browser.** The app now follows the
-   system preference and the tokens are contrast-checked in both modes (lowest
-   4.74:1), but the *layouts* have only ever been seen on a dark canvas.
+2. **Light mode has now been looked at, and holds up.** Screenshotted at
+   `colorScheme: light` and `dark` on the workflow list, the builder and the
+   analysis stage: readable in both, no light-on-light failure, no unstyled
+   panel. That was the risk this entry was originally filed for and it is
+   discharged. What is *not* discharged is that the layouts were designed
+   against a dark canvas, so light mode is merely correct rather than
+   considered — wave 2 restyles them and should check both.
    Relatedly, `DependencyGraph.tsx` hardcodes dark hexes inline
    (`stroke: "#4c9aff"`, `<Background color="#1c232c" />`), so the graph will
    show dark-grey edges on a white page until wave 2 replaces them with
