@@ -43,3 +43,6 @@ dwi.db
 .env
 .env.local
 .pytest_cache/
+
+# Local scratch
+Claude outputs/

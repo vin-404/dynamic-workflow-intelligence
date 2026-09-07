@@ -1,15 +1,32 @@
-"""Shared test fixtures."""
-import sys
+"""Shared test fixtures.
+
+Hermeticity note (Phase 1, decision D-06): the database URL is redirected to a
+throwaway file *before* any application module is imported, so the suite never
+reads or writes the developer's `dwi.db`. Nothing here depends on state left
+behind by a previous run.
+"""
 import os
+import pathlib
+import sys
+import tempfile
 
-# Ensure project root is on the path so `import engine` works
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+# Project root on the path so `backend.app...` imports resolve.
+_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
-import pytest
-import engine as E
+# Redirect the database to a temporary file. Must happen before the app's
+# settings module is imported, because the async engine is created at import.
+_TMPDIR = pathlib.Path(tempfile.mkdtemp(prefix="dwi-tests-"))
+_DBFILE = (_TMPDIR / "test.db").as_posix()
+os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_DBFILE}"
+os.environ["DATABASE_URL_SYNC"] = f"sqlite:///{_DBFILE}"
 
-# Import scenario data from the seed module (our canonical source)
-from backend.app.services.seed import (
+import pytest  # noqa: E402
+
+import engine as E  # noqa: E402
+
+from backend.app.services.seed import (  # noqa: E402
     TASKS, DEPS, STATUS, EVENTS, REQUIREMENTS, TODAY_DAY, PROJECT_START,
 )
 
