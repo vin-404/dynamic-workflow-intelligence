@@ -37,6 +37,11 @@ from backend.app.core.engine.evaluate import (
     Feasibility,
     evaluate,
 )
+from backend.app.core.engine.feasibility import (
+    NOT_A_PROBABILITY,
+    ThreePoint,
+    three_point_range,
+)
 from backend.app.core.engine.findings import (
     HIGH,
     LOW,
@@ -54,6 +59,13 @@ from backend.app.core.engine.graph import (
     build_graph_from_snapshot,
     find_cycles,
     transitive_redundant_edges,
+)
+from backend.app.core.engine.risk import (
+    SCORE_KIND,
+    Factor,
+    RiskWeights,
+    TaskRisk,
+    score_tasks,
 )
 from backend.app.core.engine.staleness import stale_tasks
 
@@ -95,6 +107,16 @@ __all__ = [
     "root_blocker",
     # staleness
     "stale_tasks",
+    # risk (Capability 2, Layer A)
+    "RiskWeights",
+    "TaskRisk",
+    "Factor",
+    "score_tasks",
+    "SCORE_KIND",
+    # feasibility
+    "ThreePoint",
+    "three_point_range",
+    "NOT_A_PROBABILITY",
     # the primitive
     "evaluate",
     "EvaluationResult",

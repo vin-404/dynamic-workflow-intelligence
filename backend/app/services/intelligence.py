@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from backend.app.core.engine import evaluate as core_evaluate
 from backend.app.core.engine import stale_tasks
 from backend.app.core.engine.graph import build_graph_from_snapshot
+from backend.app.core.engine.risk import RiskWeights
 from backend.app.core.workflow import EngineConfig, WorkflowSnapshot
 from backend.app.services import analysis_runs, versions as V
 from backend.app.services.versions import NotFound  # re-exported for routers
@@ -31,6 +32,7 @@ __all__ = [
     "NotFound",
     "get_workflow",
     "analyze",
+    "risk",
     "requirement_impact",
     "get_accuracy",
 ]
@@ -146,6 +148,7 @@ async def analyze(
     version_id: uuid.UUID | None = None,
     config: EngineConfig | None = None,
     persist: bool = True,
+    weights: RiskWeights | None = None,
 ) -> dict:
     """Capability 1: `evaluate(W)`, serialised.
 
@@ -157,7 +160,7 @@ async def analyze(
     project, version, snapshot, state, clock = await V.load_context(
         db, project_id, version_id
     )
-    result = core_evaluate(snapshot, state, clock, config)
+    result = core_evaluate(snapshot, state, clock, config, weights)
 
     labels = _resource_labels(snapshot)
     assignees = snapshot.assignees_by_task
@@ -406,3 +409,42 @@ async def get_accuracy(
             for f in fixture.labelled
         ],
     }
+
+
+async def risk(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    version_id: uuid.UUID | None = None,
+    weights: RiskWeights | None = None,
+    config: EngineConfig | None = None,
+) -> dict:
+    """Capability 2, Layer A: per-task risk with its factor decomposition.
+
+    Weights are inputs and are echoed in the response, so "18% riskier" can
+    never rest on numbers the reader cannot see (ARCHITECTURE H, risk #5).
+    """
+    project, version, snapshot, state, clock = await V.load_context(
+        db, project_id, version_id
+    )
+    result = core_evaluate(snapshot, state, clock, config, weights)
+    payload = dict(result.risk)
+    payload.update({
+        "project_id": str(project.id),
+        "version_id": str(version.id),
+        "engine_version": result.engine_version,
+        "input_hash": result.input_hash,
+        "tier_reached": result.tier_reached,
+        "feasibility": result.feasibility.as_dict(),
+        "projected_end_date": V.day_to_date(
+            project.start_date, result.projected_end
+        ),
+        "three_point_dates": {
+            band: V.day_to_date(project.start_date, day)
+            for band, day in (
+                ("optimistic", result.feasibility.three_point["optimistic_day"]),
+                ("likely", result.feasibility.three_point["likely_day"]),
+                ("pessimistic", result.feasibility.three_point["pessimistic_day"]),
+            )
+        } if result.feasibility.three_point else None,
+    })
+    return payload

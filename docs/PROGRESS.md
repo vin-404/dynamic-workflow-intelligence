@@ -778,3 +778,188 @@ D-25 … D-30 in `docs/DECISIONS.md`. The two that changed behaviour:
    `DEPLOY.md`, a `Dockerfile.backend` and a `dockerignore`). Left untracked
    and unread; it is Phase 9 material and will be reconciled there against the
    Dockerfiles already fixed and verified.
+
+---
+
+# Phase 4 — Capability 2: explainable risk prediction
+
+## 1 · CHANGED
+
+### `core/engine/risk.py` — Layer A
+
+Nine factors, exactly the ARCHITECTURE D.4 list, each normalised to 0–1 where
+higher means more exposed:
+
+| Factor | Signal | Tier |
+|---|---|---|
+| `slack_ratio` | `1 - slack/max(duration,1)` | 0 |
+| `downstream_fan_out` | `|descendants| / (|tasks|-1)` | 0 |
+| `criticality_proximity` | slack **rank**, so near-zero-but-not-zero reads distinctly from already-critical | 0 |
+| `deadline_pressure` | the task's own late finish against the deadline | 0 |
+| `resource_pressure` | concurrent demand on the assignee **and its roll-up** during this task's window, versus capacity | 0 |
+| `duration_uncertainty` | three-point spread if given, else the stated prior | 0 |
+| `predecessor_health` | days since the worst incomplete predecessor moved | 2 |
+| `remaining_chain_depth` | unfinished downstream days / project end | 0 |
+| `assignment_gap` | 1.0 if unassigned *and* critical, 0.5 if unassigned, 0 if assigned | 0 |
+
+`risk = Σ wᵢ·fᵢ`, weights summing to 1.0 by default so the score is on a 0–1
+scale. Every response returns each factor's value, weight, product, reason and
+raw evidence, and `RiskWeights` is a request input echoed back.
+
+`_explain()` builds prose from the top three contributors, deterministically,
+in the engine. The Narrator may rephrase it in Phase 7; it may not originate
+it.
+
+### `core/engine/feasibility.py` — a verdict, a margin, and a range
+
+`three_point_range()` runs the schedule three times, scaling each task's
+*observed* duration by its own band, so a task already overrunning keeps its
+overrun in all three runs. The `likely` run is literally the headline
+projection.
+
+The `monte_carlo` block is the seam and it is **empty on purpose**:
+
+    available: false
+    why: needs durations sampled from calibrated distributions
+    what_it_would_report: P(deadline) and each task's criticality index
+    why_not_faked: an invented percentage is worse than no percentage;
+                   it looks like evidence and is not
+
+### API
+
+| Endpoint | What it does |
+|---|---|
+| `GET /api/projects/{id}/risk` | full decomposition, plus calendar dates for the three-point range |
+| `POST /api/projects/{id}/risk` | the same with your own weights, echoed back |
+
+`analyze` also carries the whole risk block, so one call still answers
+Capability 1 and 2 together.
+
+## 2 · PRESERVED
+
+Nothing was replaced. `Feasibility` gained `three_point` and its statement now
+quotes the range; the verdict and margin fields are unchanged and every
+existing assertion on them still holds.
+
+## 3 · REMOVED
+
+| Removed | Why |
+|---|---|
+| `test_api.py::test_no_probability_language_in_p0_output` | The assertion was wrong: it banned the *word* "probability", which the payload now uses repeatedly and correctly — always to deny one. It was already passing only because `is_probability` was popped as a special case, which does not scale. Replaced by two stronger tests (below). |
+
+## 4 · TESTS
+
+| Suite | Phase 3 | Phase 4 |
+|---|---|---|
+| `test_risk.py` | — | **47** |
+| `test_api.py` | 46 | 47 |
+| `test_domain_leak.py` | 7 | 8 |
+| everything else | 472 | 476 |
+| **Total** | **525** | **578 pass / 0 fail / 0 skip** |
+
+### The brief's Phase-4 checklist
+
+| Requirement | Test |
+|---|---|
+| factor decomposition sums to the reported score | `test_the_factors_sum_to_the_reported_score`, `test_each_contribution_is_weight_times_value` |
+| a tight-slack high-fan-out task outranks an abundant-slack one | `test_tight_slack_and_high_fan_out_outranks_abundant_slack` |
+| no probability language in P0 output | `test_p0_never_emits_a_probability` + `test_no_probability_phrasing_in_user_facing_prose` + `TestItIsNotAProbability` (6) |
+
+### The no-probability test, rewritten
+
+Banning the word was the wrong test. The honest payload says "not a
+probability" four times, names the flag `is_probability`, and includes a field
+called `what_would_make_this_a_probability`. A word-ban either fails on those
+denials or gets weakened with per-key exceptions until it proves nothing.
+
+What it asserts instead:
+
+1. every `is_probability` flag is `False`, `monte_carlo.available` is `False`,
+   `score_kind` is `structural_estimate`, `monte_carlo_run` is `False`
+2. **no numeric field anywhere in the payload is named like a likelihood** —
+   the tree is walked, and any key containing `probability`, `likelihood`,
+   `confidence`, `odds`, `success_rate` or `p_deadline` must hold a string,
+   bool or null, never a number
+3. separately, no *sentence a user reads* contains a probability claim
+   (`"% chance"`, `"chance of"`, `"confidence level"`, `"likelihood of"`, …)
+
+That catches the actual failure mode — a number presented as a likelihood —
+which the word-ban never did.
+
+## 5 · HOW TO TEST
+
+    .venv/Scripts/python.exe -m pytest -q                            # 578 passed
+    .venv/Scripts/python.exe -m pytest backend/tests/test_risk.py -q
+
+    # sections 3 and 3b of the CLI are the whole capability, offline
+    .venv/Scripts/python.exe -m backend.scripts.demo campus-symposium
+
+    .venv/Scripts/python.exe -m uvicorn backend.app.main:app --port 8001
+    curl -s localhost:8001/api/projects/00000000-0000-0000-0000-000000000001/risk
+    curl -s -X POST localhost:8001/api/projects/00000000-0000-0000-0000-000000000001/risk \
+      -H 'Content-Type: application/json' \
+      -d '{"weights":{"downstream_fan_out":0.9,"slack_ratio":0.1}}'
+
+Verified output, campus project: bands `{high: 1, moderate: 8, low: 8}`, T01
+top at 0.592 driven by slack ratio (1.00 × 0.20), fan-out (blocks 16 of 16),
+criticality proximity and remaining chain depth — the four printed with their
+arithmetic. Three-point range day 20 / 26 / 32 with verdicts
+feasible / infeasible / infeasible, and the statement reading *"infeasible by
+2 days without a change. Running the same schedule at optimistic and
+pessimistic task durations gives day 20 to day 32."*
+
+Battery project: bands `{high: 4, moderate: 5, low: 3}`, M05 top at 0.642,
+`predecessor_health` reported `available: false` on every task with the reason
+`"no status history yet"`.
+
+## 6 · DECISIONS
+
+D-32 … D-36 in `docs/DECISIONS.md`. The two that matter:
+
+- **D-33 — the `likely` run of the three-point range *is* the headline
+  projection**, rather than a separately computed "likely" estimate. Otherwise
+  the middle of the range is a fourth number that does not match the one on
+  screen, and every reader has to ask which is real.
+- **D-35 — the no-probability test asserts substance, not vocabulary.**
+
+## 7 · DEVIATIONS
+
+1. **`criticality_proximity` is rank-based.** ARCHITECTURE D.4 describes it as
+   "slack rank; near-zero slack that is not yet zero". A pure ratio would
+   duplicate `slack_ratio`; a rank distinguishes "third-tightest of seventeen"
+   from "already critical", and the reason string says which.
+2. **`resource_pressure` also measures the roll-up.** A person with one task
+   whose *team* is at capacity is under pressure, and measuring only the person
+   would miss the seeded marketing bottleneck entirely.
+3. **`RiskWeights` is a frozen dataclass, not a dict on `EngineConfig`.**
+   Typed, and it keeps `core/` free of module-level mutable state.
+4. **Risk is computed inside `evaluate()`, not on demand.** It is pure
+   arithmetic over the schedule that call already produced, so it costs the
+   Phase-5 optimizer nothing extra per candidate — and it means `analyze`
+   answers Capabilities 1 and 2 in one round trip.
+5. **`three_point` lives on `Feasibility`**, not as a sibling field. It is a
+   feasibility statement with three runs behind it, and separating them would
+   invite a UI that shows the range without the verdict.
+
+## 8 · RISKS
+
+1. **`evaluate()` now does four schedule passes** — baseline, current,
+   optimistic, pessimistic — plus a fifth if resource unavailability is
+   present. The Phase-5 optimizer calls `evaluate()` per candidate, so that is
+   4N passes before the search does anything clever. `three_point_range` should
+   become opt-out for optimizer candidates, which is the first thing to measure
+   in Phase 5.
+2. **The nine weights are mine.** They are exposed, echoed and adjustable,
+   which is the mitigation ARCHITECTURE H #5 asks for, but nobody has
+   calibrated them against real outcomes and the defaults will look
+   authoritative on screen. The UI must show them, not just the score.
+3. **`_resource_pressure` walks every task per resource per task** — O(T²·R) in
+   the worst case. Fine at 17 tasks; it is the second thing to measure in
+   Phase 5.
+4. **`criticality_proximity` uses `list.index`** on the sorted slack values,
+   which is O(T) per task and gives every task with equal slack the same rank.
+   Correct, but it means a workflow where everything has identical slack scores
+   every task at 1.0 on that factor.
+5. **The band thresholds (0.55 / 0.30) are unexplained numbers.** They are
+   labels on a continuum, not claims, and `band` is always accompanied by
+   `score`, but a UI that shows only the band inherits an arbitrary cut.

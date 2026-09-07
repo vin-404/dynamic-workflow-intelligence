@@ -24,8 +24,11 @@ from backend.app.core.engine.detectors import (
     run_all,
     unavailable_checks,
 )
+from backend.app.core.engine.feasibility import ThreePoint, statement, three_point_range
 from backend.app.core.engine.findings import Finding, Tier
 from backend.app.core.engine.graph import build_graph_from_snapshot, find_cycles
+from backend.app.core.engine.risk import RiskWeights, score_tasks
+from backend.app.core.engine.risk import summarise as summarise_risk
 from backend.app.core.workflow import (
     Clock,
     EngineConfig,
@@ -35,7 +38,7 @@ from backend.app.core.workflow import (
 
 #: Bumped whenever a change would alter numeric output. Persisted on every
 #: AnalysisRun, so a stored result can be told apart from a fresh one.
-ENGINE_VERSION = "2.2.0-phase3"
+ENGINE_VERSION = "2.3.0-phase4"
 
 def _empty_schedule(durations: dict[str, float]) -> dict:
     """A schedule-shaped object for a workflow that cannot be scheduled.
@@ -63,8 +66,8 @@ class Feasibility:
     projected_end_day: float
     margin_days: float | None        # positive = slack against the deadline
     statement: str
-    #: Three deterministic schedule runs, not a distribution. Phase 4 fills
-    #: this in; it stays absent rather than faked until then.
+    #: Three deterministic schedule runs, not a distribution. Never a
+    #: probability - see `core/engine/feasibility.py`.
     three_point: dict | None = None
 
     def as_dict(self) -> dict:
@@ -157,42 +160,24 @@ class EvaluationResult:
 
 
 def _feasibility(
-    snapshot: WorkflowSnapshot, projected_end: float
+    snapshot: WorkflowSnapshot,
+    projected_end: float,
+    three_point: ThreePoint | None = None,
 ) -> Feasibility:
     deadline = snapshot.deadline_day
-    if deadline is None:
-        return Feasibility(
-            verdict="no_deadline_set",
-            deadline_day=None,
-            projected_end_day=projected_end,
-            margin_days=None,
-            statement=(
-                f"Projected finish is day {projected_end:.0f}. No deadline is "
-                f"set, so there is nothing to be feasible against."
-            ),
-        )
-    margin = deadline - projected_end
-    if margin >= 0:
-        return Feasibility(
-            verdict="feasible",
-            deadline_day=deadline,
-            projected_end_day=projected_end,
-            margin_days=margin,
-            statement=(
-                f"Projected finish day {projected_end:.0f} against deadline "
-                f"day {deadline:.0f} -- feasible with {margin:.0f} days to spare."
-            ),
-        )
+    margin = None if deadline is None else deadline - projected_end
+    verdict = (
+        "no_deadline_set" if deadline is None
+        else "feasible" if margin >= 0
+        else "infeasible"
+    )
     return Feasibility(
-        verdict="infeasible",
+        verdict=verdict,
         deadline_day=deadline,
         projected_end_day=projected_end,
         margin_days=margin,
-        statement=(
-            f"Projected finish day {projected_end:.0f} against deadline day "
-            f"{deadline:.0f} -- infeasible by {abs(margin):.0f} days without "
-            f"a change."
-        ),
+        statement=statement(verdict, projected_end, deadline, margin, three_point),
+        three_point=three_point.as_dict() if three_point else None,
     )
 
 
@@ -201,6 +186,7 @@ def evaluate(
     state: WorkflowState | None = None,
     clock: Clock | None = None,
     config: EngineConfig | None = None,
+    weights: RiskWeights | None = None,
 ) -> EvaluationResult:
     """Schedule the workflow, detect what is wrong with it, and say how far
     the evidence reached.
@@ -277,6 +263,8 @@ def evaluate(
         "baseline_project_end": baseline["project_end"],
     }
 
+    three_point = three_point_range(snapshot, G, adjusted if unavailability else observed, cfg)
+
     tier = available_tier(st)
     ctx = DetectorContext(
         graph=G,
@@ -288,6 +276,12 @@ def evaluate(
     )
     active, suppressed, ran = run_all(ctx, tier)
 
+    # Capability 2, Layer A. Pure arithmetic over the schedule already
+    # computed, so it costs the optimizer nothing extra per candidate.
+    risks, risk_assumptions = score_tasks(
+        snapshot, st, clk, current, cfg, weights or RiskWeights()
+    )
+
     return EvaluationResult(
         engine_version=ENGINE_VERSION,
         input_hash=snapshot.content_hash(),
@@ -295,11 +289,12 @@ def evaluate(
         baseline_schedule=baseline,
         findings=active,
         suppressed_findings=suppressed,
-        feasibility=_feasibility(snapshot, current["project_end"]),
+        feasibility=_feasibility(snapshot, current["project_end"], three_point),
         effort_model=model.as_dict(),
         config=cfg.as_dict(),
         tier_reached=int(tier),
         resource_unavailability=unavailability,
         checks_run=ran,
         unavailable_checks=unavailable_checks(tier),
+        risk={**summarise_risk(risks), "assumptions": risk_assumptions},
     )

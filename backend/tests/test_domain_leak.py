@@ -152,6 +152,27 @@ def _numeric_projection(result) -> dict:
         scrub(f) for f in payload["suppressed_findings"]
     ]
     payload["feasibility"].pop("statement", None)
+
+    # Risk factors quote the resource that is under pressure and the task the
+    # score is about, for the same reason findings do: "Kitchen Brigade has 2
+    # tasks in this window" is useful and "a resource has 2 tasks" is not.
+    # The *scores* must still be identical, and they are.
+    def scrub_risk(entry: dict) -> dict:
+        entry.pop("explanation", None)
+        entry.pop("task_name", None)
+        for factor in entry["factors"]:
+            factor.pop("reason", None)
+            factor["evidence"].pop("resource_name", None)
+            factor["evidence"].pop("resource", None)
+        return entry
+
+    if payload.get("risk"):
+        payload["risk"]["tasks"] = [
+            scrub_risk(t) for t in payload["risk"]["tasks"]
+        ]
+        payload["risk"]["top"] = [
+            scrub_risk(t) for t in payload["risk"]["top"]
+        ]
     return payload
 
 
@@ -200,6 +221,17 @@ class TestDomainLeak:
         dump_a = json.dumps(_numeric_projection(a), sort_keys=True)
         dump_b = json.dumps(_numeric_projection(b), sort_keys=True)
         assert dump_a == dump_b
+
+    def test_risk_scores_are_identical_across_domains(self, software, kitchen):
+        """Every risk factor is structural, so the *words* in a workflow must
+        not move a single score."""
+        a = evaluate(software, WorkflowState.empty(software), Clock(0.0))
+        b = evaluate(kitchen, WorkflowState.empty(kitchen), Clock(0.0))
+        scores_a = {t["task_key"]: t["score"] for t in a.risk["tasks"]}
+        scores_b = {t["task_key"]: t["score"] for t in b.risk["tasks"]}
+        assert scores_a == scores_b
+        assert a.risk["band_counts"] == b.risk["band_counts"]
+        assert a.risk["assumptions"] == b.risk["assumptions"]
 
     def test_task_names_do_not_change_the_schedule(self, software, kitchen):
         a = evaluate(software, WorkflowState.empty(software), Clock(0.0))

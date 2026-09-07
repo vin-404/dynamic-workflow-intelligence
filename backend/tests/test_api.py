@@ -176,23 +176,67 @@ class TestAnalysisRegression:
         assert f["margin_days"] == -2.0
         assert f["is_probability"] is False
 
-    async def test_no_probability_language_in_p0_output(self, analysis):
+    async def test_p0_never_emits_a_probability(self, analysis):
         """ARCHITECTURE D.6: an invented percentage is the fastest way to lose
         a technical judge, so P0 emits none.
 
-        The `is_probability: false` flag is the one legitimate use of the word
-        - it is the explicit denial - so it is asserted rather than banned.
+        Banning the *word* would be the wrong test - the payload uses it
+        repeatedly, always to deny one ("is_probability": false, "what would
+        make this a probability"). Those denials are the honest part. What
+        must not exist is a *number* presented as a likelihood, so that is
+        what this asserts.
         """
         import json
 
         assert analysis["feasibility"]["is_probability"] is False
+        assert analysis["feasibility"]["three_point"]["is_probability"] is False
+        assert (
+            analysis["feasibility"]["three_point"]["monte_carlo"]["available"]
+            is False
+        )
+        assert analysis["risk"]["assumptions"]["score_kind"] == (
+            "structural_estimate"
+        )
+        assert analysis["risk"]["assumptions"]["monte_carlo_run"] is False
+        for task in analysis["risk"]["tasks"]:
+            assert task["score_kind"] == "structural_estimate"
 
-        stripped = json.loads(json.dumps(analysis))
-        stripped["feasibility"].pop("is_probability")
-        blob = json.dumps(stripped).lower()
-        for banned in ("probability", "p(deadline)", "confidence", "likelihood",
-                       "chance of", "% likely", "success rate"):
-            assert banned not in blob, f"found probability language: {banned!r}"
+        # No numeric field anywhere may be *named* like a likelihood.
+        suspicious = ("probability", "likelihood", "confidence", "percent_chance",
+                      "p_deadline", "success_rate", "odds")
+
+        def walk(node, path=""):
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    here = f"{path}.{key}"
+                    if any(word in key.lower() for word in suspicious):
+                        assert not isinstance(value, (int, float)) or isinstance(
+                            value, bool
+                        ), f"{here} presents a number as a likelihood: {value!r}"
+                    walk(value, here)
+            elif isinstance(node, list):
+                for i, value in enumerate(node):
+                    walk(value, f"{path}[{i}]")
+
+        walk(analysis)
+
+    async def test_no_probability_phrasing_in_user_facing_prose(self, analysis):
+        """Separately: the sentences a user reads must not *claim* one."""
+        prose: list[str] = [analysis["feasibility"]["statement"]]
+        for finding in analysis["findings"]:
+            prose += [finding["explanation"], finding["suggested_action"]]
+        for task in analysis["risk"]["tasks"]:
+            prose.append(task["explanation"])
+            prose += [f["reason"] for f in task["factors"]]
+
+        for text in prose:
+            lowered = text.lower()
+            for banned in ("% chance", "% likely", "chance of", "odds of",
+                           "confidence level", "probability of",
+                           "likelihood of", "success rate"):
+                assert banned not in lowered, (
+                    f"probability claim in user-facing prose: {text!r}"
+                )
 
     async def test_every_finding_carries_evidence_and_an_action(self, analysis):
         for f in analysis["findings"]:

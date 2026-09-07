@@ -117,8 +117,49 @@ def run(fx) -> None:
         print(f"    by         : {b.suppressed.by}")
         print(f"    reason     : {b.suppressed.reason}")
 
-    # ------------------------------------------- 3. limits of the evidence
-    h("3. WHAT THIS ANALYSIS CANNOT ASSESS YET  (and why)")
+    # ------------------------------------------------------------ 3. risk
+    h("3. PREDICTED RISK  (Capability 2, Layer A - a structural estimate)")
+    risk = result.risk
+    print(f"Score kind : {risk['assumptions']['score_kind']}")
+    print(f"Formula    : {risk['assumptions']['formula']}")
+    print(f"Bands      : {risk['band_counts']}")
+    spread = risk["assumptions"]["duration_spread"]
+    print(f"Spread     : {spread['relative_spread']:.0%} "
+          f"(provenance: {spread['provenance']})")
+    if risk["assumptions"]["factors_unavailable"]:
+        print(f"Unavailable factors: "
+              f"{', '.join(risk['assumptions']['factors_unavailable'])} "
+              f"-- these contribute 0 rather than being guessed at")
+    print(NL + risk["assumptions"]["disclaimer"])
+
+    for entry in risk["top"][:3]:
+        print(f"{NL}[{entry['task_key']}] score {entry['score']:.3f} "
+              f"({entry['band']} exposure)")
+        for factor in sorted(entry["factors"],
+                             key=lambda f: -f["contribution"])[:4]:
+            flag = "" if factor["available"] else "  (unavailable)"
+            print(f"    {factor['name']:<24} value {factor['value']:.2f} "
+                  f"x weight {factor['weight']:.2f} = "
+                  f"{factor['contribution']:.3f}{flag}")
+            print(f"      {factor['reason']}")
+        print(f"    -> {entry['explanation']}")
+
+    tp = result.feasibility.three_point
+    if tp:
+        h("3b. FEASIBILITY RANGE  (three deterministic runs, not a distribution)")
+        print(f"optimistic  : day {tp['optimistic_day']:.0f}  "
+              f"({d(tp['optimistic_day'])})  {tp['verdicts']['optimistic']}")
+        print(f"likely      : day {tp['likely_day']:.0f}  "
+              f"({d(tp['likely_day'])})  {tp['verdicts']['likely']}")
+        print(f"pessimistic : day {tp['pessimistic_day']:.0f}  "
+              f"({d(tp['pessimistic_day'])})  {tp['verdicts']['pessimistic']}")
+        print(f"{NL}{tp['method']}")
+        print(f"{NL}Monte Carlo available: {tp['monte_carlo']['available']}")
+        print(f"  why not: {tp['monte_carlo']['why']}")
+        print(f"  and why it is not faked: {tp['monte_carlo']['why_not_faked']}")
+
+    # ------------------------------------------- 4. limits of the evidence
+    h("4. WHAT THIS ANALYSIS CANNOT ASSESS YET  (and why)")
     for gap in result.unavailable_checks:
         print(f"{NL}  Tier {gap['tier']} -- requires {gap['requires']}")
         for check in gap["checks"]:
@@ -127,7 +168,7 @@ def run(fx) -> None:
         print(f"    unlocked by: {gap['unlocked_by']}")
 
     # ---------------------------------------------------- 4. accuracy check
-    h("4. DETECTOR ACCURACY  (against the fixture's labelled findings)")
+    h("5. DETECTOR ACCURACY  (against the fixture's labelled findings)")
     detected = {
         (b.kind, b.root_cause) for b in result.findings if b.root_cause
     }
@@ -163,7 +204,7 @@ def run(fx) -> None:
     critical = sched["critical"]
     if critical:
         victim = critical[len(critical) // 2]
-        h(f"5. CHANGE SIMULATION  --  '{victim} slips another 5 days'")
+        h(f"6. CHANGE SIMULATION  --  '{victim} slips another 5 days'")
         hash_before = snapshot.content_hash()
         after = schedule(G, apply_delay(observed, victim, 5))
         dd = diff(current, after)
@@ -196,7 +237,7 @@ def run(fx) -> None:
     # -------------------------------------------- 6. requirement staleness
     if snapshot.requirements:
         req = snapshot.requirements[0]
-        h(f"6. REQUIREMENT CHANGE  --  {req.key} v{req.version_no} -> "
+        h(f"7. REQUIREMENT CHANGE  --  {req.key} v{req.version_no} -> "
           f"v{req.version_no + 1}")
         st = stale_tasks(G, set(req.consumed_by))
         print(f"was : {req.text}")
@@ -215,7 +256,7 @@ def run(fx) -> None:
         print("can say which finished work is now invalid.")
 
     # ---------------------------------------------------- 7. structural wins
-    h("7. STRUCTURAL OPPORTUNITIES  (computable with zero history)")
+    h("8. STRUCTURAL OPPORTUNITIES  (computable with zero history)")
     redundant = transitive_redundant_edges(G)
     if redundant:
         edges = ", ".join(f"{u}->{v}" for u, v in redundant)
@@ -232,7 +273,7 @@ def run(fx) -> None:
         print("  No redundant dependencies found.")
 
     # ------------------------------------------------------- 8. robustness
-    h("8. ROBUSTNESS  --  a circular dependency is reported, not swallowed")
+    h("9. ROBUSTNESS  --  a circular dependency is reported, not swallowed")
     if len(critical) >= 2:
         u, v = critical[0], critical[1]
         bad = G.copy()

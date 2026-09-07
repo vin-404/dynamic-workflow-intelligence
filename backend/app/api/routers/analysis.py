@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.core.engine.risk import RiskWeights
 from backend.app.db import get_db
 from backend.app.services import analysis_runs, intelligence, versions as V
 
@@ -25,6 +26,32 @@ class AnalyzeIn(BaseModel):
 class RequirementImpactIn(BaseModel):
     requirement_key: str
     version_id: uuid.UUID | None = None
+
+
+class RiskWeightsIn(BaseModel):
+    """Every weight is optional; anything omitted keeps its default. The
+    response echoes whatever was used."""
+
+    slack_ratio: float | None = None
+    downstream_fan_out: float | None = None
+    criticality_proximity: float | None = None
+    deadline_pressure: float | None = None
+    resource_pressure: float | None = None
+    duration_uncertainty: float | None = None
+    predecessor_health: float | None = None
+    remaining_chain_depth: float | None = None
+    assignment_gap: float | None = None
+
+    def to_weights(self) -> RiskWeights | None:
+        given = {
+            k: v for k, v in self.model_dump().items() if v is not None
+        }
+        return RiskWeights(**given) if given else None
+
+
+class RiskIn(BaseModel):
+    version_id: uuid.UUID | None = None
+    weights: RiskWeightsIn | None = None
 
 
 @router.post("/analyze")
@@ -53,6 +80,42 @@ async def analyze_get(
     """Same as POST. Analysis is a read, so it is available as one."""
     try:
         return await intelligence.analyze(db, project_id, version_id)
+    except V.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/risk")
+async def risk_get(
+    project_id: uuid.UUID,
+    version_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-task risk with every factor, weight, value and reason.
+
+    A **structural estimate**, not a probability: the payload says so, and
+    carries the assumptions the estimate rests on.
+    """
+    try:
+        return await intelligence.risk(db, project_id, version_id)
+    except V.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.post("/risk")
+async def risk_post(
+    project_id: uuid.UUID,
+    payload: RiskIn | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    """Same, with your own weights. Move them and watch the ranking change -
+    that is the point of exposing them (ARCHITECTURE H, risk #5)."""
+    try:
+        return await intelligence.risk(
+            db,
+            project_id,
+            payload.version_id if payload else None,
+            payload.weights.to_weights() if payload and payload.weights else None,
+        )
     except V.NotFound as e:
         raise HTTPException(status_code=404, detail=str(e))
 
