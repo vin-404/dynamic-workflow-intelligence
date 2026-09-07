@@ -128,10 +128,17 @@ class TaskRisk:
     explanation: str
 
     def as_dict(self) -> dict:
+        # The score shown is the sum of the *rounded* contributions, not the
+        # rounded sum. They differ in the last decimal often enough that a
+        # reader adding the column up gets a different number from the
+        # headline - which is a small dishonesty in a product whose whole
+        # claim is "recompute this yourself". Rounding once, at the point of
+        # display, makes the arithmetic on screen exact.
+        contributions = [round(f.contribution, 4) for f in self.factors]
         return {
             "task_key": self.task_key,
             "task_name": self.task_name,
-            "score": round(self.score, 4),
+            "score": round(sum(contributions), 4),
             "band": self.band,
             "score_kind": SCORE_KIND,
             "formula": FORMULA,

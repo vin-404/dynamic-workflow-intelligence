@@ -112,7 +112,7 @@ class TestAnalysisRegression:
 
     async def test_analysis_reports_which_checks_ran(self, analysis):
         """"Checked and clean" must be distinguishable from "never checked"."""
-        assert len(analysis["checks_run"]) == 14
+        assert len(analysis["checks_run"]) == 15
         assert "stalled_in_review" in analysis["checks_run"]
 
     async def test_suppressed_findings_are_returned_with_their_reason(
@@ -303,7 +303,7 @@ class TestColdStartProject:
         } <= kinds
 
     async def test_it_ran_only_the_structural_checks(self, analysis):
-        assert len(analysis["checks_run"]) == 9
+        assert len(analysis["checks_run"]) == 10
         for name in ("critical_path_blocker", "resource_contention",
                      "stalled_in_review", "ready_but_idle"):
             assert name not in analysis["checks_run"]
@@ -451,7 +451,7 @@ class TestAccuracyHarness:
     async def test_accuracy_reports_the_engine_it_measured(self, accuracy):
         assert accuracy["engine_version"]
         assert accuracy["tier_reached"] == 2
-        assert len(accuracy["checks_run"]) == 14
+        assert len(accuracy["checks_run"]) == 15
 
 
 class TestNotFound:

@@ -489,3 +489,104 @@ class TestColdStartContract:
         ]
         assert counts[0] > counts[1] > counts[2]
         assert counts[2] > 0, "tier 3 is never reached, so something remains"
+
+
+class TestCriticalPathSingleOwner:
+    """The gap the demo walk found: a strictly sequential chain owned by one
+    person never exceeds anyone's capacity, so `resource_overallocated` stays
+    quiet and the plan looks fine. It is not fine.
+    """
+
+    def chain(self, owners, resources=None):
+        """A straight chain of tasks, `owners[i]` assigned to task i."""
+        keys = [f"C{i:02d}" for i in range(len(owners))]
+        every = sorted({o for owner in owners for o in owner})
+        return build(
+            tasks=[(k, 3, True) for k in keys],
+            deps=[(a, b, True) for a, b in zip(keys, keys[1:])],
+            resources=resources or [
+                ResourceSpec(key=r, name=r.title(), kind="person", capacity=1)
+                for r in every
+            ],
+            assignments=[
+                AssignmentSpec(task_key=key, resource_key=owner)
+                for key, owner_list in zip(keys, owners)
+                for owner in owner_list
+            ],
+        )
+
+    def findings(self, snapshot):
+        result = evaluate(snapshot, WorkflowState.empty(snapshot), Clock(0.0))
+        return [f for f in result.findings if f.kind == "critical_path_single_owner"]
+
+    def test_one_person_owning_the_whole_critical_path_is_a_finding(self):
+        found = self.findings(self.chain([["ana"], ["ana"], ["ana"], ["ana"]]))
+        assert len(found) == 1
+        assert found[0].evidence["resource_key"] == "ana"
+        assert found[0].evidence["critical_task_count"] == 4
+        assert found[0].severity == "high"
+
+    def test_capacity_is_never_exceeded_so_overallocation_stays_quiet(self):
+        """Which is exactly why this detector has to exist separately."""
+        snapshot = self.chain([["ana"], ["ana"], ["ana"], ["ana"]])
+        result = evaluate(snapshot, WorkflowState.empty(snapshot), Clock(0.0))
+        assert not [f for f in result.findings if f.kind == "resource_overallocated"]
+
+    def test_a_second_owner_anywhere_on_the_path_clears_it(self):
+        assert self.findings(self.chain([["ana"], ["ana"], ["bo"], ["ana"]])) == []
+
+    def test_a_shared_second_assignee_clears_it(self):
+        """Two people on every task is redundancy, which is the point."""
+        pairs = [["ana", "bo"]] * 4
+        assert self.findings(self.chain(pairs)) == []
+
+    def test_an_unassigned_task_defers_to_the_detector_that_owns_that(self):
+        snapshot = self.chain([["ana"], ["ana"], [], ["ana"]])
+        assert self.findings(snapshot) == []
+        result = evaluate(snapshot, WorkflowState.empty(snapshot), Clock(0.0))
+        assert [f for f in result.findings if f.kind == "unassigned_critical_task"]
+
+    def test_a_team_of_several_people_is_not_a_single_point_of_failure(self):
+        """A team can absorb one absence; a person cannot. The roll-up
+        hierarchy is what tells them apart."""
+        snapshot = self.chain(
+            [["crew"], ["crew"], ["crew"], ["crew"]],
+            resources=[
+                ResourceSpec(key="crew", name="Crew", kind="team", capacity=2),
+                ResourceSpec(
+                    key="ana", name="Ana", kind="person", capacity=1,
+                    parent_key="crew",
+                ),
+                ResourceSpec(
+                    key="bo", name="Bo", kind="person", capacity=1,
+                    parent_key="crew",
+                ),
+            ],
+        )
+        assert self.findings(snapshot) == []
+
+    def test_two_tasks_are_not_enough_to_call_it(self):
+        assert self.findings(self.chain([["ana"], ["ana"]])) == []
+
+    def test_it_needs_no_history_at_all(self):
+        snapshot = self.chain([["ana"], ["ana"], ["ana"]])
+        result = evaluate(snapshot, WorkflowState.empty(snapshot), Clock(0.0))
+        assert result.tier_reached == 0
+        assert "critical_path_single_owner" in result.checks_run
+
+    def test_the_explanation_names_the_person_and_the_cost(self):
+        finding = self.findings(self.chain([["ana"]] * 4))[0]
+        assert "Ana" in finding.explanation
+        assert "12 days" in finding.explanation
+        assert "Ana" in finding.suggested_action
+
+    def test_the_seeded_event_workflow_does_not_trip_it(self, event_fixture):
+        """A real workflow with a mixed critical path must stay quiet, or the
+        detector is just noise."""
+        result = evaluate(
+            event_fixture.snapshot, event_fixture.state,
+            Clock(event_fixture.today_day),
+        )
+        assert not [
+            f for f in result.findings if f.kind == "critical_path_single_owner"
+        ]

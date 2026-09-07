@@ -69,6 +69,11 @@ def all_detectors() -> tuple[Detector, ...]:
             "a workflow with too little slack to absorb any delay",
         ),
         Detector(
+            "critical_path_single_owner", Tier.STRUCTURAL,
+            tier0.critical_path_single_owner,
+            "a critical path owned end to end by one person",
+        ),
+        Detector(
             "resource_overallocated", Tier.STRUCTURAL,
             tier0.resource_overallocated,
             "a resource the plan needs in more places at once than it can be",

@@ -1533,3 +1533,175 @@ mutation still carries the key.
    degrades safely: a bad proposal is gated and scored like any other, and
    loses.
 5. **`AIInteraction` rows accumulate with no retention policy.**
+
+---
+
+# Phase 8 — The demo path, made checkable
+
+The demo is not a document you rehearse against. It is a script that fails.
+
+## 1 · CHANGED
+
+### `backend/scripts/reset_db.py` — the one command
+
+```bash
+.venv/Scripts/python.exe -m backend.scripts.reset_db
+```
+
+Drops every table, recreates the schema, loads both seed domains, prints the
+deterministic project ids. Works with the server stopped, because that is when
+you need it. `--keep-schema` clears the seeded data without dropping tables,
+which is what you want against a Postgres instance you did not create.
+
+### `backend/scripts/demo_check.py` — the rehearsal, as assertions
+
+Walks all nine beats of ARCHITECTURE Section I and asserts **the thing each
+beat claims** rather than that the endpoint returned 200:
+
+| Beat | What is asserted |
+|---|---|
+| 2 · Cold start | Tier-0 findings on a workflow with no history; the deadline verdict; that the locked checks each name what would unlock them |
+| 3 · Domain-agnosticism | Both seed domains and a user-defined one produce the *same response shape* and **no domain field** anywhere in the payload; the two reach different tiers from evidence, not configuration |
+| 4 · Capability 1 | The top finding names a root cause, carries evidence, and its impact number is recomputable from the worked formula beside it |
+| 5 · Capability 2 | The score is exactly the sum of its factors; it is labelled a structural estimate; an unmeasurable factor reports itself unavailable |
+| 6 · Capability 3 | The sentence becomes a typed mutation; nothing is applied; the base workflow's content hash is byte-identical afterwards |
+| 7 · Capability 4 | Candidates found, six criteria on screen, weights published, applying creates a new version and the old one survives |
+| 8 · The refusal | Optimizing with no limits produces refusals citing `MANDATORY_TASK` and the UN38.3 reason, and a refused candidate is never scored |
+| 9 · Evidence | The narration says which produced it; with a model, that an invented number is *discarded* and the discard names the number |
+
+`--provider recorded` runs the same walk with the AI layer switched on,
+replaying structured output. There is no live-API mode.
+
+### `docs/HOW_TO_DEMO.md`
+
+Exact commands, what to click, what to say, what you should see, and a
+troubleshooting table whose last row is "anything at all, 30 seconds before
+you start: reset, restart, check — in that order".
+
+### `docs/FINAL_REPORT.md`
+
+What to look at first; what each capability can and cannot do; every
+deliberate deletion; the full test inventory; all sixty decisions indexed; why
+there is no BLOCKED.md; and ten honest limitations to volunteer before anyone
+asks.
+
+### A tenth Tier-0 detector
+
+`critical_path_single_owner` — every task on the critical path assigned to the
+same single-person resource. See BUGS FOUND below; this was a real gap the
+walk exposed.
+
+## 2 · PRESERVED
+
+Every endpoint, every finding, every test from Phases 1–7. The demo path uses
+the endpoints that already existed — `demo_check` has no privileged access and
+calls nothing a browser could not.
+
+## 3 · REMOVED
+
+Nothing.
+
+## 4 · TESTS
+
+**738 passing, up from 725** at the end of Phase 7 (which itself was 723 before
+this phase's detector arrived). Additions:
+
+- 10 tests for `critical_path_single_owner`, including the two that matter:
+  that `resource_overallocated` stays silent on the same workflow (which is
+  why the detector must exist separately), and that a *team* resource with
+  more than one member does not trip it.
+- 3 tests pinning the display arithmetic: the factor column must sum exactly
+  to the score shown, in both domains, without drifting from the value the
+  ranking actually used.
+- 5 existing tests updated for the new detector count (9 → 10 structural,
+  14 → 15 total). The count assertions were kept rather than made dynamic:
+  they are a "did you mean to change this" tripwire and they worked.
+
+## 5 · HOW TO TEST
+
+```bash
+.venv/Scripts/python.exe -m pytest backend/tests -q          # 738 passed
+
+.venv/Scripts/python.exe -m backend.scripts.reset_db
+.venv/Scripts/python.exe -m backend.scripts.demo_check                       # ALL BEATS PASSED
+.venv/Scripts/python.exe -m backend.scripts.demo_check --provider recorded   # ALL BEATS PASSED
+```
+
+Verified in five permutations, all green:
+
+| Run | Result |
+|---|---|
+| Clean database, model disabled | ALL BEATS PASSED |
+| Clean database, model disabled, again | ALL BEATS PASSED |
+| Clean database, model enabled (recorded) | ALL BEATS PASSED |
+| Clean database, model enabled, again | ALL BEATS PASSED |
+| **Used** database, no reset, consecutively | ALL BEATS PASSED |
+
+Measured on the seventeen-task seeded workflow: `analyze` 24 ms, `interpret`
+46 ms, scenario `evaluate` 45 ms, full `optimize` (40 candidates, generate +
+gate + score) 125 ms.
+
+## 6 · DECISIONS
+
+D-57 … D-60 in `docs/DECISIONS.md`.
+
+## 7 · DEVIATIONS
+
+One, forced and logged as D-59. The brief asks for the demo to run "with the
+LLM disabled and then enabled", and no `ANTHROPIC_API_KEY` exists in the
+repository or the environment. A missing credential is a named stop condition,
+but stopping the whole run over it would have been the wrong reading: the
+credential is needed for a *verification*, not for the product. The enabled
+pass therefore runs against a recorded provider — real plumbing, real
+validation, real gating, real number-checking, replayed model output. What has
+never happened is a live model call, and that is stated as a risk rather than
+smoothed over.
+
+## 8 · BUGS FOUND AND FIXED
+
+All three were found by the demo walk, and none would have been found by a
+smoke test that checked status codes.
+
+1. **The cold-start beat had nothing to say about the single owner.**
+   ARCHITECTURE Section I promises "one person on three zero-slack tasks" on a
+   brand-new workflow, and no detector said it. `resource_overallocated`
+   structurally cannot: a strictly sequential chain never asks for the resource
+   in two places at once, so capacity is never exceeded and the plan looks
+   fine. Added `critical_path_single_owner`, which defers to
+   `unassigned_critical_task` when somebody is missing and stays quiet for a
+   team of more than one person — because a team can absorb an absence and a
+   person cannot.
+
+2. **The risk factor column did not add up.** Contributions and the score were
+   each rounded to four places independently, so the column summed to 0.6298
+   while the headline read 0.6299. In a product whose pitch is "recompute this
+   yourself", a judge who adds the column up and gets a different number has
+   just caught us being loose with arithmetic — and every other number on the
+   screen becomes suspect. The score is now the sum of the rounded
+   contributions.
+
+3. **A stale narration number reached the check, and the check caught it.**
+   Not a bug in the product — the opposite. The recorded narrator hardcoded
+   "day 26", and by beat 9 the demo had applied an optimization, so the
+   projection was no longer 26. The guarantee discarded the narration exactly
+   as designed. The fixture was wrong, not the code; it now reads the payload
+   it was given, and a second deliberate check proves an invented number is
+   still discarded and named.
+
+Plus one cosmetic fix carried over from the browser check: the interpreter
+built its intent sentence from the resource key, so it read "anitha is
+unavailable" — a person's name in lower case.
+
+## 9 · RISKS
+
+1. **`demo_check` mutates the database it runs against.** It creates a project
+   and applies an optimizer recommendation, by design — the demo does too. Run
+   `reset_db` before a rehearsal, which `HOW_TO_DEMO.md` says twice.
+2. **The recorded provider is a fixture, and fixtures rot.** It now reads the
+   payload rather than hardcoding a day, which removes the failure mode that
+   already bit once, but it still encodes assumptions about the seeded
+   workflow.
+3. **The Playwright walkthroughs still live outside the repo.** Carried from
+   Phase 6 and scheduled for Phase 9.
+4. **The demo is timed for eight minutes and has never been performed by a
+   human.** The beats are verified; the pacing is not.

@@ -276,6 +276,75 @@ def zero_slack_chain(ctx: DetectorContext) -> list[Finding]:
     )]
 
 
+def critical_path_single_owner(ctx: DetectorContext) -> list[Finding]:
+    """Every task on the critical path belongs to the same resource.
+
+    `resource_overallocated` cannot see this: a strictly sequential chain
+    never asks for the resource in two places at once, so capacity is never
+    exceeded and the plan looks fine. But a critical path owned end to end by
+    one person has no redundancy at all - one absence moves the finish date,
+    and there is nobody who could take the work.
+
+    Structural, so it is visible before anything has slipped and with no
+    history whatsoever.
+    """
+    critical = [k for k in ctx.task_keys if ctx.is_critical(k)]
+    if len(critical) < 3:
+        return []
+
+    owners = [set(ctx.assignees[k]) for k in critical]
+    if any(not o for o in owners):
+        # Somebody is unassigned; `unassigned_critical_task` owns that finding
+        # and saying both would be the same complaint twice.
+        return []
+
+    shared = set.intersection(*owners)
+    if len(shared) != 1:
+        return []
+    owner = next(iter(shared))
+
+    # A resource that stands for several people is not a single point of
+    # failure in the same way - the team can absorb one absence.
+    members = ctx.resource_members(owner)
+    if len(members) > 1:
+        return []
+
+    total = sum(ctx.duration(k) for k in critical)
+    label = ctx.resource_label.get(owner, owner)
+    return [Finding(
+        kind="critical_path_single_owner",
+        tier=Tier.STRUCTURAL,
+        severity=HIGH,
+        task_ids=tuple(critical),
+        root_cause=critical[0],
+        evidence={
+            "resource_key": owner,
+            "resource": label,
+            "critical_tasks": critical,
+            "critical_task_count": len(critical),
+            "critical_path_days": total,
+            "project_end_day": ctx.schedule["project_end"],
+            "share_of_completion": (
+                total / ctx.schedule["project_end"]
+                if ctx.schedule["project_end"] else 1.0
+            ),
+        },
+        impact=Impact.exposed(days_at_risk=total, downstream=0),
+        downstream_affected=tuple(critical),
+        suggested_action=(
+            f"Every task on the critical path is {label}'s. Give one of them "
+            f"to somebody else, or accept that {label} being unavailable for "
+            f"a day is the project being late by a day."
+        ),
+        explanation=(
+            f"{label} owns all {len(critical)} tasks on the critical path, "
+            f"{total:.0f} days of work with no slack. Nothing here can absorb "
+            f"an absence: there is no second person on any of these tasks, so "
+            f"any day {label} cannot work is a day the finish date moves."
+        ),
+    )]
+
+
 def resource_overallocated(ctx: DetectorContext) -> list[Finding]:
     """A resource is scheduled to do more at once than its capacity allows.
 

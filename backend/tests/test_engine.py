@@ -188,12 +188,12 @@ class TestDetectorRegistry:
         } <= structural
 
     def test_evaluation_reports_which_checks_ran(self, evaluation):
-        assert len(evaluation.checks_run) == 14
+        assert len(evaluation.checks_run) == 15
         assert "stalled_in_review" in evaluation.checks_run
 
     def test_cold_start_runs_only_the_structural_checks(self, mfg_fixture):
         result = E.evaluate(mfg_fixture.snapshot, mfg_fixture.state, Clock(0.0))
-        assert len(result.checks_run) == 9
+        assert len(result.checks_run) == 10
         assert "stalled_in_review" not in result.checks_run
 
 

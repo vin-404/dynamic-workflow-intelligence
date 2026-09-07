@@ -508,3 +508,37 @@ class TestRiskApi:
             "/api/projects/00000000-0000-0000-0000-000000000099/risk"
         )
         assert r.status_code == 404
+
+
+class TestTheArithmeticOnScreen:
+    """The product's claim is "add the column up yourself". So the column on
+    screen has to add up - not to within floating-point noise, exactly."""
+
+    def _serialised(self, fixture):
+        result = evaluate(fixture.snapshot, fixture.state, Clock(fixture.today_day))
+        return result.risk["tasks"]
+
+    def test_the_displayed_score_is_the_sum_of_the_displayed_factors(
+        self, event_fixture
+    ):
+        for task in self._serialised(event_fixture):
+            total = sum(f["contribution"] for f in task["factors"])
+            assert round(total, 4) == task["score"], (
+                f"{task['task_key']}: factors sum to {total}, score shows "
+                f"{task['score']} - a reader adding these up gets a different "
+                f"number from the headline"
+            )
+
+    def test_it_holds_in_the_other_domain_too(self, mfg_fixture):
+        for task in self._serialised(mfg_fixture):
+            total = sum(f["contribution"] for f in task["factors"])
+            assert round(total, 4) == task["score"]
+
+    def test_the_rounded_score_still_tracks_the_unrounded_one(
+        self, event_fixture
+    ):
+        """Rounding for display must not drift from the value the ranking
+        used - half a thousandth, not a different number."""
+        for task in self._serialised(event_fixture):
+            exact = sum(f["value"] * f["weight"] for f in task["factors"])
+            assert abs(task["score"] - exact) < 5e-4
