@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.workflow import WorkflowSnapshot
+from backend.app.api.identity import current_user
 from backend.app.db import get_db
 from backend.app.models import Domain, Project, ProjectMember, User
 from backend.app.schemas.authoring import (
@@ -39,7 +40,11 @@ async def get_project(project_id: uuid.UUID, db: AsyncSession = Depends(get_db))
 
 
 @router.post("", response_model=ProjectOut, status_code=201)
-async def create_project(payload: ProjectIn, db: AsyncSession = Depends(get_db)):
+async def create_project(
+    payload: ProjectIn,
+    db: AsyncSession = Depends(get_db),
+    who: User | None = Depends(current_user),
+):
     """Create a project and its empty version 1.
 
     A project starts with a real, empty workflow version rather than with
@@ -75,7 +80,11 @@ async def create_project(payload: ProjectIn, db: AsyncSession = Depends(get_db))
         if exists is None:
             raise HTTPException(status_code=422, detail="Unknown domain_id.")
 
-    owner: User | None = None
+    # The name the visitor picked owns what they create. An explicit
+    # `owner_email` still wins - the seed loader and the tests use it - but a
+    # person clicking "new workflow" should not have to type their own email
+    # to end up on the member list.
+    owner: User | None = who
     if payload.owner_email:
         owner = (
             await db.execute(select(User).where(User.email == payload.owner_email))

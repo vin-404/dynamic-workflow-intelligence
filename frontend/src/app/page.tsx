@@ -18,14 +18,23 @@ import {
   Analysis,
   ApiError,
   Domain,
+  Person,
   Project,
   Workflow,
   analyze,
   getWorkflow,
   listDomains,
   listProjects,
+  setCurrentUser,
 } from "@/lib/api";
 import DependencyGraph from "@/components/DependencyGraph";
+import ErrorBoundary from "@/components/ErrorBoundary";
+import WhoAreYou, {
+  IdentityBadge,
+  loadIdentity,
+  saveIdentity,
+  verifyIdentity,
+} from "@/components/WhoAreYou";
 import AskPanel from "@/components/AskPanel";
 import Explainer from "@/components/Explainer";
 import FindingsPanel from "@/components/FindingsPanel";
@@ -74,8 +83,11 @@ export default function Home() {
   const [stage, setStage] = useState<Stage>("build");
   const [viewVersion, setViewVersion] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<ApiError | string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Who you are. No password, no session - a name this browser remembers.
+  const [person, setPerson] = useState<Person | null>(null);
+  const [askingWho, setAskingWho] = useState(false);
   // The hash is only ours to write once the initial restore has finished -
   // otherwise the sync effect fires first with no project and wipes the hash
   // we were about to read.
@@ -90,7 +102,7 @@ export default function Home() {
         setWorkflow(wf);
         setAnalysis(null);
       } catch (e) {
-        setError(e instanceof ApiError ? e.userMessage : String(e));
+        setError(e instanceof ApiError ? e : String(e));
       } finally {
         setBusy(false);
       }
@@ -105,13 +117,35 @@ export default function Home() {
       try {
         setAnalysis(await analyze(projectId, versionId ?? undefined));
       } catch (e) {
-        setError(e instanceof ApiError ? e.userMessage : String(e));
+        setError(e instanceof ApiError ? e : String(e));
       } finally {
         setBusy(false);
       }
     },
     [],
   );
+
+  // A remembered identity is checked before it is used: after an admin
+  // reset it no longer exists, and a browser that keeps sending a dangling id
+  // would attribute everything to a user who is gone.
+  useEffect(() => {
+    const remembered = loadIdentity();
+    if (!remembered) {
+      setAskingWho(true);
+      return;
+    }
+    setCurrentUser(remembered.id);
+    verifyIdentity(remembered).then((confirmed) => {
+      if (confirmed) {
+        setPerson(confirmed);
+        setCurrentUser(confirmed.id);
+      } else {
+        saveIdentity(null);
+        setCurrentUser(null);
+        setAskingWho(true);
+      }
+    });
+  }, []);
 
   useEffect(() => {
     Promise.all([listProjects(), listDomains()])
@@ -136,8 +170,8 @@ export default function Home() {
         setBooted(true);
         setError(
           e instanceof ApiError
-            ? `Could not reach the API (${e.status}). Is the backend running on port 8001?`
-            : String(e),
+            ? e
+            : "Could not reach the API. Is the backend running on port 8001?",
         );
       });
     // `load` is stable (useCallback with no deps).
@@ -172,25 +206,73 @@ export default function Home() {
 
   const hasWorkflow = (workflow?.tasks.length ?? 0) > 0;
 
+  /** One renderer, so the API's hint and request id are never dropped. */
+  function renderError(onRetry?: () => void) {
+    if (!error) return null;
+    const api = error instanceof ApiError ? error : null;
+    return (
+      <div className="mb-4">
+        <ErrorNote
+          onRetry={onRetry}
+          hint={api?.hint}
+          requestId={api?.requestId}
+        >
+          {api ? api.userMessage : String(error)}
+        </ErrorNote>
+      </div>
+    );
+  }
+
   /* --------------------------------------------------------- no project */
+
+  const header = (
+    <header className="mb-6">
+      <h1 className="text-2xl font-semibold">Workflow Intelligence</h1>
+      <p className="text-dim mt-1 max-w-2xl">
+        Build a workflow, then ask it four things: where it is stuck now,
+        where it is likely to get stuck, what a change would do, and whether
+        there is a better arrangement of the same work.
+      </p>
+    </header>
+  );
+
+  /* ------------------------------------------------------- who are you */
+
+  if (askingWho || !person) {
+    return (
+      <main className="max-w-2xl w-full mx-auto p-6">
+        {header}
+        {renderError(() => location.reload())}
+        <ErrorBoundary what="The name picker">
+          <WhoAreYou
+            onPicked={(picked) => {
+              setPerson(picked);
+              setCurrentUser(picked.id);
+              setAskingWho(false);
+            }}
+          />
+        </ErrorBoundary>
+      </main>
+    );
+  }
 
   if (!project) {
     return (
       <main className="max-w-4xl w-full mx-auto p-6">
-        <header className="mb-6">
-          <h1 className="text-2xl font-semibold">Workflow Intelligence</h1>
-          <p className="text-dim mt-1 max-w-2xl">
-            Build a workflow, then ask it four things: where it is stuck now,
-            where it is likely to get stuck, what a change would do, and
-            whether there is a better arrangement of the same work.
-          </p>
-        </header>
+        <div className="flex items-start justify-between gap-4">
+          {header}
+          <IdentityBadge
+            person={person}
+            onSwitch={() => {
+              saveIdentity(null);
+              setCurrentUser(null);
+              setPerson(null);
+              setAskingWho(true);
+            }}
+          />
+        </div>
 
-        {error && (
-          <div className="mb-4">
-            <ErrorNote onRetry={() => location.reload()}>{error}</ErrorNote>
-          </div>
-        )}
+        {renderError(() => location.reload())}
 
         {creating ? (
           <ProjectCreate
@@ -291,6 +373,16 @@ export default function Home() {
                 historical view
               </Badge>
             )}
+            <span className="flex-1" />
+            <IdentityBadge
+              person={person}
+              onSwitch={() => {
+                saveIdentity(null);
+                setCurrentUser(null);
+                setPerson(null);
+                setAskingWho(true);
+              }}
+            />
           </div>
           {project.goal && (
             <p className="text-sm text-dim mt-0.5">{project.goal}</p>
@@ -324,13 +416,7 @@ export default function Home() {
       </header>
 
       <main className="flex-1 max-w-6xl w-full mx-auto p-6">
-        {error && (
-          <div className="mb-4">
-            <ErrorNote onRetry={() => load(project.id, viewVersion)}>
-              {error}
-            </ErrorNote>
-          </div>
-        )}
+        {renderError(() => load(project.id, viewVersion))}
 
         {busy && !workflow && <Spinner label="Loading workflow…" />}
 
@@ -346,17 +432,19 @@ export default function Home() {
               ) : undefined
             }
           >
-            <div className="space-y-4">
-              <WorkflowBuilder
-                workflow={workflow}
-                templates={domain?.task_templates}
-                onChange={(next) => {
-                  setWorkflow(next);
-                  setAnalysis(null);
-                }}
-              />
-              <MemberList projectId={project.id} />
-            </div>
+            <ErrorBoundary what="The workflow builder" resetKey={stage}>
+              <div className="space-y-4">
+                <WorkflowBuilder
+                  workflow={workflow}
+                  templates={domain?.task_templates}
+                  onChange={(next) => {
+                    setWorkflow(next);
+                    setAnalysis(null);
+                  }}
+                />
+                <MemberList projectId={project.id} />
+              </div>
+            </ErrorBoundary>
           </Section>
         )}
 
@@ -374,12 +462,40 @@ export default function Home() {
             }
           >
             {busy && !analysis && <Spinner label="Evaluating…" />}
+            {!busy && !analysis && (
+              <EmptyState
+                title="Not analysed yet"
+                action={
+                  <Button
+                    variant="primary"
+                    onClick={() => runAnalysis(project.id, viewVersion)}
+                  >
+                    Analyze now
+                  </Button>
+                }
+              >
+                Nothing has been evaluated for this version yet. Analysis is a
+                read — it never changes your workflow.
+              </EmptyState>
+            )}
             {analysis && (
               <div className="space-y-4">
-                <Headline analysis={analysis} />
-                <FindingsPanel analysis={analysis} />
-                <Explainer projectId={project.id} />
-                <DependencyGraph analysis={analysis} />
+                <ErrorBoundary what="The summary" resetKey={stage}>
+                  <Headline analysis={analysis} />
+                </ErrorBoundary>
+                <ErrorBoundary what="The findings panel" resetKey={stage}>
+                  <FindingsPanel analysis={analysis} />
+                </ErrorBoundary>
+                <ErrorBoundary what="The plain-language summary" resetKey={stage}>
+                  <Explainer projectId={project.id} />
+                </ErrorBoundary>
+                {/* The graph is the most likely thing here to throw: it is the
+                    only panel with a third-party layout engine under it. Its
+                    own boundary means a layout bug costs the graph and not the
+                    findings above it. */}
+                <ErrorBoundary what="The dependency graph" resetKey={stage}>
+                  <DependencyGraph analysis={analysis} />
+                </ErrorBoundary>
               </div>
             )}
           </Section>
@@ -391,7 +507,24 @@ export default function Home() {
             subtitle="A structural estimate, not a probability — with every factor, weight and reason on show."
           >
             {busy && !analysis && <Spinner label="Scoring…" />}
+            {!busy && !analysis && (
+              <EmptyState
+                title="Nothing scored yet"
+                action={
+                  <Button
+                    variant="primary"
+                    onClick={() => runAnalysis(project.id, viewVersion)}
+                  >
+                    Score this workflow
+                  </Button>
+                }
+              >
+                Risk is computed from the same evaluation as the findings, so
+                it arrives with them.
+              </EmptyState>
+            )}
             {analysis && (
+              <ErrorBoundary what="The risk panel" resetKey={stage}>
               <RiskPanel
                 analysis={analysis}
                 busy={busy}
@@ -406,6 +539,7 @@ export default function Home() {
                   }
                 }}
               />
+              </ErrorBoundary>
             )}
           </Section>
         )}
@@ -416,8 +550,12 @@ export default function Home() {
             subtitle="Composed from a closed set of typed changes, evaluated against a copy. Your workflow is not touched, and the panel proves it."
           >
             <div className="space-y-6">
-              <AskPanel workflow={workflow} />
-              <WhatIfPanel workflow={workflow} />
+              <ErrorBoundary what="The sentence box" resetKey={stage}>
+                <AskPanel workflow={workflow} />
+              </ErrorBoundary>
+              <ErrorBoundary what="The what-if panel" resetKey={stage}>
+                <WhatIfPanel workflow={workflow} />
+              </ErrorBoundary>
             </div>
           </Section>
         )}
@@ -427,15 +565,17 @@ export default function Home() {
             title="Is there a better arrangement?"
             subtitle="Candidates are generated, checked against your constraints, then scored by the same engine. Read the table, not the total."
           >
-            <OptimizePanel
-              projectId={project.id}
-              onApplied={async () => {
-                const fresh = await getWorkflow(project.id);
-                setWorkflow(fresh);
-                setAnalysis(null);
-                setStage("history");
-              }}
-            />
+            <ErrorBoundary what="The optimizer" resetKey={stage}>
+              <OptimizePanel
+                projectId={project.id}
+                onApplied={async () => {
+                  const fresh = await getWorkflow(project.id);
+                  setWorkflow(fresh);
+                  setAnalysis(null);
+                  setStage("history");
+                }}
+              />
+            </ErrorBoundary>
           </Section>
         )}
 
@@ -444,15 +584,17 @@ export default function Home() {
             title="History"
             subtitle="Applying a change never destroys the version it came from."
           >
-            <VersionHistory
-              projectId={project.id}
-              currentVersionId={workflow?.version.id ?? null}
-              onView={async (versionId) => {
-                setViewVersion(versionId);
-                await load(project.id, versionId);
-                setStage("build");
-              }}
-            />
+            <ErrorBoundary what="The version history" resetKey={stage}>
+              <VersionHistory
+                projectId={project.id}
+                currentVersionId={workflow?.version.id ?? null}
+                onView={async (versionId) => {
+                  setViewVersion(versionId);
+                  await load(project.id, versionId);
+                  setStage("build");
+                }}
+              />
+            </ErrorBoundary>
           </Section>
         )}
       </main>

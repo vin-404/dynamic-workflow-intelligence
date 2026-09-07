@@ -22,6 +22,16 @@ export class ApiError extends Error {
     this.detail = detail;
   }
 
+  /**
+   * What to do about it, from the API's `hint`. Every 4xx and 5xx carries
+   * one, because "422 Unprocessable Entity" is not something a person can
+   * act on.
+   */
+  hint = "";
+
+  /** The server's id for this request, for correlating with its logs. */
+  requestId = "";
+
   /** A sentence a user can act on, dug out of whatever shape the detail is. */
   get userMessage(): string {
     const d = this.detail as
@@ -56,21 +66,47 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * The identity the user picked, sent on every request as `X-User-Id`.
+ *
+ * Set once at boot rather than read from storage per call, so a component
+ * that renders during a switch cannot send a stale id. It is an identity, not
+ * a credential: nothing on the server checks it against anything, and nothing
+ * is protected by it.
+ */
+let currentUserId: string | null = null;
+
+export function setCurrentUser(id: string | null) {
+  currentUserId = id;
+}
+
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(currentUserId ? { "X-User-Id": currentUserId } : {}),
+    },
     cache: "no-store",
     ...init,
   });
   if (!res.ok) {
     let detail: unknown = null;
+    let hint = "";
+    let requestId = res.headers.get("X-Request-ID") ?? "";
     try {
       const body = await res.json();
       detail = body.detail ?? body;
+      hint = body.hint ?? "";
+      requestId = body.request_id ?? requestId;
     } catch {
       detail = await res.text().catch(() => null);
     }
-    throw new ApiError(res.status, `${res.status} ${res.statusText}`, detail);
+    const error = new ApiError(
+      res.status, `${res.status} ${res.statusText}`, detail,
+    );
+    error.hint = hint;
+    error.requestId = requestId;
+    throw error;
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -885,3 +921,30 @@ export const interpret = (id: string, utterance: string, keep = true) =>
 
 export const explain = (id: string) =>
   post<Narration>(`/api/projects/${id}/explain`, {});
+
+/* -------------------------------------------------------------- identity */
+
+/**
+ * A person, not an account. There is no password, no session and no
+ * permission attached to any of this (Phase 9.5).
+ */
+export type Person = {
+  id: string;
+  email: string;
+  name: string;
+  project_count?: number;
+};
+
+export const listUsers = () => call<Person[]>(`/api/users`);
+
+export const createUser = (name: string, email?: string) =>
+  post<Person>(`/api/users`, { name, email });
+
+export const getUser = (id: string) => call<Person>(`/api/users/${id}`);
+
+export const userProjects = (id: string) =>
+  call<{
+    user_id: string;
+    projects: { id: string; name: string; role: string }[];
+    note: string;
+  }>(`/api/users/${id}/projects`);

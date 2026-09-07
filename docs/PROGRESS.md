@@ -1705,3 +1705,283 @@ unavailable" — a person's name in lower case.
    Phase 6 and scheduled for Phase 9.
 4. **The demo is timed for eight minutes and has never been performed by a
    human.** The beats are verified; the pacing is not.
+
+---
+
+# Phase 9 — Production hardening and deployment
+
+Judged by one question throughout: would a user notice this in five minutes of
+use. Everything below passes that test, and everything in 9.9 was left alone.
+
+## 1 · CHANGED
+
+### Deployment artifacts that actually work (9.1)
+
+| File | What |
+|---|---|
+| `scripts/smoke.sh`, `scripts/smoke.ps1` | Build from scratch, start, wait for live *then* ready, reset the seed, analyze both domains under a 1s budget, check the refusal still cites its constraint, check a 404 carries a hint. Non-zero exit on any failure |
+| `frontend/.dockerignore` | New. The frontend build context is `./frontend`, so the repo-root file never applied to it |
+| `docker-compose.yml` | Adds a `db` service behind a `postgres` profile, so it is not started by default; frontend gets `API_REWRITE_URL` for in-network rewrites |
+
+`backend/Dockerfile` and `frontend/Dockerfile` were already correct — Python
+pinned to 3.12, `0.0.0.0`, `--port ${PORT:-8000}` — from the deployment fix
+committed at the end of Phase 6.
+
+### Postgres by configuration (9.2)
+
+`asyncpg==0.31.0` is a listed requirement. Nothing else changed. Verified:
+
+- the **full suite passes unchanged against real Postgres** (774 at the time),
+- the smoke script passes against a container built from scratch pointed at an
+  **empty** Postgres database,
+- a container restarted twice against the populated database writes nothing:
+  2 projects, 29 tasks, 6 users, unchanged.
+
+### Configuration and CORS (9.3)
+
+`backend/app/settings.py` is rewritten as the single documented list of every
+variable, and `.env.example` mirrors it — with a test that fails if
+`.env.example` documents a variable that does not exist.
+
+### Resilience (9.4)
+
+| Piece | Where |
+|---|---|
+| `{error, detail, hint, request_id}` on every 4xx and 5xx | `main.py` exception handlers |
+| One structured log line per request, with an id and **no bodies** | `main.py` middleware |
+| `/health` liveness-only, `/ready` asks the database | `main.py` |
+| Explicit ceilings on analyze, simulate, optimize | `api/limits.py` |
+| Per-stage error boundaries | `components/ErrorBoundary.tsx` |
+| Empty states on the analysis and risk stages | `app/page.tsx` |
+| The optimizer names the stage it is in | `components/OptimizePanel.tsx` |
+| Errors show the API's hint and the request id | `components/ui.tsx` |
+
+### Identity without authentication (9.5)
+
+`api/routers/users.py`, `api/identity.py`, `components/WhoAreYou.tsx`. Pick a
+name; the browser remembers it; it is sent as `X-User-Id` and drives
+`created_by` and the member list. **No login, no password, no session, no
+role enforcement** — and a test that fails if `/api/login` ever appears.
+
+### The reset button (9.6)
+
+`POST /admin/reset-seed`, guarded by `ADMIN_TOKEN` with a constant-time
+comparison. No token configured means the endpoint returns 403 and says why.
+
+### Deployment handoff (9.8)
+
+`docs/DEPLOY.md`: the click-by-click for Render, Vercel and Neon/Supabase, a
+first-deploy checklist, the rollback step, how to re-point the frontend at a
+new backend, the complete environment table, and a troubleshooting table whose
+rows are all things that have actually gone wrong.
+
+### Verification moved into the repo
+
+`frontend/e2e/{journey,ai,hardening}.mjs` plus a shared `lib.mjs` and a
+README, with `playwright` as a devDependency and `npm run e2e:all`. This
+closes the risk recorded at the end of Phase 6.
+
+## 2 · PRESERVED
+
+Every endpoint and every response shape from Phases 1–8. The error envelope
+wraps the existing `detail` rather than replacing it, so the cited constraint
+and the actual cycle still arrive exactly as they did.
+
+## 3 · REMOVED
+
+Nothing. `deploy-kit/` is untracked user-supplied material; `docs/DEPLOY.md`
+supersedes it and it was left in place rather than deleted (D-72).
+
+## 4 · TESTS
+
+**780 passing, up from 738.** `backend/tests/test_hardening.py` adds 42:
+configuration parsing including the two forms and the refused wildcard,
+structured errors including a refusal keeping its structure, liveness vs
+readiness including a simulated database outage, bounded work including the
+optimizer returning partial results, the name picker, identity driving
+ownership, the guarded reset, and seed idempotency.
+
+The same 780 pass against **real Postgres**.
+
+## 5 · HOW TO TEST
+
+```bash
+# the suite, on SQLite
+.venv/Scripts/python.exe -m pytest backend/tests -q                    # 780 passed
+
+# the suite, on Postgres
+docker compose --profile postgres up -d db
+DATABASE_URL="postgresql+asyncpg://dwi:dwi@127.0.0.1:5433/dwi" \
+DATABASE_URL_SYNC="postgresql://dwi:dwi@127.0.0.1:5433/dwi" \
+  .venv/Scripts/python.exe -m pytest backend/tests -q                  # 780 passed
+
+# the deployment artifacts, from scratch
+bash scripts/smoke.sh
+DATABASE_URL="postgresql+asyncpg://dwi:dwi@host.docker.internal:5433/dwi_smoke" \
+  bash scripts/smoke.sh
+.\scripts\smoke.ps1
+
+# the browser
+cd frontend && npm run e2e:all
+```
+
+### Smoke output — container built from scratch, Postgres, empty database
+
+```
+1 - Build the image from scratch
+  [PASS] docker build
+
+2 - Start a container
+  database: postgresql+asyncpg  (external)
+  [PASS] container started
+
+3 - Wait for liveness, then readiness
+  [PASS] /health answers
+  [PASS] /ready answers, so the database is reachable
+  {"status":"ready","database":"postgres","latency_ms":7.76}
+
+4 - Reset the seed through the guarded endpoint
+  [PASS] both seed domains reloaded
+  [PASS] an untokened reset is refused
+
+5 - Analyze both seed domains
+  [PASS] campus: analyze returns findings
+  [PASS] campus: analyze returns a critical path
+  [PASS] campus: the analysis payload carries no domain field
+  [PASS] campus: analyze under 1s warm            campus analyze: 230ms
+  [PASS] battery: analyze returns findings
+  [PASS] battery: analyze returns a critical path
+  [PASS] battery: the analysis payload carries no domain field
+  [PASS] battery: analyze under 1s warm           battery analyze: 228ms
+
+6 - The refusal still refuses
+  [PASS] deleting a mandatory task is refused with the constraint
+
+7 - Errors are structured
+  [PASS] a 404 carries an actionable hint
+
+SMOKE PASSED in 6s
+```
+
+The SQLite run of the same script: campus 129ms, battery 152ms, passed in 30s
+including the build.
+
+### The three endpoint timings (9.7)
+
+`.venv/Scripts/python.exe -m backend.scripts.perf` — warm, over HTTP, SQLite,
+median of twelve runs (five for optimize):
+
+| Endpoint | Median | p95 | Max |
+|---|---:|---:|---:|
+| `analyze` campus (17 tasks, tier 2) | **23.9ms** | 25.9ms | 26.9ms |
+| `analyze` battery (12 tasks, tier 0) | **18.7ms** | 22.0ms | 47.6ms |
+| `simulate` campus (1 mutation, full diff) | **38.4ms** | 40.8ms | 42.0ms |
+| `optimize` campus (40 candidates, persisted) | **706.5ms** | 719.3ms | 726.8ms |
+| `optimize` campus (40 candidates, not persisted) | 316.1ms | 316.5ms | 329.6ms |
+| `optimize` battery, aggressive (60 candidates) | 126.4ms | 127.0ms | 132.2ms |
+| `/ready` | 1.0ms | 1.1ms | 1.4ms |
+
+Analyze is **forty times under** the one-second floor. The 390ms difference
+between the persisted and unpersisted optimize is the cost of writing 31
+scenario rows so the UI can diff or apply one without re-running the search —
+a deliberate trade (D-43), not a mystery, and still comfortably inside a
+second. Nothing was cached to make any of these look better.
+
+**The budget is honoured, and returns partial ranked results rather than
+failing:**
+
+```
+max_seconds=0.1  ->  135.6ms, 11 ranked candidates, stopped_early=True,
+                     time budget reached (0.1s); 20 candidate(s) not evaluated
+max_seconds=0.3  ->  315.1ms, 31 ranked candidates, stopped_early=False, completed
+max_seconds=1.0  ->  329.9ms, 31 ranked candidates, stopped_early=False, completed
+```
+
+### Browser walkthroughs
+
+All three green, no console errors: `journey` (the six stages over a seeded
+project and a cold start in a user-defined domain), `ai` (13 checks), and
+`hardening` (17 checks — the picker, identity across a reload, two browsers as
+two people, structured errors).
+
+### Every environment variable required to deploy
+
+**Backend**
+
+| Key | Required | Purpose |
+|---|---|---|
+| `CORS_ORIGINS` | **yes** | Exact origins, comma-separated. `*` refused at startup |
+| `DATABASE_URL` | no | `postgresql+asyncpg://...`; defaults to SQLite, which does not survive a PaaS deploy |
+| `DATABASE_URL_SYNC` | no | Tooling only |
+| `PORT` | injected | Set by the platform; the image reads it |
+| `ENVIRONMENT` | no | `production` hides exception detail from 500s |
+| `ADMIN_TOKEN` | no | Guards the reset endpoint. **Empty disables it** |
+| `SEED_ON_STARTUP` | no | Default true, idempotent |
+| `ANALYZE_TIMEOUT_SECONDS` | no | Default 20 — a ceiling, not a target |
+| `SIMULATE_TIMEOUT_SECONDS` | no | Default 20 |
+| `OPTIMIZE_TIMEOUT_SECONDS` | no | Default 30, backstop only |
+| `ANTHROPIC_API_KEY` | no | Absent selects the offline path; everything still works |
+| `AI_PROVIDER` | no | `null` forces the offline path even with a key |
+
+**Frontend**
+
+| Key | Required | Purpose |
+|---|---|---|
+| `NEXT_PUBLIC_API_URL` | **yes** | Backend URL as the browser reaches it. Inlined at build time |
+| `API_REWRITE_URL` | **yes** | Backend URL as the Next.js server reaches it |
+
+## 6 · DECISIONS
+
+D-61 … D-72 in `docs/DECISIONS.md`.
+
+## 7 · DEVIATIONS
+
+None. Everything in 9.9 was left unbuilt: no authentication, no SSO, no OAuth,
+no RBAC or permission enforcement, no multi-tenancy, no rate limiting, no
+CI/CD, no Kubernetes, no queues, no caching tier, no monitoring stack, no
+feature flags, no i18n, no status page. The identity system is a name picker
+and nothing more, and there is a test that fails if a login endpoint appears.
+
+## 8 · BUGS FOUND AND FIXED
+
+1. **The application would not have started with a comma-separated
+   `CORS_ORIGINS`.** pydantic-settings JSON-decodes complex fields from the
+   environment before any validator runs, so the exact configuration
+   `docs/DEPLOY.md` tells you to use died with a `JSONDecodeError` at import
+   time. Found by testing the feature immediately after writing it. Fixed
+   with `NoDecode` (D-62).
+2. **`analyze` was never actually bounded.** The patch adding the timeout to
+   `analysis.py` was written and never run — I moved on to the next file and
+   the edit sat in a scratch script. The test asserting a slow analyze returns
+   503 caught it, and the route was left believing itself protected.
+3. **The PowerShell smoke script silently compared against empty strings.**
+   On Windows PowerShell 5.1 `Invoke-WebRequest` needs `-UseBasicParsing`, and
+   for a non-2xx the response body has to come from `ErrorDetails.Message`
+   rather than the already-consumed stream. Both error-path assertions were
+   passing vacuously until this was fixed.
+
+## 9 · RISKS
+
+1. **Nothing has been deployed.** An agent cannot create accounts or click
+   through hosting dashboards. `docs/DEPLOY.md` is written from the artifacts
+   and verified locally in containers, including against Postgres, but the
+   first real Render deploy is still a first.
+2. **`asyncio.wait_for` does not interrupt synchronous work.** A timeout frees
+   the request; the computation finishes on its own. Safe here because the
+   work is pure, finite and lock-free — but a pathological input costs CPU
+   after the client has gone. Said plainly in `api/limits.py` rather than
+   implied away.
+3. **The identity is trivially spoofable.** Anyone can send any `X-User-Id`,
+   or pick any name from the picker. That is the design, and the UI says so
+   in as many words — but it means "who changed this" is a convenience, not
+   evidence.
+4. **`ADMIN_TOKEN` is a single shared secret over HTTPS.** No rotation, no
+   expiry, no audit of who used it. Adequate for one destructive route on a
+   demo instance; not a security model.
+5. **Persisting optimizer candidates costs 390ms.** It is 31 INSERTs and it
+   scales with the candidate count. Not hidden behind a cache (the brief
+   forbids it), and still under the floor — but it is the first thing that
+   will get slow on a large workflow.
+6. **The browser walkthroughs need a running stack and a real Chromium.**
+   They are in the repo now and scripted, but they are not something a
+   reviewer gets for free from `pytest`.

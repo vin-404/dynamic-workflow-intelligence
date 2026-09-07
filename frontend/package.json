@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "e2e": "node e2e/journey.mjs e2e/.shots",
+    "e2e:ai": "node e2e/ai.mjs e2e/.shots",
+    "e2e:hardening": "node e2e/hardening.mjs e2e/.shots",
+    "e2e:all": "npm run e2e && npm run e2e:ai && npm run e2e:hardening"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",
@@ -22,6 +26,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
+    "playwright": "^1.63.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

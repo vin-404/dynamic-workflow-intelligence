@@ -61,6 +61,10 @@ class ProjectOut(BaseModel):
     deadline: date | None
     today_day: float
     current_version_id: uuid.UUID | None
+    #: Who created it, from the identity they picked. None for a visitor who
+    #: had not picked a name - which is allowed, because this is an identity
+    #: and not a credential.
+    created_by: uuid.UUID | None = None
 
     model_config = {"from_attributes": True}
 

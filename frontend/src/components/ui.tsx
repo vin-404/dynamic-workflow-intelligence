@@ -259,17 +259,30 @@ export function Spinner({ label }: { label?: string }) {
 export function ErrorNote({
   children,
   onRetry,
+  hint,
+  requestId,
 }: {
   children: ReactNode;
   onRetry?: () => void;
+  /** The API's `hint`: what to do about it. Every 4xx and 5xx carries one. */
+  hint?: string;
+  /** The server's id for the failed request, for correlating with its logs. */
+  requestId?: string;
 }) {
   return (
     <div className="border border-red/40 bg-red/5 rounded-lg p-3 text-sm">
       <div className="text-red font-medium mb-1">That did not work</div>
       <div className="text-foreground/90">{children}</div>
+      {hint && <div className="mt-2 text-dim">{hint}</div>}
       {onRetry && (
         <div className="mt-2">
           <Button onClick={onRetry}>Try again</Button>
+        </div>
+      )}
+      {requestId && (
+        <div className="mt-2 text-[11px] text-dim">
+          Request <span className="font-mono">{requestId}</span> — quote this
+          if you report it.
         </div>
       )}
     </div>

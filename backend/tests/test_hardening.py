@@ -344,6 +344,119 @@ class TestNamePicker:
         assert r.status_code == 201
 
 
+class TestIdentityDrivesOwnership:
+    """The identity is not decoration: what you create is yours, and shows up
+    on the member list without anyone typing an email."""
+
+    async def test_a_project_created_with_an_identity_is_owned_by_it(
+        self, client
+    ):
+        person = (
+            await client.post("/api/users", json={"name": "Nia Okafor"})
+        ).json()
+
+        created = await client.post(
+            "/api/projects",
+            json={
+                "name": "Nia's workflow",
+                "start_date": "2026-01-05",
+                "today_day": 0,
+            },
+            headers={"X-User-Id": person["id"]},
+        )
+        assert created.status_code == 201
+        project_id = created.json()["id"]
+        assert created.json()["created_by"] == person["id"]
+
+        members = (
+            await client.get(f"/api/projects/{project_id}/members")
+        ).json()
+        assert [m["name"] for m in members] == ["Nia Okafor"]
+        assert members[0]["role"] == "owner"
+
+        mine = (await client.get(f"/api/users/{person['id']}/projects")).json()
+        assert [p["name"] for p in mine["projects"]] == ["Nia's workflow"]
+
+    async def test_no_identity_still_works(self, client):
+        """A visitor who has not picked a name is not blocked - refusing them
+        would be enforcing an identity, which is what this is not."""
+        created = await client.post(
+            "/api/projects",
+            json={"name": "Anonymous", "start_date": "2026-01-05",
+                  "today_day": 0},
+        )
+        assert created.status_code == 201
+        assert created.json()["created_by"] is None
+
+    async def test_a_stale_identity_is_ignored_rather_than_refused(
+        self, client
+    ):
+        """After a reset, a browser sends an id that no longer exists. The
+        request is served; the project simply has no owner."""
+        created = await client.post(
+            "/api/projects",
+            json={"name": "Stale", "start_date": "2026-01-05", "today_day": 0},
+            headers={"X-User-Id": MISSING},
+        )
+        assert created.status_code == 201
+        assert created.json()["created_by"] is None
+
+    async def test_a_malformed_identity_header_is_ignored(self, client):
+        created = await client.post(
+            "/api/projects",
+            json={"name": "Junk header", "start_date": "2026-01-05",
+                  "today_day": 0},
+            headers={"X-User-Id": "not-a-uuid"},
+        )
+        assert created.status_code == 201
+
+    async def test_an_explicit_owner_email_still_wins(self, client):
+        """The seed loader and the tests set it, and it must keep working."""
+        person = (
+            await client.post("/api/users", json={"name": "Header Person"})
+        ).json()
+        created = await client.post(
+            "/api/projects",
+            json={
+                "name": "Explicit owner",
+                "start_date": "2026-01-05",
+                "today_day": 0,
+                "owner_email": "explicit@example.com",
+            },
+            headers={"X-User-Id": person["id"]},
+        )
+        members = (
+            await client.get(f"/api/projects/{created.json()['id']}/members")
+        ).json()
+        assert [m["email"] for m in members] == ["explicit@example.com"]
+
+    async def test_two_people_see_the_same_project(self, client):
+        """The whole multi-user requirement: no live sync, but both see it."""
+        a = (await client.post("/api/users", json={"name": "First"})).json()
+        b = (await client.post("/api/users", json={"name": "Second"})).json()
+
+        created = await client.post(
+            "/api/projects",
+            json={"name": "Shared", "start_date": "2026-01-05", "today_day": 0},
+            headers={"X-User-Id": a["id"]},
+        )
+        project_id = created.json()["id"]
+
+        seen_by_b = (
+            await client.get("/api/projects", headers={"X-User-Id": b["id"]})
+        ).json()
+        assert any(p["id"] == project_id for p in seen_by_b)
+
+        # And B can edit it, because roles are advisory.
+        edit = await client.post(
+            f"/api/projects/{project_id}/tasks",
+            json={"key": "S1", "name": "Added by the other person",
+                  "effort": 2.0},
+            headers={"X-User-Id": b["id"]},
+        )
+        assert edit.status_code == 201
+
+
 # ---------------------------------------------------------------------------
 # The reset button
 # ---------------------------------------------------------------------------

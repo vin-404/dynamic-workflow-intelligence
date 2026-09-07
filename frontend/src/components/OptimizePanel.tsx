@@ -13,7 +13,7 @@
  * one that reports a miraculous improvement.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   ApiError,
   OptimizeCandidate,
@@ -37,6 +37,22 @@ import {
   days,
 } from "./ui";
 
+/**
+ * What the search is doing, in the order it does it.
+ *
+ * The whole search is one request, so the client cannot know which stage the
+ * server is in. These advance on a timer that is slower than the search
+ * usually is (it finishes in about 250ms on a seeded workflow), so the label
+ * never claims to be further along than it could be - it stops on the last
+ * one and waits.
+ */
+const SEARCH_PHASES = [
+  "Generating candidate workflows",
+  "Checking each against your constraints",
+  "Scoring the survivors on six criteria",
+  "Ranking them",
+];
+
 export default function OptimizePanel({
   projectId,
   onApplied,
@@ -46,12 +62,27 @@ export default function OptimizePanel({
 }) {
   const [result, setResult] = useState<OptimizeResponse | null>(null);
   const [busy, setBusy] = useState(false);
+  const [phase, setPhase] = useState(0);
   const [error, setError] = useState<ApiError | null>(null);
   const [aggressive, setAggressive] = useState(false);
   const [maxCandidates, setMaxCandidates] = useState(40);
   const [maxSeconds, setMaxSeconds] = useState(5);
   const [weights, setWeights] = useState<Record<string, number> | null>(null);
   const [applying, setApplying] = useState<string | null>(null);
+
+  // Advance the label while a search is in flight, and reset it when one
+  // finishes so the next run starts from the beginning.
+  useEffect(() => {
+    if (!busy) {
+      setPhase(0);
+      return;
+    }
+    const timer = setInterval(
+      () => setPhase((p) => Math.min(p + 1, SEARCH_PHASES.length - 1)),
+      700,
+    );
+    return () => clearInterval(timer);
+  }, [busy]);
 
   async function run(withAggressive = aggressive) {
     setBusy(true);
@@ -138,7 +169,7 @@ export default function OptimizePanel({
         </div>
       </Card>
 
-      {busy && <Spinner label="Generating, gating and scoring candidates…" />}
+      {busy && <Spinner label={`${SEARCH_PHASES[phase]}…`} />}
       {error && <ErrorNote>{error.userMessage}</ErrorNote>}
 
       {result && (
