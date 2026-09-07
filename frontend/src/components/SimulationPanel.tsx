@@ -12,12 +12,20 @@ import Card, { CardTitle } from "./Card";
 
 export default function SimulationPanel({ state }: { state: ProjectState }) {
   return (
-    <div className="flex gap-4 flex-wrap">
-      <div className="flex-1 min-w-[400px]">
-        <DelaySim state={state} />
+    <div className="space-y-4">
+      <div className="p-3 bg-accent/5 border border-accent/20 rounded-md text-[13px] text-accent/80">
+        <strong>Change Simulator</strong> — these simulations are read-only.
+        They compute what <em>would</em> happen without modifying the actual
+        project data. Every number is derived from a deterministic formula you
+        can verify by hand.
       </div>
-      <div className="flex-1 min-w-[400px]">
-        <RequirementSim state={state} />
+      <div className="flex gap-4 flex-wrap">
+        <div className="flex-1 min-w-[400px]">
+          <DelaySim state={state} />
+        </div>
+        <div className="flex-1 min-w-[400px]">
+          <RequirementSim state={state} />
+        </div>
       </div>
     </div>
   );
@@ -75,6 +83,14 @@ function DelaySim({ state }: { state: ProjectState }) {
           {loading ? "Simulating..." : "Propagate"}
         </button>
       </div>
+
+      {!result && (
+        <p className="text-xs text-dim">
+          Try it: Select T03 (budget approval) + 5 days to see how the
+          critical path delay propagates to 7 downstream tasks. Or select T12
+          (registration site) + 1 day to see the delay absorbed by slack.
+        </p>
+      )}
 
       {result && (
         <div>
@@ -216,6 +232,14 @@ function RequirementSim({ state }: { state: ProjectState }) {
           {loading ? "Analyzing..." : "Propagate"}
         </button>
       </div>
+
+      {!result && (
+        <p className="text-xs text-dim">
+          Try it: Select R2 (venue layout spec) to see which tasks consumed
+          this artifact directly (must redo) vs those merely downstream (must
+          re-check). This distinction is impossible without a dependency model.
+        </p>
+      )}
 
       {result && (
         <div>
