@@ -35,7 +35,7 @@ from backend.app.core.workflow import (
 
 #: Bumped whenever a change would alter numeric output. Persisted on every
 #: AnalysisRun, so a stored result can be told apart from a fresh one.
-ENGINE_VERSION = "2.1.0-phase2"
+ENGINE_VERSION = "2.2.0-phase3"
 
 def _empty_schedule(durations: dict[str, float]) -> dict:
     """A schedule-shaped object for a workflow that cannot be scheduled.
@@ -91,6 +91,9 @@ class EvaluationResult:
     effort_model: dict
     config: dict
     tier_reached: int
+    #: Non-empty only when some resource has an unavailable window. Carries
+    #: the per-task adjustment and the statement that it is an approximation.
+    resource_unavailability: dict = field(default_factory=dict)
     checks_run: list[str] = field(default_factory=list)
     unavailable_checks: list[dict] = field(default_factory=list)
     schedulable: bool = True
@@ -146,6 +149,7 @@ class EvaluationResult:
             "effort_model": self.effort_model,
             "config": self.config,
             "tier_reached": self.tier_reached,
+            "resource_unavailability": self.resource_unavailability,
             "checks_run": list(self.checks_run),
             "unavailable_checks": self.unavailable_checks,
             "risk": self.risk,
@@ -259,6 +263,14 @@ def evaluate(
     observed = effort_model.observed_durations(snapshot, st, clk, cfg)
     baseline = schedule(G, planned)
     current = schedule(G, observed)
+
+    # Resource unavailability is applied against the resource-blind schedule,
+    # in one pass, and reported as the approximation it is.
+    adjusted, unavailability = effort_model.apply_unavailability(
+        snapshot, observed, current
+    )
+    if unavailability:
+        current = schedule(G, adjusted)
     # The slip detector needs both, and a detector only ever sees `ctx`.
     current_with_baseline = {
         **current,
@@ -287,6 +299,7 @@ def evaluate(
         effort_model=model.as_dict(),
         config=cfg.as_dict(),
         tier_reached=int(tier),
+        resource_unavailability=unavailability,
         checks_run=ran,
         unavailable_checks=unavailable_checks(tier),
     )

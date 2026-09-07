@@ -15,6 +15,7 @@ from backend.app.api.routers import (
     analysis_runs,
     domains,
     projects,
+    scenarios,
     seed,
     workflow,
 )
@@ -58,6 +59,8 @@ app.include_router(projects.router)
 app.include_router(workflow.router)
 app.include_router(analysis.router)
 app.include_router(analysis_runs.router)
+app.include_router(scenarios.project_router)
+app.include_router(scenarios.router)
 app.include_router(seed.router)
 
 

@@ -107,6 +107,9 @@ class Task(Base):
     divisible: Mapped[bool] = mapped_column(Boolean, default=True)
     priority: Mapped[int] = mapped_column(Integer, default=0)
     required_skills: Mapped[list] = mapped_column(JSON, default=list)
+    #: Days beyond the current projection, written by TASK_DELAY_ADD. Kept
+    #: separate from effort so a delay reads as slip, not as a re-baseline.
+    added_delay: Mapped[float] = mapped_column(Float, default=0.0)
     #: Observed state. Lives on the version row because a version is a
     #: snapshot of the workflow *as it stood*.
     status: Mapped[str] = mapped_column(String(20), default="not_started")
@@ -165,6 +168,8 @@ class Resource(Base):
     #: members (decision D-16).
     parent_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
     calendar_key: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    #: (from_day, to_day) pairs this resource is unavailable for.
+    unavailable_windows: Mapped[list] = mapped_column(JSON, default=list)
     #: Present when this resource is a real person with an account.
     user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), nullable=True

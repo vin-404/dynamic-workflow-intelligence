@@ -25,6 +25,7 @@ from backend.app.core.engine.detectors import (
 from backend.app.core.engine.detectors.tier1 import root_blocker
 from backend.app.core.engine.effort import (
     EffortModel,
+    apply_unavailability,
     duration_for,
     observed_durations,
     planned_durations,
@@ -71,6 +72,7 @@ __all__ = [
     # effort
     "EffortModel",
     "duration_for",
+    "apply_unavailability",
     "planned_durations",
     "observed_durations",
     "three_point_durations",

@@ -90,10 +90,18 @@ class TaskSpec:
     likely: float | None = None
     pessimistic: float | None = None
     required_skills: tuple[str, ...] = ()
+    #: Days this task is expected to take *beyond* what it currently looks
+    #: like it will, written by the TASK_DELAY_ADD mutation. Deliberately not
+    #: folded into `effort`: effort is the plan, and a delay is a departure
+    #: from it. Keeping them separate is what lets `slip_days` attribute the
+    #: delay as slip rather than quietly re-baselining the plan around it.
+    added_delay: float = 0.0
 
     def __post_init__(self) -> None:
         if self.effort < 0:
             raise ValueError(f"task {self.key}: effort must be >= 0")
+        if self.added_delay < 0:
+            raise ValueError(f"task {self.key}: added_delay must be >= 0")
 
     @property
     def has_three_point(self) -> bool:
@@ -133,12 +141,33 @@ class ResourceSpec:
     #: what lets a team cap total throughput below the sum of its members
     #: (decision D-16). Generic structure, not a domain concept.
     parent_key: str | None = None
+    #: Windows this resource is unavailable, as (from_day, to_day) pairs of
+    #: integer working-day offsets, `to_day` exclusive. Written by the
+    #: RESOURCE_UNAVAILABLE_WINDOW mutation - "what if Deepa is away next
+    #: week". The effect on the schedule is an explicit, labelled
+    #: approximation; see `core.engine.effort.apply_unavailability`.
+    unavailable_windows: tuple[tuple[float, float], ...] = ()
 
     def __post_init__(self) -> None:
         if self.capacity < 0:
             raise ValueError(f"resource {self.key}: capacity must be >= 0")
         if self.parent_key == self.key:
             raise ValueError(f"resource {self.key}: cannot be its own parent")
+        for start, end in self.unavailable_windows:
+            if end <= start:
+                raise ValueError(
+                    f"resource {self.key}: unavailable window ({start}, {end}) "
+                    f"ends before it starts"
+                )
+
+    def unavailable_overlap(self, start: float, end: float) -> float:
+        """Days of [start, end) this resource is unavailable for."""
+        total = 0.0
+        for w_start, w_end in self.unavailable_windows:
+            overlap = min(end, w_end) - max(start, w_start)
+            if overlap > 0:
+                total += overlap
+        return total
 
 
 @dataclass(frozen=True, slots=True)
@@ -304,6 +333,34 @@ class WorkflowSnapshot:
     def constraints_of(self, kind: ConstraintKind) -> tuple[ConstraintSpec, ...]:
         return tuple(c for c in self.constraints if c.kind == kind)
 
+    def is_mandatory(self, task_key: str) -> bool:
+        return any(
+            c.target == task_key
+            for c in self.constraints_of(ConstraintKind.MANDATORY_TASK)
+        )
+
+    def is_immutable_dependency(self, from_task: str, to_task: str) -> bool:
+        target = ConstraintSpec.dependency_target(from_task, to_task)
+        return any(
+            c.target == target
+            for c in self.constraints_of(ConstraintKind.IMMUTABLE_DEPENDENCY)
+        )
+
+    def min_duration(self, task_key: str) -> float | None:
+        for c in self.constraints_of(ConstraintKind.MIN_DURATION):
+            if c.target == task_key and c.value is not None:
+                return c.value
+        return None
+
+    def constraint_reason(self, kind: ConstraintKind, target: str) -> str:
+        for c in self.constraints_of(kind):
+            if c.target == target:
+                return c.reason
+        return ""
+
+    def total_effort(self) -> float:
+        return sum(t.effort for t in self.tasks)
+
     def is_divisible(self, task_key: str) -> bool:
         """A task is divisible only if its own flag allows it *and* no
         NON_DIVISIBLE_TASK constraint protects it."""
@@ -319,7 +376,14 @@ class WorkflowSnapshot:
 
     def to_canonical(self) -> dict:
         """A stable, sorted, JSON-safe projection. This is what gets hashed
-        and what the domain-leak test compares."""
+        and what the domain-leak test compares.
+
+        Set-like fields (`consumed_by`, `skills`, `required_skills`,
+        `working_days`, `holidays`) are sorted here: their order carries no
+        meaning, so two snapshots that differ only in insertion order must
+        hash the same. Without this, undoing a task removal produced an
+        identical workflow with a different hash.
+        """
 
         def task(t: TaskSpec) -> dict:
             return {
@@ -332,7 +396,8 @@ class WorkflowSnapshot:
                 "optimistic": t.optimistic,
                 "likely": t.likely,
                 "pessimistic": t.pessimistic,
-                "required_skills": list(t.required_skills),
+                "required_skills": sorted(t.required_skills),
+                "added_delay": t.added_delay,
             }
 
         return {
@@ -352,9 +417,12 @@ class WorkflowSnapshot:
                     "name": r.name,
                     "kind": r.kind,
                     "capacity": r.capacity,
-                    "skills": list(r.skills),
+                    "skills": sorted(r.skills),
                     "calendar_key": r.calendar_key,
                     "parent_key": r.parent_key,
+                    "unavailable_windows": sorted(
+                        list(w) for w in r.unavailable_windows
+                    ),
                 }
                 for r in self.resources
             ],
@@ -371,7 +439,7 @@ class WorkflowSnapshot:
                     "key": r.key,
                     "text": r.text,
                     "version_no": r.version_no,
-                    "consumed_by": list(r.consumed_by),
+                    "consumed_by": sorted(r.consumed_by),
                 }
                 for r in self.requirements
             ],
@@ -387,8 +455,8 @@ class WorkflowSnapshot:
             "calendars": [
                 {
                     "key": c.key,
-                    "working_days": list(c.working_days),
-                    "holidays": list(c.holidays),
+                    "working_days": sorted(c.working_days),
+                    "holidays": sorted(c.holidays),
                 }
                 for c in self.calendars
             ],

@@ -152,6 +152,7 @@ async def load_snapshot(
                 likely=t.likely,
                 pessimistic=t.pessimistic,
                 required_skills=tuple(t.required_skills or ()),
+                added_delay=t.added_delay or 0.0,
             )
             for t in version.tasks
         ],
@@ -173,6 +174,10 @@ async def load_snapshot(
                 skills=tuple(r.skills or ()),
                 calendar_key=r.calendar_key,
                 parent_key=r.parent_key,
+                unavailable_windows=tuple(
+                    (float(w[0]), float(w[1]))
+                    for w in (r.unavailable_windows or ())
+                ),
             )
             for r in version.resources
         ],
@@ -323,6 +328,7 @@ async def write_version(
             divisible=t.divisible,
             priority=t.priority,
             required_skills=list(t.required_skills),
+            added_delay=t.added_delay,
             status=st.get(t.key, TaskStatus.NOT_STARTED).value,
         ))
     for d in snapshot.dependencies:
@@ -343,6 +349,7 @@ async def write_version(
             skills=list(r.skills),
             parent_key=r.parent_key,
             calendar_key=r.calendar_key,
+            unavailable_windows=[list(w) for w in r.unavailable_windows],
         ))
     for a in snapshot.assignments:
         db.add(Assignment(
