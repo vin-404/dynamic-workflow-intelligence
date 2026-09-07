@@ -532,3 +532,249 @@ D-17 … D-22 in `docs/DECISIONS.md`. The three that matter most:
    `evaluate()` injects into the schedule dict. That is a slightly smelly
    channel — a detector reading a key no scheduler produces. It works and it is
    tested, but a `DetectorContext.baseline_schedule` field would be cleaner.
+
+---
+
+# Phase 3 — Capability 3: mutations, scenarios, simulation
+
+Built before prediction and optimization, because both consume it.
+
+## 1 · CHANGED
+
+### D — the mutation algebra (`core/mutations.py`, ~1150 lines)
+
+Seventeen kinds, exactly the ARCHITECTURE D.3 list. Each has:
+
+| Part | What it is |
+|---|---|
+| payload schema | required and optional fields, checked before anything semantic runs |
+| semantic validator | returns `Rejection`s with user-readable reasons, and the cited constraint where one applies |
+| applier | returns a **new** `(snapshot, state)` pair; cannot modify what it was given |
+| inverse | returns a **tuple** of mutations that undoes it |
+
+"Restructure the project" is not expressible, and an unknown kind is refused
+with the valid set printed. `Mutation.payload` is a `MappingProxyType`, so a
+stored mutation cannot be edited in place.
+
+### Simulation (`core/simulation.py`)
+
+`Scenario = base snapshot + base state + ordered mutations`. `simulate()`
+materialises it in memory and calls **the same `evaluate()`** Capability 1
+uses. `_compare()` produces the full ARCHITECTURE D.3 diff:
+
+- projected completion before/after/delta/direction
+- tasks moved, each with its own delta and name
+- slack consumed, per task and totalled
+- critical path before/after, newly critical, no longer critical
+- findings created, removed, unchanged
+- resource overload before/after, resolved, introduced
+- feasibility before/after, margin delta, whether the verdict changed
+- structure: tasks added/removed, dependencies added/removed, **total effort delta**
+- the effort model and its efficiency factor
+
+`summarise()` renders it deterministically. That is the Narrator's
+`NullProvider` fallback: the engine can always describe its own result, so
+language is never a capability the model adds.
+
+### Persistence and the single write path
+
+| File | What it is |
+|---|---|
+| `services/scenarios.py` | create / add mutation / remove mutation / evaluate / diff / **apply** / delete / one-shot what-if |
+| `api/routers/scenarios.py` | 9 endpoints, including `GET /api/scenarios/mutation-kinds` which publishes the algebra with its payload contracts |
+
+**`apply_scenario()` is the only function in the codebase that writes workflow
+state.** It creates a new immutable version whose parent is the base, moves the
+project pointer, and returns the parent's content hash so the caller can
+confirm history was preserved. An LLM proposal will be a `Scenario` row with
+`origin="llm_proposal"`; it reaches a version only through this function, only
+on an explicit human call. That is what will make Phase 7's "the LLM cannot
+mutate the database" structural rather than a policy.
+
+### `RESOURCE_UNAVAILABLE_WINDOW` — the demo's beat 6
+
+`ResourceSpec.unavailable_windows` plus `effort.apply_unavailability()`. A task
+whose scheduled window overlaps an assignee's absence has the overlap added to
+its duration, in a single pass over the resource-blind schedule.
+
+Verified over HTTP: *"what if Anitha is unavailable next week"* moves projected
+completion from day 26 to day 33, three tasks shift, and the base version's
+hash is byte-identical before and after. Suresh away for the same week adds
+seven days of *work* and zero days of *project*, because he has slack — two
+facts reported separately.
+
+It is an approximation and the payload says so: `is_approximation: true` and
+`"This is not a resource-constrained optimal schedule - we do not solve RCPSP
+and do not claim to."` (ARCHITECTURE H, risk #2.)
+
+## 2 · PRESERVED
+
+| Prototype behaviour | Where it is now |
+|---|---|
+| `apply_delay()` | `core/engine/cpm.py`, untouched; `TASK_DELAY_ADD` is the mutation-level equivalent |
+| `diff()` | `core/engine/cpm.py`, untouched; `simulation._compare()` wraps and extends it |
+| `POST /simulate/delay` | `POST /api/projects/{id}/what-if` with a `TASK_DELAY_ADD` — **the same numbers**: 26 → 31, +5 days, 7 tasks moved, critical path unchanged. Asserted. |
+| Calendar dates at the boundary | `projected_end_date_before/after`, still produced only in the service layer |
+| The stalled-review observed duration | untouched; the delay model was changed *because* it interacted with it wrongly |
+
+## 3 · REMOVED
+
+Nothing was deleted in this phase. Two behaviours changed deliberately:
+
+| Changed | From | To | Why |
+|---|---|---|---|
+| `TASK_DELAY_ADD` | added to `effort` | writes a separate `added_delay` | T03 is nine elapsed days against a two-day estimate, so raising the estimate to seven changed the schedule **not at all**. A delay has to sit on top of what the task already looks like it will take. Keeping it separate also makes a slip read as slip rather than as a re-baselined plan. |
+| `inverse()` | `-> Mutation` | `-> tuple[Mutation, ...]` | A single-mutation inverse was quietly wrong; see TESTS. |
+
+## 4 · TESTS
+
+| Suite | Phase 2 | Phase 3 | Notes |
+|---|---|---|---|
+| `test_mutations.py` | — | **80** | all 17 kinds round-trip, every rejection, every constraint cited |
+| `test_simulation.py` | — | **53** | immutability at three levels, the full diff payload, apply |
+| `test_engine.py` | 64 | 64 | unchanged |
+| `test_detectors.py` | 43 | 43 | unchanged |
+| `test_api.py` | 46 | 46 | unchanged |
+| `test_core_purity.py` | 34 | 36 | grew with the module count |
+| `test_domain_leak.py` | 7 | 7 | unchanged |
+| `test_properties.py` | 168 | 168 | unchanged |
+| `test_authoring.py` | 25 | 25 | unchanged |
+| **Total** | **388** | **525 pass / 0 fail / 0 skip** | |
+
+### The brief's Phase-3 checklist
+
+| Requirement | Test |
+|---|---|
+| every mutation type round-trips and validates | `TestRoundTrip`, parametrised over all 17 |
+| invalid mutations rejected with reasons | `TestStructuralRejections`, `TestSemanticRejections` (11 cases) |
+| **base version's hash unchanged after evaluation** | `TestBaseImmutability` (4), `test_evaluating_returns_the_diff_and_proves_the_base_is_intact` |
+| non-divisible tasks cannot be split | `test_a_non_divisible_task_cannot_be_split` |
+| apply creates a new version leaving the parent intact | `TestApplyIsTheOnlyWrite` (10) |
+
+### Three bugs the round-trip test found
+
+Writing the parametrised round-trip is what exposed all three. Each was a real
+defect, not a test artefact:
+
+1. **A single-mutation inverse was wrong.** Undoing a task removal has to
+   re-add the task, restore each edge **with its `dep_type` and `consumes`
+   flags** (the `predecessors`/`successors` shorthand cannot carry them, and
+   losing `consumes` silently turns an artifact dependency into ordering only,
+   changing what a requirement change invalidates), drop the bridges the
+   removal created, re-attach the assignments, and re-link the requirements the
+   task consumed. `inverse()` returns a tuple now.
+2. **`REQUIREMENT_VERSION_BUMP`'s inverse bumped again**, landing on version 3
+   instead of back on 1, and did not restore the statuses the bump had reset.
+   The payload now accepts an explicit `version_no`.
+3. **`content_hash()` was order-sensitive on set-like fields.** An identical
+   workflow could hash differently after a round trip because `consumed_by`
+   came back in a different order. `to_canonical()` sorts them now — which
+   matters well beyond round-tripping, since the hash is what version
+   comparison and the immutability guarantee rest on.
+
+Two of my own assertions were also wrong and the behaviour right: a uniform
+push of a zero-slack task consumes **no** slack (every late date moves with the
+project end), and a delay is **not** an effort change so `total_effort_delta`
+is correctly 0. Both became two tests each, pinning the contrast.
+
+One real staleness bug: `expire_on_commit=False` meant an
+identity-mapped `Scenario` kept the `mutations` collection it was first loaded
+with, so an appended mutation was invisible. `get_row` uses
+`populate_existing=True`.
+
+## 5 · HOW TO TEST
+
+    .venv/Scripts/python.exe -m pytest -q                                # 525 passed
+    .venv/Scripts/python.exe -m pytest backend/tests/test_mutations.py -q
+    .venv/Scripts/python.exe -m pytest backend/tests/test_simulation.py -q
+
+    .venv/Scripts/python.exe -m uvicorn backend.app.main:app --port 8001
+
+    # the published algebra
+    curl -s localhost:8001/api/scenarios/mutation-kinds
+
+    # demo beat 6: what if Anitha is away next week?
+    curl -s -X POST localhost:8001/api/projects/00000000-0000-0000-0000-000000000001/what-if \
+      -H 'Content-Type: application/json' -d '{"keep":false,"mutations":[
+        {"kind":"RESOURCE_UNAVAILABLE_WINDOW",
+         "payload":{"resource_key":"anitha","from_day":14,"to_day":21}}]}'
+
+    # demo beat 8: the refusal
+    curl -s -X POST localhost:8001/api/projects/00000000-0000-0000-0000-000000000002/what-if \
+      -H 'Content-Type: application/json' -d '{"keep":false,"mutations":[
+        {"kind":"TASK_REMOVE","payload":{"key":"M09"}}]}'
+
+Verified output for beat 6: `day 26 -> day 33 (+7 days)`, three tasks shift,
+`base_unchanged: true` with the hash identical before and after.
+
+Verified output for beat 8, HTTP 422:
+
+    reason   : M09 is a mandatory task and cannot be removed.
+    cited    : MANDATORY_TASK
+    on record: UN38.3 safety certification is a legal precondition to shipping.
+
+## 6 · DECISIONS
+
+D-25 … D-30 in `docs/DECISIONS.md`. The two that changed behaviour:
+
+- **D-26 — `TASK_DELAY_ADD` writes `added_delay`, not `effort`.** Without
+  this, delaying the fixture's stalled approval did nothing, because its
+  observed duration already exceeded the raised estimate.
+- **D-25 — `inverse()` returns a tuple.** A single-mutation inverse is not
+  expressible for a task removal, and pretending it was produced two silent
+  round-trip failures.
+
+## 7 · DEVIATIONS
+
+1. **`TaskSpec.added_delay` and `ResourceSpec.unavailable_windows` are not in
+   ARCHITECTURE C's field list.** Both are required by mutations
+   ARCHITECTURE D.3 *does* list (`TASK_DELAY_ADD`,
+   `RESOURCE_UNAVAILABLE_WINDOW`), so the fields are the storage those
+   mutations need rather than new concepts.
+2. **`RESOURCE_UNAVAILABLE_WINDOW` also accepts a whole `windows` list**, and
+   `TASK_DELAY_ADD` a `total_delay_days`, and `REQUIREMENT_VERSION_BUMP` a
+   `version_no`. Each exists so the mutation's inverse is exact. The
+   alternative was three more kinds used by nothing but undo, which would
+   have made the algebra twenty kinds to save three optional fields.
+3. **`TASK_ADD` gained `consumed_requirements` and `added_delay`.** Same
+   reason: without them, removing a task severs requirement links that no
+   inverse can restore.
+4. **`POST /what-if` is not in ARCHITECTURE E's endpoint list.** It is
+   create + evaluate + diff in one call, which is what a what-if *panel*
+   needs and what restores the prototype's `/simulate/delay`. It writes
+   nothing the three separate endpoints would not.
+5. **A cyclic or otherwise invalid scenario is still stored** when created
+   through `POST /scenarios`, with `status="rejected"` and the reason on the
+   row. A rejected proposal the user can read beats a silent failure — and
+   Phase 7 needs exactly this for LLM proposals. `POST /what-if` validates
+   first and writes nothing, because a throwaway question should not leave a
+   row behind.
+
+## 8 · RISKS
+
+1. **`_compare()` calls `evaluate()` twice per simulation.** Correct, and the
+   point of the spine, but the Phase 5 optimizer will call `simulate()` once
+   per candidate, so that is 2N evaluations. The base evaluation is identical
+   across all candidates and should be computed once and passed in. First task
+   of Phase 5.
+2. **`transitive_redundant_edges` is still O(E × (V+E))** and
+   `resource_overallocated` sweeps boundaries per resource. Both run inside
+   every `evaluate()`, so they are now inside the optimizer's hot loop too.
+   Measure before optimising, but measure early.
+3. **The `applied` test fixture had to become class-scoped**, because applying
+   moves the project pointer and a per-test fixture tried to remove an edge the
+   previous apply had already removed. That is a real property of the system —
+   applying is stateful — and any future test that applies must account for it.
+4. **`TaskSpec.added_delay` is persisted on the version row.** Applying a
+   what-if therefore bakes the delay into the new version's plan, where it will
+   read as `added_delay` rather than as effort. That is intended, but it means
+   a version's "plan" and its "current expectation" are both in one snapshot
+   and only `evaluate()` distinguishes them. If that gets confusing, the fix is
+   a separate expectation record, not folding the delay into effort.
+5. **`RESOURCE_UNAVAILABLE_WINDOW`'s effect is one pass.** A task pushed by an
+   absence into a *second* absence is not pushed again. Documented in the
+   payload; a fixed-point loop would be more accurate and is a P1 change.
+6. **`deploy-kit/` appeared in the working tree during this phase** (a
+   `DEPLOY.md`, a `Dockerfile.backend` and a `dockerignore`). Left untracked
+   and unread; it is Phase 9 material and will be reconciled there against the
+   Dockerfiles already fixed and verified.
