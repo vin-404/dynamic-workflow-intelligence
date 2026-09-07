@@ -50,6 +50,7 @@ to it. Step 3 fixes it.
    |---|---|
    | `CORS_ORIGINS` | `http://localhost:3000` for now; add the Vercel URL after step 2 |
    | `ADMIN_TOKEN` | a long random string, if you want the reset button |
+   | `PROXY_SHARED_SECRET` | a long random string — **the same one you set on Vercel** |
 
    Leave `DATABASE_URL` unset for SQLite. Leave `PORT` unset — Render injects
    it and the image reads it.
@@ -88,15 +89,28 @@ to it. Step 3 fixes it.
 
    | Key | Value |
    |---|---|
-   | `NEXT_PUBLIC_API_URL` | `https://<your-service>.onrender.com` |
    | `API_REWRITE_URL` | `https://<your-service>.onrender.com` |
+   | `AUTH_GOOGLE_ID` | from the Google Cloud Console |
+   | `AUTH_GOOGLE_SECRET` | from the Google Cloud Console |
+   | `AUTH_SECRET` | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
+   | `NEXTAUTH_URL` | `https://<your-app>.vercel.app` |
+   | `PROXY_SHARED_SECRET` | the same value you set on Render |
 
-   **Both.** `src/lib/api.ts` reads the first in the browser;
-   `next.config.ts` reads the second for server-side rewrites. Setting only
-   one gives you a site that works in some places and not others.
+   **There is no `NEXT_PUBLIC_API_URL`, and adding one back would break the
+   security model.** The browser talks only to the Vercel origin, because that
+   is where `src/proxy.ts` verifies the Google session and injects the identity
+   headers the backend trusts. An absolute backend URL in the browser bundle
+   would send requests straight to Render, past the session check and past the
+   injection — the app would look signed-in while every request arrived
+   anonymous. `src/lib/api.ts` hard-codes a relative base and reads no
+   variable, so there is nothing to get wrong here.
 
-   `NEXT_PUBLIC_*` is inlined **at build time**. Changing it later requires a
-   redeploy, not just a restart.
+   `API_REWRITE_URL` is read at **runtime** by the Node.js proxy, so changing
+   it takes effect on a restart. It is not inlined into the bundle.
+
+   In the Google Cloud Console, register the redirect URI as
+   `https://<your-app>.vercel.app/api/auth/callback/google`. A mismatch here is
+   the single most common sign-in failure and Google's error names it.
 
 5. Deploy, then **go back to Render and add the Vercel URL to `CORS_ORIGINS`**:
 
@@ -154,12 +168,20 @@ Work down it. Each line is a thing that has gone wrong for somebody.
 - [ ] `curl https://<backend>/ready` → `"status":"ready"` and the database you expect
 - [ ] `curl https://<backend>/api/projects` → two seeded projects
 - [ ] `curl -X POST https://<backend>/api/projects/00000000-0000-0000-0000-000000000001/analyze` → findings
-- [ ] Open the Vercel URL. It asks who you are.
-- [ ] Pick a name. The workflow list appears with both seeded workflows.
+- [ ] Open the Vercel URL. You land on `/login`, not on the app.
+- [ ] `curl https://<frontend>/api/projects` → **401** with a `hint`. The API is
+      not reachable without a session, even though the backend's own URL is.
+- [ ] Sign in with Google. The workflow list appears with both seeded workflows.
 - [ ] Open one and click through to **Bottlenecks**. Findings render.
 - [ ] Open the browser console. No CORS errors, no red.
-- [ ] Reload the page. You are still the same person, on the same workflow.
-- [ ] Open the site in a second browser. It asks who you are separately.
+- [ ] Reload the page. You are still signed in, on the same workflow.
+- [ ] Open the site in a second browser. It asks that one to sign in separately.
+- [ ] Sign out. You land back on `/login`, and reloading the app does not let
+      you back in.
+- [ ] If you set `PROXY_SHARED_SECRET`, confirm the header alone is not enough:
+      `curl https://<backend>/api/projects -H "X-User-Id: <a real uuid>"` is
+      served as **anonymous**, and a write with that header returns 403. If a
+      write succeeds, the secret is not actually set on the backend.
 - [ ] If you set `ADMIN_TOKEN`:
       `curl -X POST https://<backend>/admin/reset-seed -H "X-Admin-Token: ..."`
       → `{"status":"reset",...}`
@@ -175,9 +197,13 @@ curl -s https://<backend>/ready
 curl -s -X POST https://<backend>/api/projects/00000000-0000-0000-0000-000000000001/analyze | head -c 300
 ```
 
-Then open the frontend and confirm data renders. If the page loads but is
-empty, it is CORS or a wrong `NEXT_PUBLIC_API_URL` nine times out of ten —
-open the browser console and it will say which.
+Then open the frontend. You will be sent to `/login` — sign in with Google
+first; every route except the sign-in page requires a session. If the page
+loads signed-in but every panel is empty, it is `API_REWRITE_URL` or a
+`PROXY_SHARED_SECRET` mismatch nine times out of ten. Open the browser console
+and the network tab: a 401 from `/api/*` is the proxy refusing you, and a 403
+is the backend refusing your **role** — the response body names the role you
+hold and the one the route needs.
 
 ---
 
@@ -195,16 +221,17 @@ token puts the database back to both seed domains without a redeploy.
 
 ## Re-pointing the frontend at a new backend
 
-The backend URL is baked into the frontend at build time, so this is a
-redeploy, not a restart:
+The backend URL is now read at runtime by the Next.js proxy, not compiled into
+the bundle, so this is a restart rather than a rebuild:
 
 1. Vercel → the project → **Settings → Environment Variables**
-2. Change **both** `NEXT_PUBLIC_API_URL` and `API_REWRITE_URL`.
-3. **Deployments → the latest → Redeploy.** Do not skip this: changing the
-   variable alone does nothing, because the old build already has the old URL
-   compiled into it.
-4. Add the frontend origin to `CORS_ORIGINS` on the *new* backend and redeploy
-   that too.
+2. Change `API_REWRITE_URL`. There is no browser-side URL to change.
+3. Set `PROXY_SHARED_SECRET` on the new backend to the same value the frontend
+   already has, or set both to new matching values.
+4. Redeploy the frontend so the new environment is picked up.
+5. `CORS_ORIGINS` on the new backend matters much less than it used to — the
+   browser no longer calls the backend directly — but set it anyway, so a
+   direct call from a tool or a future client is not a mystery.
 
 ---
 
@@ -220,6 +247,7 @@ redeploy, not a restart:
 | `PORT` | injected | `10000` | Set by the platform; the image reads it. Do not hardcode. |
 | `ENVIRONMENT` | no | `production` | Hides exception detail from 500 responses. |
 | `ADMIN_TOKEN` | no | a long random string | Guards `POST /admin/reset-seed`. **Empty disables the endpoint.** |
+| `PROXY_SHARED_SECRET` | recommended | 32+ random bytes | Backend half of the identity handshake. `X-User-Id` is honoured only when `X-Proxy-Secret` matches, and `ProjectMember.role` becomes enforced. **Empty keeps the pre-auth open behaviour**, which is what a fresh clone and the test suite run. Must equal the frontend's. Setting it without `ADMIN_TOKEN` also disables `POST /api/seed/reset`. |
 | `SEED_ON_STARTUP` | no | `true` | Load both demo domains at boot. Idempotent. |
 | `ANALYZE_TIMEOUT_SECONDS` | no | `20` | Ceiling, not a target — analyze takes about 20ms. |
 | `SIMULATE_TIMEOUT_SECONDS` | no | `20` | As above. |
@@ -231,8 +259,14 @@ redeploy, not a restart:
 
 | Key | Required | Example | Purpose |
 |---|---|---|---|
-| `NEXT_PUBLIC_API_URL` | **yes** | `https://api.onrender.com` | Backend URL as the **browser** reaches it. Inlined at build time. |
-| `API_REWRITE_URL` | **yes** | `https://api.onrender.com` | Backend URL as the **Next.js server** reaches it, for rewrites. |
+| `API_REWRITE_URL` | **yes** | `https://api.onrender.com` | Backend URL as the **Next.js server** reaches it. Read at runtime by `src/proxy.ts` and by the sign-in upsert. |
+| `AUTH_GOOGLE_ID` | **yes** | `1234-abc.apps.googleusercontent.com` | Google OAuth client id. |
+| `AUTH_GOOGLE_SECRET` | **yes** | `GOCSPX-...` | Google OAuth client secret. |
+| `AUTH_SECRET` | **yes** | 32+ random bytes | Signs and encrypts the session cookie. |
+| `NEXTAUTH_URL` | **yes** | `https://app.vercel.app` | The origin Auth.js builds callback URLs from. Must match what Google has registered. |
+| `PROXY_SHARED_SECRET` | recommended | 32+ random bytes | Frontend half of the identity handshake. Must equal the backend's. Unset on both sides = open mode. |
+| `E2E_AUTH_ENABLED` | **never in a deployment** | `1` | Adds a password-free sign-in for the browser walkthroughs. Requires `NODE_ENV != production`, so a `next build` bundle cannot contain it — but do not set it anyway. |
+| `NEXT_PUBLIC_API_URL` | **removed** | — | Deliberately no longer read. See the note in the Vercel step above: a browser-side backend URL bypasses the session check entirely. |
 
 No secret belongs in this repository. Everything above is set in the platform
 dashboards. `.env.example` documents the same list for local use and contains
@@ -245,7 +279,13 @@ no real values.
 | Symptom | Cause | Fix |
 |---|---|---|
 | Page loads, every panel empty, console shows a CORS error | The frontend origin is not in `CORS_ORIGINS` | Add it, comma-separated, redeploy the backend |
-| Page loads, panels empty, console shows `ERR_CONNECTION_REFUSED` or a 404 on `/api/...` | `NEXT_PUBLIC_API_URL` wrong or unset at build time | Fix it and **redeploy** — a restart is not enough |
+| Page loads, panels empty, console shows a 404 or `ERR_CONNECTION_REFUSED` on `/api/...` | `API_REWRITE_URL` wrong | Fix it and restart; it is read at runtime, so no rebuild is needed |
+| Every `/api/*` call returns 401 while the app looks signed-in | The session carries no backend user id | Sign out and back in. If it persists the backend was unreachable at sign-in; check `/ready` |
+| A write returns 403 naming a role | Working as designed — `PROXY_SHARED_SECRET` is set and you are a `viewer`, or not a member | An owner adds you as an `editor` on the project |
+| Sign-in returns `?error=AccessDenied` | The backend refused the user upsert at sign-in — usually the backend is down or `PROXY_SHARED_SECRET` does not match | Check `/ready`, then compare the secret on both sides byte for byte |
+| Sign-in returns `?error=Configuration` | `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET`/`AUTH_SECRET` missing | Set all three and redeploy |
+| Google says `redirect_uri_mismatch` | The registered URI is not `<NEXTAUTH_URL>/api/auth/callback/google` | Fix it in the Google Cloud Console; check for a trailing slash |
+| The walkthroughs fail at sign-in with a 404 on `/api/auth/callback/e2e` | The app is running a production build, where the provider cannot exist | Run them against `next dev` with `E2E_AUTH_ENABLED=1` |
 | `/health` passes, `/ready` returns 503 | The database is unreachable | Check `DATABASE_URL`, and that it starts `postgresql+asyncpg://` |
 | Startup crashes with a driver error | `postgresql://` instead of `postgresql+asyncpg://` | Add `+asyncpg` |
 | Startup crashes with `CORS_ORIGINS cannot be '*'` | Exactly what it says | List the exact origins |

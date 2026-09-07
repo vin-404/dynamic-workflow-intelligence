@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.engine.graph import build_graph_from_snapshot, find_cycles
 from backend.app.core.workflow import DependencySpec
+from backend.app.api.deps import project_role_guard
 from backend.app.db import get_db
 from backend.app.models import (
     Assignment,
@@ -40,7 +41,11 @@ from backend.app.schemas.authoring import (
 )
 from backend.app.services import intelligence, versions as V
 
-router = APIRouter(prefix="/api/projects/{project_id}", tags=["workflow"])
+router = APIRouter(
+    prefix="/api/projects/{project_id}",
+    tags=["workflow"],
+    dependencies=[project_role_guard],
+)
 
 
 def _not_found(e: Exception):

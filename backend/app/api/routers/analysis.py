@@ -13,12 +13,17 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.limits import bounded
+from backend.app.api.deps import project_role_guard
 from backend.app.core.engine.risk import RiskWeights
 from backend.app.db import get_db
 from backend.app.settings import settings
 from backend.app.services import analysis_runs, intelligence, versions as V
 
-router = APIRouter(prefix="/api/projects/{project_id}", tags=["analysis"])
+router = APIRouter(
+    prefix="/api/projects/{project_id}",
+    tags=["analysis"],
+    dependencies=[project_role_guard],
+)
 
 
 class AnalyzeIn(BaseModel):

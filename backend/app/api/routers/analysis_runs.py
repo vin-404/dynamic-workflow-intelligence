@@ -13,9 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.db import get_db
+from backend.app.api.deps import project_role_guard
 from backend.app.services import analysis_runs, versions as V
 
-router = APIRouter(prefix="/api/analysis", tags=["analysis"])
+router = APIRouter(
+    prefix="/api/analysis",
+    tags=["analysis"],
+    dependencies=[project_role_guard],
+)
 
 
 @router.get("/{run_id}")

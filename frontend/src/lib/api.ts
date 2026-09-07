@@ -10,7 +10,22 @@
  * project, as context for the user - never in the analysis payload.
  */
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+/**
+ * Always relative. Never configurable.
+ *
+ * Every request goes to this app's own origin, where `src/proxy.ts` verifies
+ * the session and injects the identity headers the backend trusts. That makes
+ * an absolute backend URL here actively dangerous rather than merely
+ * redundant: pointing the browser at FastAPI directly would bypass the origin,
+ * the session check and the injection in one step, and the app would look
+ * signed-in while every request arrived anonymous. This used to read
+ * `NEXT_PUBLIC_API_URL`, whose default in `docker-compose.yml` was exactly
+ * that absolute URL - so the safe configuration depended on someone
+ * remembering to blank a variable. It is not a variable any more.
+ *
+ * `API_REWRITE_URL` (server-side only) is where the backend URL is configured.
+ */
+const BASE = "";
 
 export class ApiError extends Error {
   status: number;
@@ -67,25 +82,18 @@ export class ApiError extends Error {
 }
 
 /**
- * The identity the user picked, sent on every request as `X-User-Id`.
+ * No identity is sent from here, deliberately.
  *
- * Set once at boot rather than read from storage per call, so a component
- * that renders during a switch cannot send a stale id. It is an identity, not
- * a credential: nothing on the server checks it against anything, and nothing
- * is protected by it.
+ * `src/proxy.ts` deletes any `X-User-Id` on an incoming request and sets the
+ * one it derives from the verified session cookie. So a header set here would
+ * be stripped before the backend saw it, and code that looked like it was
+ * choosing an identity would in fact be choosing nothing - which is worse than
+ * not having it. This module used to hold a `setCurrentUser`; the session
+ * replaced it.
  */
-let currentUserId: string | null = null;
-
-export function setCurrentUser(id: string | null) {
-  currentUserId = id;
-}
-
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(currentUserId ? { "X-User-Id": currentUserId } : {}),
-    },
+    headers: { "Content-Type": "application/json" },
     cache: "no-store",
     ...init,
   });

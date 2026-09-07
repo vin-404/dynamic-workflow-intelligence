@@ -1,9 +1,17 @@
 /**
- * Phase 9 in a browser: the name picker, the identity surviving a reload,
- * two browsers as two people, an error boundary that does not blank the page,
- * and an empty state that says what to do next.
+ * Phase 9 in a browser, updated for real authentication: the sign-in gate,
+ * the session surviving a reload, two browsers as two people, an error
+ * boundary that does not blank the page, and an empty state that says what to
+ * do next.
+ *
+ * The first section used to assert the name picker's copy - "no password
+ * needed", "anyone with this link can pick any name". That copy was true and
+ * is now false, so it is asserted *gone* rather than quietly dropped. What
+ * replaces it is a stronger claim the picker could never make: a signed-out
+ * request to the API is refused, in the same envelope as every other error.
  */
 import { chromium } from "playwright";
+import { signIn } from "./lib.mjs";
 
 const BASE = "http://localhost:3000";
 const OUT = process.argv[2] ?? ".";
@@ -26,7 +34,7 @@ function ok(label, condition, detail = "") {
 const browser = await chromium.launch();
 
 // ---------------------------------------------------------------------------
-console.log("\n=== The name picker is the first screen ===");
+console.log("\n=== Signing in is the first screen ===");
 const ctxA = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
 const page = await ctxA.newPage();
 const consoleErrors = [];
@@ -34,35 +42,59 @@ page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
 page.on("pageerror", (e) => consoleErrors.push(String(e)));
 
 await page.goto(BASE, { waitUntil: "networkidle" });
-ok("it asks who you are", await page.getByText(/Who are you\?/i).first().isVisible());
 ok(
-  "it says there is no password rather than implying security",
-  await page.getByText(/no password needed/i).first().isVisible(),
+  "a signed-out visit is redirected to the sign-in page",
+  new URL(page.url()).pathname === "/login",
+  page.url(),
 );
 ok(
-  "it is honest that anyone can pick any name",
-  await page.getByText(/Anyone with this link can pick any name/i).first().isVisible(),
+  "and it says where to send you back to",
+  new URL(page.url()).searchParams.get("callbackUrl") === "/",
 );
 ok(
-  "it offers people who have been here before",
-  await page.getByText(/continue as someone who has been here/i).first().isVisible(),
+  "it offers Google",
+  await page.getByRole("button", { name: /Continue with Google/i }).first().isVisible(),
 );
-console.log("  shot:", await shot(page, "who-are-you"));
+ok(
+  "the old name picker is gone",
+  !(await page.getByText(/Who are you/i).first().isVisible().catch(() => false)),
+);
+ok(
+  "and so is the copy promising there is no password",
+  !(await page.getByText(/no password needed/i).first().isVisible().catch(() => false)),
+);
+console.log("  shot:", await shot(page, "sign-in"));
 
-await page.getByLabel(/Your name/i).fill("Devika Raman");
-await page.getByRole("button", { name: /^Continue$/ }).click();
+// The API is closed to a signed-out browser, in the same envelope as every
+// other error. This is the claim the name picker could not make.
+const anon = await page.request.get(`${BASE}/api/projects`);
+const anonBody = await anon.json().catch(() => ({}));
+ok("a signed-out API call is refused", anon.status() === 401, `got ${anon.status()}`);
+ok("the refusal is the standard envelope", "detail" in anonBody && "hint" in anonBody);
+ok(
+  "and the hint says what to do about it",
+  typeof anonBody.hint === "string" && anonBody.hint.length > 0,
+  anonBody.hint,
+);
+
+await signIn(page, "Devika Raman");
 await page.waitForTimeout(1200);
-ok("picking a name opens the workflow list", await page.getByText(/Open a workflow/i).first().isVisible());
+ok("signing in opens the workflow list", await page.getByText(/Open a workflow/i).first().isVisible());
 ok("the header shows who you are", await page.getByText(/Devika Raman/).first().isVisible());
-console.log("  shot:", await shot(page, "picked"));
+ok(
+  "and offers a way to stop being them",
+  await page.getByRole("button", { name: /sign out/i }).first().isVisible(),
+);
+console.log("  shot:", await shot(page, "signed-in"));
 
 // ---------------------------------------------------------------------------
 console.log("\n=== It survives a reload ===");
 await page.reload({ waitUntil: "networkidle" });
 await page.waitForTimeout(800);
 ok(
-  "it does not ask again",
-  !(await page.getByText(/Who are you\?/i).first().isVisible().catch(() => false)),
+  "it does not send you back to sign in",
+  new URL(page.url()).pathname !== "/login",
+  page.url(),
 );
 ok("and still knows the name", await page.getByText(/Devika Raman/).first().isVisible());
 
@@ -71,13 +103,12 @@ console.log("\n=== A second browser is a second person ===");
 const ctxB = await browser.newContext({ viewport: { width: 1200, height: 900 } });
 const page2 = await ctxB.newPage();
 await page2.goto(BASE, { waitUntil: "networkidle" });
-ok("the second browser is asked who it is", await page2.getByText(/Who are you\?/i).first().isVisible());
 ok(
-  "and is offered the first person's name, because nothing is private",
-  await page2.getByRole("button", { name: /Devika Raman/ }).first().isVisible(),
+  "a separate browser has its own session and is asked to sign in",
+  new URL(page2.url()).pathname === "/login",
+  page2.url(),
 );
-await page2.getByLabel(/Your name/i).fill("Tomas Klein");
-await page2.getByRole("button", { name: /^Continue$/ }).click();
+await signIn(page2, "Tomas Klein");
 await page2.waitForTimeout(1000);
 ok("the second identity is separate", await page2.getByText(/Tomas Klein/).first().isVisible());
 ok(

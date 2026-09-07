@@ -27,6 +27,17 @@ _DBFILE = (_TMPDIR / "test.db").as_posix()
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_DBFILE}"
 os.environ["DATABASE_URL_SYNC"] = f"sqlite:///{_DBFILE}"
 
+# Pin the open configuration, for the same reason and by the same technique.
+# `Settings` reads `env_file=".env"`, so a developer who puts a real
+# `PROXY_SHARED_SECRET` in the repo-root `.env` would silently flip the whole
+# suite into enforcing mode - and the tests that assert the pre-auth behaviour
+# (`test_hardening`'s advisory-role cases) would fail on their machine and
+# nowhere else. An explicitly empty environment variable outranks the dotenv
+# value, so this makes the compatibility path the one the suite always runs.
+# `test_auth.py` sets the secret per-test on the live `settings` object, which
+# is how the enforcing configuration gets covered.
+os.environ["PROXY_SHARED_SECRET"] = ""
+
 import pytest  # noqa: E402
 
 from backend.app.core import engine as E  # noqa: E402

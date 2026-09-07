@@ -34,6 +34,10 @@ services:
       # Optional. Absent selects the offline path, under which everything
       # still works.
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # The backend half of the identity handshake. Must be byte-identical to
+      # the frontend's. Empty keeps the pre-auth open behaviour: X-User-Id is
+      # trusted as sent and roles stay advisory.
+      PROXY_SHARED_SECRET: ${PROXY_SHARED_SECRET:-}
     volumes:
       - dwidata:/data
     healthcheck:
@@ -50,16 +54,23 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        # Inlined at build time, so it must be the URL the *browser* will use.
-        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
+      # No build args. The browser talks only to this origin, and the
+      # backend URL is a runtime setting (API_REWRITE_URL) below.
     ports:
       - "3000:3000"
     environment:
       PORT: 3000
-      # Server-side rewrites run inside the container, where the backend is
-      # reachable by service name rather than on localhost.
+      # Read at runtime by src/proxy.ts and by the sign-in upsert, inside the
+      # container, where the backend answers to a service name.
       API_REWRITE_URL: ${API_REWRITE_URL:-http://api:8001}
+      # Auth.js. Without the first three, sign-in fails closed and the app is
+      # unusable - which is the correct failure for a misconfigured login.
+      AUTH_SECRET: ${AUTH_SECRET:-}
+      AUTH_GOOGLE_ID: ${AUTH_GOOGLE_ID:-}
+      AUTH_GOOGLE_SECRET: ${AUTH_GOOGLE_SECRET:-}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      # The frontend half of the handshake. Must equal the api service's.
+      PROXY_SHARED_SECRET: ${PROXY_SHARED_SECRET:-}
     depends_on:
       api:
         condition: service_healthy

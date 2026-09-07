@@ -5,9 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.db import get_db
+from backend.app.api.deps import destructive_operator_only, project_role_guard
 from backend.app.seed import loader
 
-router = APIRouter(prefix="/api/seed", tags=["seed"])
+router = APIRouter(
+    prefix="/api/seed",
+    tags=["seed"],
+    dependencies=[project_role_guard],
+)
 
 
 @router.post("")
@@ -17,7 +22,7 @@ async def seed(db: AsyncSession = Depends(get_db)):
     return {"status": "ok", "projects": projects}
 
 
-@router.post("/reset")
+@router.post("/reset", dependencies=[Depends(destructive_operator_only)])
 async def reset(db: AsyncSession = Depends(get_db)):
     """Drop everything and reload both seed domains.
 

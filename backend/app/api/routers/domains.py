@@ -11,10 +11,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.db import get_db
+from backend.app.api.deps import project_role_guard
 from backend.app.models import Domain
 from backend.app.schemas.authoring import DomainIn, DomainOut
 
-router = APIRouter(prefix="/api/domains", tags=["domains"])
+router = APIRouter(
+    prefix="/api/domains",
+    tags=["domains"],
+    dependencies=[project_role_guard],
+)
 
 
 @router.get("", response_model=list[DomainOut])

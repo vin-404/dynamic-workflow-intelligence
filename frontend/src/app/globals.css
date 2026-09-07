@@ -1,42 +1,350 @@
 @import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/*
+ * ---------------------------------------------------------------------------
+ * Design tokens.
+ * ---------------------------------------------------------------------------
+ *
+ * Two vocabularies live here and they are deliberately one palette:
+ *
+ *   1. The *legacy* names the twelve existing panels are written against —
+ *      panel, panel2, line, dim, accent, red, amber, green, violet. Every one
+ *      still resolves; `bg-panel`, `border-line`, `text-dim`, `text-accent`
+ *      keep working unchanged.
+ *   2. The *shadcn* semantic names the primitives in `src/components/ui/` are
+ *      written against — background, card, popover, primary, secondary, muted,
+ *      accent, destructive, border, input, ring.
+ *
+ * They are wired to the same raw values, so a shadcn Card and a legacy
+ * `bg-panel` div are the same surface. Wave 2 migrates panel by panel without
+ * a visual seam.
+ *
+ * Rules encoded here:
+ *   - ONE accent colour (the blue), reserved for critical path and
+ *     high-severity findings. It is NOT the primary button colour — `primary`
+ *     is a strong neutral, so muted neutrals carry everything else.
+ *   - Severity is exactly THREE states: severity-high, severity-medium,
+ *     severity-low. There is no fourth. `violet` survives because
+ *     OptimizePanel still uses it; it is not a severity and must not become
+ *     one.
+ *   - No gradients.
+ *   - Tabular numerals are on by default (see the base layer).
+ *
+ * Raw values are Primer's dark and light semantic sets, so the two modes are
+ * siblings rather than one being an inversion guess. Every foreground token
+ * clears 4.5:1 against both `background` and `panel` in both modes.
+ */
+
+/*
+ * Dark mode follows the system preference, and an explicit `.dark` / `.light`
+ * class on <html> overrides it. shadcn ships `@custom-variant dark (&:is(.dark *))`,
+ * which is class-only; this app has no theme provider and this agent does not
+ * own layout.tsx, so the system-preference branch is added here. Both branches
+ * are needed: the class branch keeps a future next-themes provider working.
+ */
+@custom-variant dark {
+  &:is(.dark, .dark *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:is(:root:not(.light), :root:not(.light) *) {
+      @slot;
+    }
+  }
+}
+
+/* --------------------------------------------------------------- light mode */
+
+:root {
+  /* Surfaces. In light the page is the tinted one and panels are white — the
+     inverse of dark — so a card still lifts off the canvas. */
+  --background: #f6f8fa;
+  --panel: #ffffff;
+  --panel2: #eef1f4;
+  --line: #d1d9e0;
+  /* The surface a dialog, popover or dropdown floats on. In light it is the
+     brightest surface; in dark it is the lightest one. */
+  --elevated: #ffffff;
+
+  /* Text. */
+  --foreground: #1f2328;
+  --dim: #59636e;
+
+  /* The one accent. Critical path, high-severity emphasis, focus rings. */
+  --accent: #0969da;
+  --accent-foreground: #ffffff;
+
+  /* Severity — exactly three. */
+  --severity-high: #cf222e;
+  --severity-medium: #8a6300;
+  --severity-low: #1a7f37;
+  --violet: #8250df;
+
+  /* The one neutral that is not derived: a "primary" action is a strong
+     neutral, never the accent, so the accent stays reserved. */
+  --primary: #1f2328;
+  --primary-foreground: #ffffff;
+  --on-severity: #ffffff;
+
+  /* Charts: the accent, then a neutral ramp. Not a rainbow. */
+  --chart-2: #6e7781;
+  --chart-3: #8c959f;
+  --chart-4: #afb8c1;
+  --chart-5: #d0d7de;
+
+  /* Density: tighter than shadcn's 0.625rem default, and back to Tailwind's
+     stock `rounded-lg` (8px) so the existing panels look untouched. */
+  --radius: 0.5rem;
+}
+
+/* ---------------------------------------------------------------- dark mode */
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    --background: #0e1116;
+    --panel: #161b22;
+    --panel2: #1c232c;
+    --line: #2a323d;
+    --elevated: #1c232c;
+
+    --foreground: #e6edf3;
+    --dim: #8b98a5;
+
+    --accent: #4c9aff;
+    --accent-foreground: #0e1116;
+
+    --severity-high: #f85149;
+    --severity-medium: #e3b341;
+    --severity-low: #3fb950;
+    --violet: #a371f7;
+
+    --primary: #e6edf3;
+    --primary-foreground: #0e1116;
+    --on-severity: #0e1116;
+
+    --chart-2: #8b98a5;
+    --chart-3: #6e7781;
+    --chart-4: #4d5560;
+    --chart-5: #2a323d;
+  }
+}
+
+.dark {
+  --background: #0e1116;
+  --panel: #161b22;
+  --panel2: #1c232c;
+  --line: #2a323d;
+  --elevated: #1c232c;
+
+  --foreground: #e6edf3;
+  --dim: #8b98a5;
+
+  --accent: #4c9aff;
+  --accent-foreground: #0e1116;
+
+  --severity-high: #f85149;
+  --severity-medium: #e3b341;
+  --severity-low: #3fb950;
+  --violet: #a371f7;
+
+  --primary: #e6edf3;
+  --primary-foreground: #0e1116;
+  --on-severity: #0e1116;
+
+  --chart-2: #8b98a5;
+  --chart-3: #6e7781;
+  --chart-4: #4d5560;
+  --chart-5: #2a323d;
+}
+
+/* ------------------------------------------------------- derived aliases */
+
+/*
+ * Everything below is an alias for something above. It is declared on every
+ * element that can carry a mode so the `var()` chain re-resolves against that
+ * element's raw values — otherwise a `.dark` class on anything other than
+ * <html> would inherit already-substituted light values.
+ */
+:root,
+.light,
+.dark {
+  /* Legacy hue names. Same values as the severity triple; `violet` is the odd
+     one out and stays only because a component still names it. */
+  --red: var(--severity-high);
+  --amber: var(--severity-medium);
+  --green: var(--severity-low);
+
+  /* shadcn semantics, wired to the palette above. */
+  --card: var(--panel);
+  --card-foreground: var(--foreground);
+  --popover: var(--elevated);
+  --popover-foreground: var(--foreground);
+  --secondary: var(--panel2);
+  --secondary-foreground: var(--foreground);
+  --muted: var(--panel2);
+  --muted-foreground: var(--dim);
+  --destructive: var(--severity-high);
+  --destructive-foreground: var(--on-severity);
+  --border: var(--line);
+  --input: var(--line);
+  --ring: var(--accent);
+  --chart-1: var(--accent);
+
+  /* Sidebar isn't installed; these exist so `add sidebar` inherits the palette
+     instead of shadcn's stray purple. */
+  --sidebar: var(--panel);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
+  --sidebar-accent: var(--panel2);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--line);
+  --sidebar-ring: var(--accent);
+}
+
+/* --------------------------------------------------- token -> utility names */
 
 @theme inline {
-  --color-background: #0e1116;
-  --color-foreground: #e6edf3;
-  --color-panel: #161b22;
-  --color-panel2: #1c232c;
-  --color-line: #2a323d;
-  --color-dim: #8b98a5;
-  --color-accent: #4c9aff;
-  --color-red: #f85149;
-  --color-amber: #e3b341;
-  --color-green: #3fb950;
-  --color-violet: #a371f7;
+  /* Legacy vocabulary. Do not remove: the twelve existing panels depend on
+     every one of these resolving. */
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-panel: var(--panel);
+  --color-panel2: var(--panel2);
+  --color-line: var(--line);
+  --color-dim: var(--dim);
+  --color-accent: var(--accent);
+  --color-red: var(--red);
+  --color-amber: var(--amber);
+  --color-green: var(--green);
+  --color-violet: var(--violet);
 
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Severity — the three names wave 2 should use. */
+  --color-severity-high: var(--severity-high);
+  --color-severity-medium: var(--severity-medium);
+  --color-severity-low: var(--severity-low);
+
+  /* Fonts. layout.tsx supplies --font-geist-sans / --font-geist-mono via
+     next/font; the fallbacks keep type sane if that ever changes. */
+  --font-sans: var(--font-geist-sans, ui-sans-serif, system-ui, sans-serif);
+  --font-mono: var(--font-geist-mono, ui-monospace, SFMono-Regular, monospace);
+  --font-heading: var(--font-geist-sans, ui-sans-serif, system-ui, sans-serif);
+
+  /* shadcn vocabulary. */
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-body {
-  background: var(--color-background);
-  color: var(--color-foreground);
+/* ----------------------------------------------------------------- base */
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply font-sans;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    /*
+     * Tabular numerals everywhere a number appears — which, in this app, is
+     * everywhere. Setting it once on the body means wave 2 never has to
+     * remember it and columns of days, costs and counts line up by default.
+     * Escape hatch for running prose: Tailwind's built-in `proportional-nums`.
+     */
+    font-variant-numeric: tabular-nums;
+  }
+
+  /*
+   * Typography does the hierarchy, not boxes: headings are tight and set
+   * slightly negative, so a heading reads as a heading without a rule or a
+   * card around it.
+   */
+  h1,
+  h2,
+  h3,
+  h4 {
+    letter-spacing: -0.011em;
+    text-wrap: balance;
+  }
+
+  p {
+    text-wrap: pretty;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 28%, transparent);
+  }
 }
 
-/* React Flow overrides for dark theme */
+/* -------------------------------------------------------- React Flow theme */
+
+/*
+ * The dependency graph depends on these. They read the raw tokens rather than
+ * the Tailwind `--color-*` aliases, so they follow light and dark on their own.
+ */
 .react-flow__background {
-  background: var(--color-background) !important;
+  background: var(--background) !important;
 }
 
 .react-flow__minimap {
-  background: var(--color-panel) !important;
+  background: var(--panel) !important;
+}
+
+.react-flow__minimap-mask {
+  fill: color-mix(in oklab, var(--background) 72%, transparent) !important;
 }
 
 .react-flow__controls button {
-  background: var(--color-panel) !important;
-  border-color: var(--color-line) !important;
-  fill: var(--color-dim) !important;
+  background: var(--panel) !important;
+  border-color: var(--line) !important;
+  fill: var(--dim) !important;
 }
 
 .react-flow__controls button:hover {
-  background: var(--color-panel2) !important;
+  background: var(--panel2) !important;
+}
+
+.react-flow__attribution {
+  background: transparent !important;
+  color: var(--dim) !important;
 }

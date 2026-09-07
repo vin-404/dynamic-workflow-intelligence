@@ -11,7 +11,7 @@ backend that predated the AI routes.
 |---|---|
 | `journey.mjs` | The whole six-stage journey, twice: over a seeded project, and building a new workflow from empty in a domain you define on the spot |
 | `ai.mjs` | The natural-language box and the plain-language summary, including that the model's typed changes are shown before anything runs |
-| `hardening.mjs` | The name picker, identity across a reload, two browsers as two people, structured errors with a hint |
+| `hardening.mjs` | The sign-in gate, a signed-out API call refused with a hint, the session across a reload, two browsers as two people, structured errors |
 
 ## Running them
 
@@ -22,9 +22,21 @@ Both servers have to be up, and the database should be freshly seeded:
 .venv/Scripts/python.exe -m backend.scripts.reset_db
 .venv/Scripts/python.exe -m uvicorn backend.app.main:app --port 8001
 
-# in another terminal
-cd frontend && npm run dev
+# in another terminal — the E2E flag is required, see below
+cd frontend && E2E_AUTH_ENABLED=1 npm run dev     # bash
+cd frontend; $env:E2E_AUTH_ENABLED=1; npm run dev # PowerShell
 ```
+
+**`E2E_AUTH_ENABLED=1` is not optional.** The app requires a real Google
+session, and Google's consent screen cannot be driven headless, so `signIn` in
+`lib.mjs` goes through a Credentials provider that `auth.ts` only constructs
+when that variable is `1` *and* the build is not a production one. Because Next
+inlines `NODE_ENV` at build time, the provider cannot exist in a `next build`
+bundle at all — so these scripts must run against `next dev`. Without the flag
+they fail immediately, and loudly, at sign-in.
+
+`AUTH_SECRET` must also be set (see `.env.example`), or Auth.js cannot mint the
+session cookie. `frontend/.env.local` is the usual place.
 
 Then:
 

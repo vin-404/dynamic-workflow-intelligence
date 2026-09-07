@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.core.workflow import WorkflowSnapshot
 from backend.app.api.identity import current_user
+from backend.app.api.deps import project_role_guard
 from backend.app.db import get_db
 from backend.app.models import Domain, Project, ProjectMember, User
 from backend.app.schemas.authoring import (
@@ -20,7 +21,11 @@ from backend.app.schemas.authoring import (
 )
 from backend.app.services import versions as V
 
-router = APIRouter(prefix="/api/projects", tags=["projects"])
+router = APIRouter(
+    prefix="/api/projects",
+    tags=["projects"],
+    dependencies=[project_role_guard],
+)
 
 
 @router.get("", response_model=list[ProjectOut])

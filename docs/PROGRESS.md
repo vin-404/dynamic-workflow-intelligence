@@ -1985,3 +1985,191 @@ and nothing more, and there is a test that fails if a login endpoint appears.
 6. **The browser walkthroughs need a running stack and a real Chromium.**
    They are in the repo now and scripted, but they are not something a
    reviewer gets for free from `pytest`.
+
+---
+
+# PHASE 10, WAVE 1 — Google sign-in, enforced roles, and the design system
+
+Three agents in parallel, partitioned by file ownership, then integrated by
+hand. Tagged `wave-1-auth`.
+
+## 1 · WHAT CHANGED
+
+**Authentication moved to Next.js.** The browser only ever talks to the Next
+origin. `src/proxy.ts` verifies the Google session, strips any identity headers
+the client sent, and injects `X-User-Id` plus `X-Proxy-Secret` into the
+upstream request. FastAPI honours `X-User-Id` only when the secret matches.
+There is still no login route in FastAPI, and the test asserting so is green.
+
+**Roles are enforced.** `ProjectMember.role` stopped being advisory: a viewer
+reads and evaluates, an editor authors and applies, an owner also changes
+members. One router-level dependency refuses by default, so a new write route
+inherits the guard instead of needing to remember it.
+
+**Both of those are behind one switch.** With `PROXY_SHARED_SECRET` unset,
+everything behaves exactly as it did before this phase. That is what let 780
+existing tests stay green without editing one of them.
+
+**shadcn/ui is installed** with fourteen primitives and a two-vocabulary token
+system: the twelve legacy names the existing panels are written against and the
+shadcn semantic names, wired to one palette, now with light *and* dark values.
+No existing panel component was touched — wave 2 does that.
+
+## 2 · WHAT EACH AGENT PRODUCED
+
+**AUTH-FE** — `auth.ts`, `src/proxy.ts`, `src/app/api/auth/[...nextauth]/route.ts`,
+`src/lib/session.ts`, `src/types/next-auth.d.ts`, `src/app/login/page.tsx`, and
+the removal of the `next.config.ts` rewrite. Auth.js v5, Google provider, JWT
+sessions with no adapter, the backend user upsert on first sign-in, and a
+walkthrough-only Credentials provider.
+
+**AUTH-BE** — `PROXY_SHARED_SECRET` in `settings.py`, the header-pair check in
+`identity.py`, the whole authorization layer in the new `api/deps.py`, one
+guard line on nine routers, and `tests/test_auth.py` (39 tests).
+
+**DESIGN-SYS** — `components.json`, fourteen primitives under
+`src/components/ui/`, `src/lib/utils.ts`, and a rewritten `globals.css`.
+`ui.tsx` was left untouched on purpose (see the deviation below).
+
+**Integration (not delegated)** — `page.tsx`, `layout.tsx`, `src/lib/api.ts`,
+the new `Identity.tsx`, the deletion of `WhoAreYou.tsx`, `e2e/lib.mjs`,
+`e2e/hardening.mjs`, `main.py`'s 403 hint, `conftest.py`'s secret pin,
+`docker-compose.yml`, `frontend/Dockerfile`, `.env.example`, `docs/DEPLOY.md`,
+`docs/DECISIONS.md` (D-73 … D-100) and this file.
+
+## 3 · TESTS
+
+| Check | Before | After |
+|---|---|---|
+| `pytest backend/tests -q` | 780 passed | **819 passed** (+39, none modified) |
+| `demo_check` | ALL BEATS PASSED | **ALL BEATS PASSED** |
+| `npm run e2e` | pass | **ALL CHECKS PASSED** |
+| `npm run e2e:ai` | pass | **ALL CHECKS PASSED** |
+| `npm run e2e:hardening` | pass | **ALL CHECKS PASSED** (rewritten, below) |
+| `npx tsc --noEmit` | clean | clean |
+| `npm run build` | succeeds | succeeds |
+| `npm run lint` | 2 errors, 2 warnings | **1 error, 2 warnings** |
+
+The lint error that went away was `page.tsx:134 set-state-in-effect`, removed
+along with the identity-restoring effect. The remaining three are pre-existing
+and all in files wave 2 owns.
+
+`test_auth.py` covers: the header pair honoured together; `X-User-Id` ignored
+with a missing or wrong secret; the open path asserted rather than assumed;
+viewer/editor/owner across the matrix; the non-member and anonymous cases; and
+two tests that walk **every** route in the application and fail on an unguarded
+write or a stale read-exemption.
+
+## 4 · HOW TO TEST IT
+
+```bash
+# Backend, enforcing (omit the secret for the open path)
+PROXY_SHARED_SECRET=<same value as the frontend> \
+  .venv/Scripts/python.exe -m uvicorn backend.app.main:app --port 8001
+
+# Frontend. frontend/.env.local needs AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET,
+# AUTH_SECRET, NEXTAUTH_URL and the same PROXY_SHARED_SECRET.
+cd frontend && npm run dev
+```
+
+Open `http://localhost:3000` and you land on `/login`. The walkthroughs need
+`E2E_AUTH_ENABLED=1` on `npm run dev` — Google's consent screen cannot be
+driven headless, and the provider that replaces it cannot exist in a
+production build.
+
+The one command that proves the design, run against the live backend:
+
+```bash
+# The seeded project's own owner id, without the secret. Refused as anonymous.
+curl -X POST localhost:8001/api/projects/00000000-0000-0000-0000-000000000001/tasks \
+  -H "X-User-Id: <the owner's real uuid>" -H "Content-Type: application/json" \
+  -d '{"key":"ZZ1","name":"probe","effort":2}'
+```
+
+## 5 · WHAT WAS VERIFIED, AND HOW
+
+Not reasoned about — run:
+
+* **Impersonation is defeated.** The seeded project's real owner id sent
+  without the secret → 403, `your_role: anonymous`. With a wrong secret → the
+  same. With the correct secret → 201.
+* **Spoofing through the proxy is defeated.** A signed-in client that sent its
+  own `X-User-Id` *and* `X-Proxy-Secret: attacker-guess` was reported by the
+  backend as its *real* session user (`your_role: none`), so the proxy
+  overwrote both headers rather than forwarding either.
+* **The production build is actually protected.** `next start`: `GET /` → 307
+  `/login`, `GET /api/projects` → 401, and `/api/auth/providers` lists Google
+  **only** — the walkthrough provider does not exist in that bundle.
+* **A viewer can still ask a what-if.** Checked because the role matrix looked
+  self-contradictory: creating a scenario needs `editor`, and D-86 claims a
+  viewer may simulate. The UI uses the one-shot `POST /what-if`, which is
+  exempt, so both are true. `journey.mjs` passes as a non-member.
+* **A newcomer's own project works end to end.** Create → they are `owner` →
+  writes succeed → the member row names them. This is also what proves the
+  D-89 identity-header fix, since that row was the thing coming back empty.
+* **The conftest pin holds.** A root `.env` carrying a real
+  `PROXY_SHARED_SECRET` was planted; the suite stayed green; the file was
+  removed.
+
+## 6 · DEVIATIONS FROM THE BRIEF, STATED PLAINLY
+
+1. **`ui.tsx` was not converted to thin re-exports.** The brief asked for that;
+   the agent kept its twenty-one exports *working* by not touching the file.
+   That was a deliberate instruction from the orchestrator — a wave-1 commit
+   that leaves the app looking broken is worse than one that changes nothing
+   visually. The consequence is real: wave 2 inherits the whole migration, and
+   the compatibility layer currently wraps nothing new.
+2. **The proxy file is `src/proxy.ts`, not `middleware.ts`.** Next 16
+   deprecated and renamed the convention. The agent followed the docs over the
+   brief's file list, which is correct.
+3. **`hardening.mjs`'s first section was rewritten, not preserved.** It asserted
+   the name picker's copy — "no password needed", "anyone can pick any name" —
+   which was true and is now false. It now asserts that copy is *absent*, plus
+   a claim the picker could never make: a signed-out `/api/*` call is refused
+   with a 401 in the standard envelope. No analysis copy, number, disclaimer or
+   assumptions block was altered anywhere.
+
+## 7 · RISKS
+
+1. **A real Google sign-in has never happened.** It needs a human at a consent
+   screen. Everything up to the redirect is verified, and the identical
+   callbacks are exercised by the Credentials path — but the Google leg itself
+   is untested. Register the redirect URI as
+   `<NEXTAUTH_URL>/api/auth/callback/google` or it will fail on first contact.
+2. **Nobody has looked at light mode in a browser.** The app now follows the
+   system preference and the tokens are contrast-checked in both modes (lowest
+   4.74:1), but the *layouts* have only ever been seen on a dark canvas.
+   Relatedly, `DependencyGraph.tsx` hardcodes dark hexes inline
+   (`stroke: "#4c9aff"`, `<Background color="#1c232c" />`), so the graph will
+   show dark-grey edges on a white page until wave 2 replaces them with
+   `var(--accent)` / `var(--line)`.
+3. **`middleware-manifest.json` is empty even on a working build.** AUTH-FE
+   recommended asserting it is non-empty in CI, having found that a misplaced
+   proxy file is silently ignored. That check would be a **false alarm**: the
+   manifest is `{"middleware":{}}` on this build and the production server
+   still redirects and 401s correctly. The trap it warned about is real; the
+   proposed detector is not. Assert the behaviour — `GET /` redirects to
+   `/login` — not the artifact.
+4. **On an enforcing deployment, a newly signed-in user cannot edit the seeded
+   demo projects.** They are not a member, so reads, analysis, risk, optimize
+   and what-if all work while any authoring returns 403. Every one of the six
+   demo stages is a read or an evaluation, so the demo walk is unaffected — but
+   "click Add task on the seeded project" is not something a newcomer can do.
+   Creating their own project makes them owner.
+5. **A viewer can still persist rows.** `optimize(persist_candidates=true)` and
+   `what-if(keep=true)` write `Scenario` rows. Deliberate (D-86, it is what
+   makes a read-only seat useful) but it is an unmetered write available to the
+   least-privileged role, so it is a denial-of-space vector on a public
+   instance.
+6. **`GET /api/analysis/{run_id}` is readable across projects.** Consistent
+   with reads being open (D-85), but it is the route where that decision looks
+   least deliberate rather than inherited.
+7. **`route_template` depends on FastAPI populating `scope["route"]`.** It does
+   on 0.141, and the fallback cannot resolve endpoints through lazy router
+   inclusion — so if a future version stops populating it, classification
+   degrades to concrete URLs and every write is refused. Uncomfortable, but it
+   fails closed.
+8. **The walkthroughs now require `next dev`.** The provider they sign in with
+   is compiled out of a production build by design, so they can never verify a
+   production bundle's app behaviour — only its signed-out behaviour, which is
+   what section 5 checks by hand.

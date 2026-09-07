@@ -19,10 +19,19 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.db import get_db
+from backend.app.api.deps import project_role_guard
 from backend.app.services import ai_service, versions as V
 
-router = APIRouter(prefix="/api/projects/{project_id}", tags=["ai"])
-status_router = APIRouter(prefix="/api/ai", tags=["ai"])
+router = APIRouter(
+    prefix="/api/projects/{project_id}",
+    tags=["ai"],
+    dependencies=[project_role_guard],
+)
+status_router = APIRouter(
+    prefix="/api/ai",
+    tags=["ai"],
+    dependencies=[project_role_guard],
+)
 
 
 class InterpretIn(BaseModel):

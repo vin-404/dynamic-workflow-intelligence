@@ -18,23 +18,16 @@ import {
   Analysis,
   ApiError,
   Domain,
-  Person,
   Project,
   Workflow,
   analyze,
   getWorkflow,
   listDomains,
   listProjects,
-  setCurrentUser,
 } from "@/lib/api";
 import DependencyGraph from "@/components/DependencyGraph";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import WhoAreYou, {
-  IdentityBadge,
-  loadIdentity,
-  saveIdentity,
-  verifyIdentity,
-} from "@/components/WhoAreYou";
+import { IdentityBadge, useIdentity } from "@/components/Identity";
 import AskPanel from "@/components/AskPanel";
 import Explainer from "@/components/Explainer";
 import FindingsPanel from "@/components/FindingsPanel";
@@ -85,9 +78,10 @@ export default function Home() {
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<ApiError | string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Who you are. No password, no session - a name this browser remembers.
-  const [person, setPerson] = useState<Person | null>(null);
-  const [askingWho, setAskingWho] = useState(false);
+  // Who you are: the Google session, read once on mount. Not a choice made
+  // here any more, and not something this client can influence - `proxy.ts`
+  // derives the identity it sends upstream from the session cookie.
+  const { person, failed: identityFailed } = useIdentity();
   // The hash is only ours to write once the initial restore has finished -
   // otherwise the sync effect fires first with no project and wipes the hash
   // we were about to read.
@@ -124,28 +118,6 @@ export default function Home() {
     },
     [],
   );
-
-  // A remembered identity is checked before it is used: after an admin
-  // reset it no longer exists, and a browser that keeps sending a dangling id
-  // would attribute everything to a user who is gone.
-  useEffect(() => {
-    const remembered = loadIdentity();
-    if (!remembered) {
-      setAskingWho(true);
-      return;
-    }
-    setCurrentUser(remembered.id);
-    verifyIdentity(remembered).then((confirmed) => {
-      if (confirmed) {
-        setPerson(confirmed);
-        setCurrentUser(confirmed.id);
-      } else {
-        saveIdentity(null);
-        setCurrentUser(null);
-        setAskingWho(true);
-      }
-    });
-  }, []);
 
   useEffect(() => {
     Promise.all([listProjects(), listDomains()])
@@ -238,20 +210,26 @@ export default function Home() {
 
   /* ------------------------------------------------------- who are you */
 
-  if (askingWho || !person) {
+  // The proxy has already redirected anyone without a session to /login, so
+  // this is one round trip to /api/auth/session and not a sign-in screen.
+  if (!person) {
     return (
       <main className="max-w-2xl w-full mx-auto p-6">
         {header}
-        {renderError(() => location.reload())}
-        <ErrorBoundary what="The name picker">
-          <WhoAreYou
-            onPicked={(picked) => {
-              setPerson(picked);
-              setCurrentUser(picked.id);
-              setAskingWho(false);
-            }}
-          />
-        </ErrorBoundary>
+        {identityFailed ? (
+          <ErrorNote
+            onRetry={() => location.reload()}
+            hint={
+              "Your session did not carry an account id, so every change you " +
+              "made would be refused. Sign out and back in to rebuild it."
+            }
+          >
+            You are signed in, but this session is not linked to an account on
+            this instance.
+          </ErrorNote>
+        ) : (
+          <Spinner label="Checking your session" />
+        )}
       </main>
     );
   }
@@ -261,15 +239,7 @@ export default function Home() {
       <main className="max-w-4xl w-full mx-auto p-6">
         <div className="flex items-start justify-between gap-4">
           {header}
-          <IdentityBadge
-            person={person}
-            onSwitch={() => {
-              saveIdentity(null);
-              setCurrentUser(null);
-              setPerson(null);
-              setAskingWho(true);
-            }}
-          />
+          <IdentityBadge person={person} />
         </div>
 
         {renderError(() => location.reload())}
@@ -374,15 +344,7 @@ export default function Home() {
               </Badge>
             )}
             <span className="flex-1" />
-            <IdentityBadge
-              person={person}
-              onSwitch={() => {
-                saveIdentity(null);
-                setCurrentUser(null);
-                setPerson(null);
-                setAskingWho(true);
-              }}
-            />
+            <IdentityBadge person={person} />
           </div>
           {project.goal && (
             <p className="text-sm text-dim mt-0.5">{project.goal}</p>
