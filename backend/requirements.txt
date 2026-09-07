@@ -1,14 +1,28 @@
-fastapi==0.115.12
-uvicorn[standard]==0.34.2
-sqlalchemy[asyncio]==2.0.41
-# asyncpg==0.30.0
-# psycopg2-binary==2.9.10
-alembic==1.15.2
-pydantic==2.11.3
-pydantic-settings==2.9.1
-networkx==3.4.2
-httpx==0.28.1
-pytest==8.3.5
-pytest-asyncio==0.25.3
-python-dotenv==1.1.0
+# Pinned to what is actually installed in ./.venv and verified green
+# (decision D-01). SQLite is the default and Postgres is a URL away.
+fastapi==0.141.1
+uvicorn==0.52.4
+sqlalchemy[asyncio]==2.0.52
 aiosqlite==0.22.1
+# Postgres, by configuration alone (Phase 9.2). Installed always, used only
+# when DATABASE_URL names it: `postgresql+asyncpg://...`. The async driver is
+# the only one needed - nothing in this application takes a synchronous
+# database connection, so psycopg2-binary stays out.
+asyncpg==0.31.0
+alembic==1.19.2
+pydantic==2.13.5
+pydantic-settings==2.15.0
+networkx==3.6.1
+python-dotenv==1.2.3
+
+# The AI service boundary. Optional at runtime: with no ANTHROPIC_API_KEY the
+# application selects NullProvider and every P0 capability still works
+# (D-49), and the import is lazy so the app starts without this installed.
+# Pinned because the structured-output surface this code targets
+# (output_config.format, thinking: adaptive) is 1.x only.
+anthropic==1.4.0
+
+# tests
+httpx==0.28.1
+pytest==9.1.1
+pytest-asyncio==1.4.0

@@ -44,7 +44,5 @@ dwi.db
 .env.local
 .pytest_cache/
 
-dwi.db
-*.db
-.env
-.pytest_cache/
+# Local scratch
+Claude outputs/

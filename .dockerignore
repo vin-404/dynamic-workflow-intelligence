@@ -1,18 +1,36 @@
-.git/
+# Keep the build context small and keep local state out of images.
+.git
+.gitignore
+
+# Python
 .venv/
-venv/
-**/__pycache__/
+__pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
+
+# Node / Next
 node_modules/
 frontend/node_modules/
-frontend/.next/
 .next/
+frontend/.next/
+
+# Local database and secrets - never in an image
 dwi.db
 *.db
+*.sqlite3
 .env
-.env.local
+.env.*
+!.env.example
+
+# Docs and scratch
 docs/
-scripts/
+Claude outputs/
 *.md
+!frontend/README.md
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

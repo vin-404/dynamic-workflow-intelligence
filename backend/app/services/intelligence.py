@@ -1,351 +1,450 @@
 """
-Intelligence service — bridge between PostgreSQL and engine.py.
+Intelligence service - the DB <-> engine adapter.
 
-Loads project data from the database, converts it into the format
-engine.py expects (plain dicts + lists), runs deterministic computations,
-and returns structured results.
+It loads a snapshot, calls `core.engine.evaluate()`, and serialises the result
+for the API. Every number in what it returns came out of `core/`; this layer
+adds calendar dates, resource names and task names, and nothing else.
 
-engine.py is NEVER modified. This service adapts around it.
+The two prototype helpers that used to live here are gone for good reasons:
+
+* `_compute_dept_capacity` guessed a department's capacity from the count of
+  distinct owners. Capacity is now an explicit `Resource.capacity`, so there
+  is nothing to guess.
+* `_compute_observed_durations` moved into `core.engine.effort` as
+  `observed_durations`, where it belongs: it is engine arithmetic, and putting
+  it in a DB service made it untestable without a database.
 """
 from __future__ import annotations
 
 import uuid
-from datetime import date
 
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
-from backend.app.models import (
-    Project, Task, Dependency, Event, Requirement, RequirementConsumer,
-    DepartmentCapacity,
-)
+from backend.app.core.engine import evaluate as core_evaluate
+from backend.app.core.engine import stale_tasks
+from backend.app.core.engine.graph import build_graph_from_snapshot
+from backend.app.core.engine.risk import RiskWeights
+from backend.app.core.workflow import EngineConfig, WorkflowSnapshot
+from backend.app.services import analysis_runs, versions as V
+from backend.app.services.versions import NotFound  # re-exported for routers
 
-# Import the untouched engine
-import engine as E
-
-
-async def _load_project(db: AsyncSession, project_id: uuid.UUID) -> Project:
-    result = await db.execute(
-        select(Project).where(Project.id == project_id)
-    )
-    project = result.scalar_one_or_none()
-    if project is None:
-        raise ValueError(f"Project {project_id} not found")
-    return project
+__all__ = [
+    "NotFound",
+    "get_workflow",
+    "analyze",
+    "risk",
+    "requirement_impact",
+    "get_accuracy",
+]
 
 
-async def _load_project_data(db: AsyncSession, project_id: uuid.UUID) -> dict:
-    """Load all project data from DB and convert to engine-compatible format."""
-    project = await _load_project(db, project_id)
-
-    # Load tasks
-    tasks_result = await db.execute(
-        select(Task).where(Task.project_id == project_id)
-    )
-    tasks_rows = tasks_result.scalars().all()
-
-    # Load dependencies
-    deps_result = await db.execute(
-        select(Dependency).where(Dependency.project_id == project_id)
-    )
-    deps_rows = deps_result.scalars().all()
-
-    # Load events
-    events_result = await db.execute(
-        select(Event).where(Event.project_id == project_id).order_by(Event.day)
-    )
-    events_rows = events_result.scalars().all()
-
-    # Load requirements with consumers
-    reqs_result = await db.execute(
-        select(Requirement)
-        .where(Requirement.project_id == project_id)
-        .options(selectinload(Requirement.consumers))
-    )
-    reqs_rows = reqs_result.scalars().all()
-
-    # Convert to engine format
-    tasks_dict = {}
-    status_dict = {}
-    for t in tasks_rows:
-        tasks_dict[t.task_code] = {
-            "name": t.name,
-            "dept": t.department,
-            "owner": t.owner,
-            "duration": t.planned_duration,
-        }
-        status_dict[t.task_code] = t.status
-
-    deps_list = [
-        (d.predecessor_code, d.successor_code, d.kind)
-        for d in deps_rows
-    ]
-
-    events_list = [
-        {
-            "day": e.day,
-            "task": e.task_code,
-            "actor": e.actor,
-            "frm": e.from_status,
-            "to": e.to_status,
-        }
-        for e in events_rows
-    ]
-
-    requirements_dict = {}
-    for r in reqs_rows:
-        requirements_dict[r.req_code] = {
-            "version": r.version,
-            "text": r.text,
-            "consumed_by": [c.task_code for c in r.consumers],
-        }
-
-    # Load department capacities from DB
-    cap_result = await db.execute(
-        select(DepartmentCapacity).where(DepartmentCapacity.project_id == project_id)
-    )
-    cap_rows = cap_result.scalars().all()
-    if cap_rows:
-        dept_capacity = {c.department: c.capacity for c in cap_rows}
-    else:
-        # Fallback: compute from unique owners if no explicit capacity
-        dept_capacity = _compute_dept_capacity(tasks_rows)
-
-    return {
-        "project": project,
-        "tasks": tasks_dict,
-        "status": status_dict,
-        "deps": deps_list,
-        "events": events_list,
-        "requirements": requirements_dict,
-        "dept_capacity": dept_capacity,
-        "today_day": project.today_day,
-        "project_start": project.start_date,
-    }
+def _resource_labels(snapshot: WorkflowSnapshot) -> dict[str, str]:
+    """resource key -> "Name (Parent)" for presentation only."""
+    by_key = snapshot.resource_by_key
+    out: dict[str, str] = {}
+    for r in snapshot.resources:
+        parent = by_key.get(r.parent_key) if r.parent_key else None
+        out[r.key] = f"{r.name} ({parent.name})" if parent else r.name
+    return out
 
 
-def _compute_dept_capacity(tasks_rows: list[Task]) -> dict[str, int]:
-    """Estimate department capacity as the count of unique owners in each dept."""
-    dept_owners: dict[str, set] = {}
-    for t in tasks_rows:
-        dept_owners.setdefault(t.department, set()).add(t.owner)
-    return {dept: len(owners) for dept, owners in dept_owners.items()}
-
-
-def _compute_observed_durations(
-    tasks_dict: dict, status_dict: dict, events_list: list, today_day: float
-) -> tuple[dict, dict]:
-    """Compute planned and observed durations from task data and events.
-
-    For stalled tasks (in_review or in_progress), we add the time they've been
-    sitting beyond their planned duration.
-    """
-    planned = {tid: float(t["duration"]) for tid, t in tasks_dict.items()}
-    observed = dict(planned)
-
-    for tid, st in status_dict.items():
-        if st in ("in_review", "in_progress"):
-            # Find when this task started its current status
-            last_event_day = 0.0
-            for e in events_list:
-                if e["task"] == tid:
-                    last_event_day = max(last_event_day, e["day"])
-
-            # Time spent = today - when task entered current state
-            time_in_state = today_day - last_event_day
-            if time_in_state > planned[tid]:
-                observed[tid] = time_in_state
-
-    return planned, observed
-
-
-async def get_project_state(db: AsyncSession, project_id: uuid.UUID) -> dict:
-    """Full project state — schedule, bottlenecks, everything the dashboard needs."""
-    data = await _load_project_data(db, project_id)
-    project = data["project"]
-
-    G = E.build_graph(data["tasks"], data["deps"])
-    planned_dur, observed_dur = _compute_observed_durations(
-        data["tasks"], data["status"], data["events"], data["today_day"]
-    )
-
-    baseline = E.schedule(G, planned_dur)
-    current = E.schedule(G, observed_dur)
-
-    bottlenecks = E.detect(
-        G, current, data["status"], data["events"],
-        data["dept_capacity"], data["today_day"]
-    )
-
-    # Build task rows
-    task_rows = []
-    for tid in sorted(G.nodes):
-        t = G.nodes[tid]
-        task_rows.append({
-            "task_code": tid,
-            "name": t["name"],
-            "department": t["dept"],
-            "owner": t["owner"],
-            "planned_duration": t["duration"],
-            "status": data["status"][tid],
-            "es": current["ES"][tid],
-            "ef": current["EF"][tid],
-            "ls": current["LS"][tid],
-            "lf": current["LF"][tid],
-            "slack": current["slack"][tid],
-            "critical": tid in current["critical"],
-            "start_date": E.day_to_date(project.start_date, current["ES"][tid]),
-            "end_date": E.day_to_date(project.start_date, current["EF"][tid]),
-            "depends_on": sorted(G.predecessors(tid)),
-        })
-
-    edges = [
-        {"source": u, "target": v, "kind": G.edges[u, v]["kind"]}
-        for u, v in G.edges
-    ]
-
-    requirements = [
-        {
-            "req_code": k,
-            "version": v["version"],
-            "text": v["text"],
-            "consumed_by": v["consumed_by"],
-        }
-        for k, v in data["requirements"].items()
-    ]
-
+def _serialise_workflow(project, version, snapshot, state) -> dict:
+    """The authoring view: the graph as the user built it, no analysis."""
+    labels = _resource_labels(snapshot)
+    assignees = snapshot.assignees_by_task
     return {
         "project_id": str(project.id),
         "project_name": project.name,
+        "goal": project.goal,
         "project_start": project.start_date.isoformat(),
-        "today_day": data["today_day"],
-        "planned_end": baseline["project_end"],
-        "projected_end": current["project_end"],
-        "planned_end_date": E.day_to_date(project.start_date, baseline["project_end"]),
-        "projected_end_date": E.day_to_date(project.start_date, current["project_end"]),
-        "slip_days": current["project_end"] - baseline["project_end"],
-        "critical_path": current["critical"],
-        "tasks": task_rows,
-        "edges": edges,
-        "departments": data["dept_capacity"],
-        "bottlenecks": [b.to_dict() for b in bottlenecks],
-        "requirements": requirements,
+        "deadline": project.deadline.isoformat() if project.deadline else None,
+        "deadline_day": snapshot.deadline_day,
+        "today_day": project.today_day,
+        "version": {
+            "id": str(version.id),
+            "version_no": version.version_no,
+            "parent_version_id": (
+                str(version.parent_version_id) if version.parent_version_id else None
+            ),
+            "content_hash": version.content_hash,
+            "is_draft": version.is_draft,
+            "note": version.note,
+            "created_at": version.created_at.isoformat(),
+        },
+        "tasks": [
+            {
+                "key": t.key,
+                "name": t.name,
+                "description": t.description,
+                "effort": t.effort,
+                "divisible": t.divisible,
+                "priority": t.priority,
+                "optimistic": t.optimistic,
+                "likely": t.likely,
+                "pessimistic": t.pessimistic,
+                "required_skills": list(t.required_skills),
+                "status": state.status_of(t.key).value,
+                "assignees": [
+                    {"key": k, "label": labels.get(k, k)}
+                    for k in assignees.get(t.key, ())
+                ],
+            }
+            for t in snapshot.tasks
+        ],
+        "dependencies": [
+            {
+                "from_task": d.from_task,
+                "to_task": d.to_task,
+                "dep_type": d.dep_type.value,
+                "consumes": d.consumes,
+            }
+            for d in snapshot.dependencies
+        ],
+        "resources": [
+            {
+                "key": r.key,
+                "name": r.name,
+                "kind": r.kind,
+                "capacity": r.capacity,
+                "skills": list(r.skills),
+                "parent_key": r.parent_key,
+                "label": labels[r.key],
+            }
+            for r in snapshot.resources
+        ],
+        "requirements": [
+            {
+                "key": r.key,
+                "version_no": r.version_no,
+                "text": r.text,
+                "consumed_by": list(r.consumed_by),
+            }
+            for r in snapshot.requirements
+        ],
+        "constraints": [
+            {
+                "kind": c.kind.value,
+                "target": c.target,
+                "reason": c.reason,
+                "value": c.value,
+            }
+            for c in snapshot.constraints
+        ],
     }
 
 
-async def simulate_delay(
-    db: AsyncSession, project_id: uuid.UUID,
-    task_code: str, extra_days: float
+async def get_workflow(
+    db: AsyncSession, project_id: uuid.UUID, version_id: uuid.UUID | None = None
 ) -> dict:
-    """Simulate what happens if a task slips by extra_days."""
-    data = await _load_project_data(db, project_id)
-    project = data["project"]
-
-    G = E.build_graph(data["tasks"], data["deps"])
-    _, observed_dur = _compute_observed_durations(
-        data["tasks"], data["status"], data["events"], data["today_day"]
+    project, version, snapshot, state, _ = await V.load_context(
+        db, project_id, version_id
     )
-
-    current = E.schedule(G, observed_dur)
-    delayed = E.apply_delay(observed_dur, task_code, extra_days)
-    after = E.schedule(G, delayed)
-    d = E.diff(current, after)
-
-    d["notify"] = sorted({G.nodes[t]["owner"] for t in d["tasks_moved"]})
-    d["moved_detail"] = [
-        {
-            "task_code": t,
-            "name": G.nodes[t]["name"],
-            "department": G.nodes[t]["dept"],
-            "owner": G.nodes[t]["owner"],
-            "delta": m["delta"],
-            "from_date": E.day_to_date(project.start_date, m["from"]),
-            "to_date": E.day_to_date(project.start_date, m["to"]),
-        }
-        for t, m in sorted(d["tasks_moved"].items(), key=lambda kv: -kv[1]["delta"])
-    ]
-    d["end_date_before"] = E.day_to_date(project.start_date, d["project_end_before"])
-    d["end_date_after"] = E.day_to_date(project.start_date, d["project_end_after"])
-
-    return d
+    return _serialise_workflow(project, version, snapshot, state)
 
 
-async def simulate_requirement_change(
-    db: AsyncSession, project_id: uuid.UUID, req_code: str
+async def analyze(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    version_id: uuid.UUID | None = None,
+    config: EngineConfig | None = None,
+    persist: bool = True,
+    weights: RiskWeights | None = None,
 ) -> dict:
-    """Simulate what happens if a requirement changes."""
-    data = await _load_project_data(db, project_id)
+    """Capability 1: `evaluate(W)`, serialised.
 
-    G = E.build_graph(data["tasks"], data["deps"])
-    req = data["requirements"].get(req_code)
+    A pure read over the immutable snapshot. The only row it writes is an
+    `AnalysisRun` recording `engine_version` and `input_hash` so the result is
+    reproducible and comparable - **no workflow state is touched**, which is
+    the contract rule in ARCHITECTURE E.
+    """
+    project, version, snapshot, state, clock = await V.load_context(
+        db, project_id, version_id
+    )
+    result = core_evaluate(snapshot, state, clock, config, weights)
+
+    labels = _resource_labels(snapshot)
+    assignees = snapshot.assignees_by_task
+    task_by_key = snapshot.task_by_key
+    sched = result.schedule
+
+    task_rows = []
+    for key in snapshot.task_keys:
+        t = task_by_key[key]
+        task_rows.append({
+            "key": key,
+            "name": t.name,
+            "effort": t.effort,
+            "duration": sched["durations"][key],
+            "status": state.status_of(key).value,
+            "assignees": [labels.get(k, k) for k in assignees.get(key, ())],
+            "es": sched["ES"][key],
+            "ef": sched["EF"][key],
+            "ls": sched["LS"][key],
+            "lf": sched["LF"][key],
+            "slack": sched["slack"][key],
+            "critical": key in sched["critical"],
+            "start_date": V.day_to_date(project.start_date, sched["ES"][key]),
+            "end_date": V.day_to_date(project.start_date, sched["EF"][key]),
+            "depends_on": sorted(
+                d.from_task for d in snapshot.dependencies if d.to_task == key
+            ),
+        })
+
+    payload = result.as_dict()
+
+    run_id = None
+    if persist:
+        run = await analysis_runs.record(
+            db,
+            project.id,
+            result,
+            subject_type="version",
+            subject_id=version.id,
+            params={"today_day": project.today_day},
+        )
+        run_id = str(run.id)
+        await db.commit()
+
+    payload.update({
+        "analysis_run_id": run_id,
+        "project_id": str(project.id),
+        "project_name": project.name,
+        "version_id": str(version.id),
+        "version_no": version.version_no,
+        "project_start": project.start_date.isoformat(),
+        "today_day": project.today_day,
+        "planned_end_date": V.day_to_date(project.start_date, result.planned_end),
+        "projected_end_date": V.day_to_date(project.start_date, result.projected_end),
+        "deadline_date": project.deadline.isoformat() if project.deadline else None,
+        "tasks": task_rows,
+        "resources": [
+            {
+                "key": r.key,
+                "name": r.name,
+                "label": labels[r.key],
+                "kind": r.kind,
+                "capacity": r.capacity,
+                "parent_key": r.parent_key,
+            }
+            for r in snapshot.resources
+        ],
+        "edges": [
+            {
+                "source": d.from_task,
+                "target": d.to_task,
+                "dep_type": d.dep_type.value,
+                "consumes": d.consumes,
+            }
+            for d in snapshot.dependencies
+        ],
+    })
+    return payload
+
+
+async def requirement_impact(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    requirement_key: str,
+    version_id: uuid.UUID | None = None,
+) -> dict:
+    """What a requirement change invalidates.
+
+    `must_redo` is reachable along *consuming* edges: that work consumed
+    something that is now wrong. `must_recheck` is merely downstream in time.
+    Keeping them separate is the difference between a useful alert and
+    "your whole project is red".
+    """
+    project, version, snapshot, state, _ = await V.load_context(
+        db, project_id, version_id
+    )
+    req = snapshot.requirement_by_key.get(requirement_key)
     if req is None:
-        raise ValueError(f"Requirement {req_code} not found")
+        raise NotFound(f"Requirement {requirement_key} not found")
 
-    st = E.stale_tasks(G, set(req["consumed_by"]))
+    G = build_graph_from_snapshot(snapshot)
+    st = stale_tasks(G, set(req.consumed_by))
 
-    def rows(ids):
+    labels = _resource_labels(snapshot)
+    assignees = snapshot.assignees_by_task
+    task_by_key = snapshot.task_by_key
+
+    def rows(keys):
         return [
             {
-                "task_code": t,
-                "name": G.nodes[t]["name"],
-                "department": G.nodes[t]["dept"],
-                "owner": G.nodes[t]["owner"],
-                "status": data["status"][t],
+                "key": k,
+                "name": task_by_key[k].name,
+                "status": state.status_of(k).value,
+                "assignees": [labels.get(r, r) for r in assignees.get(k, ())],
             }
-            for t in ids
+            for k in keys
         ]
 
+    resources_hit = sorted({
+        labels.get(r, r)
+        for k in st["must_redo"]
+        for r in assignees.get(k, ())
+    })
+
     return {
-        "req_code": req_code,
-        "text": req["text"],
-        "from_version": req["version"],
-        "to_version": req["version"] + 1,
-        "directly_consumed_by": req["consumed_by"],
+        "project_id": str(project.id),
+        "version_id": str(version.id),
+        "requirement_key": requirement_key,
+        "text": req.text,
+        "from_version": req.version_no,
+        "to_version": req.version_no + 1,
+        "directly_consumed_by": list(req.consumed_by),
         "must_redo": rows(st["must_redo"]),
         "must_recheck": rows(st["must_recheck"]),
-        "departments_hit": sorted({G.nodes[t]["dept"] for t in st["must_redo"]}),
+        "resources_hit": resources_hit,
+        #: Effort already spent on work that is now invalid.
         "wasted_days": sum(
-            G.nodes[t]["duration"] for t in st["must_redo"]
-            if data["status"][t] == "done"
+            task_by_key[k].effort
+            for k in st["must_redo"]
+            if state.is_done(k)
         ),
     }
 
 
-async def get_accuracy(db: AsyncSession, project_id: uuid.UUID) -> dict:
-    """Check detector accuracy against planted ground truth (for demo verification)."""
-    data = await _load_project_data(db, project_id)
+async def get_accuracy(
+    db: AsyncSession, project_id: uuid.UUID, version_id: uuid.UUID | None = None
+) -> dict:
+    """Detector precision and recall against a fully labelled fixture.
 
-    G = E.build_graph(data["tasks"], data["deps"])
-    _, observed_dur = _compute_observed_durations(
-        data["tasks"], data["status"], data["events"], data["today_day"]
+    The prototype hardcoded three planted faults in this function and reported
+    `precision_vs_planted`. That metric punished the detectors for being right
+    about anything nobody had written down - and once the Tier-0 detectors
+    landed, being right about eight more things would have "dropped precision"
+    from 100% to 33%. So the fixtures now label **every** problem they are
+    known to contain, and the numbers below mean what they say:
+
+    * `planted_recall` - the headline: did we find the faults authored
+      deliberately to be found?
+    * `recall` - of everything this fixture is known to contain, how much did
+      we find? A drop means a detector regressed.
+    * `precision` - of everything we reported, how much was expected? A drop
+      means a detector started firing spuriously.
+
+    A project with no labels says so and reports no score, rather than
+    inventing one.
+    """
+    from backend.app.seed.fixtures import FIXTURE_BUILDERS
+    from backend.app.seed.loader import PROJECT_IDS
+
+    project, version, snapshot, state, clock = await V.load_context(
+        db, project_id, version_id
     )
 
-    current = E.schedule(G, observed_dur)
-    bottlenecks = E.detect(
-        G, current, data["status"], data["events"],
-        data["dept_capacity"], data["today_day"]
+    fixture_key = next(
+        (k for k, pid in PROJECT_IDS.items() if pid == project.id), None
+    )
+    fixture = (
+        FIXTURE_BUILDERS[fixture_key]()
+        if fixture_key in FIXTURE_BUILDERS
+        else None
     )
 
-    detected = {b.root_cause for b in bottlenecks}
-
-    # Ground truth is hardcoded for the demo scenario
-    ground_truth = {
-        "T03": "budget approval stalled in review for 9 days (critical path)",
-        "MKT": "marketing has 2 ready tasks (T11, T12) against capacity 1",
-        "T12": "registration site unblocked for 10 days, never started",
+    result = core_evaluate(snapshot, state, clock)
+    detected = {
+        (f.kind, f.root_cause) for f in result.findings if f.root_cause
     }
 
-    truth = set(ground_truth)
-    tp = sorted(truth & detected)
+    def ref_str(ref: tuple[str, str]) -> str:
+        return f"{ref[0]}@{ref[1]}"
 
+    if fixture is None or not fixture.labelled:
+        return {
+            "project_id": str(project.id),
+            "has_labels": False,
+            "labelled": 0,
+            "detected": len(detected),
+            "detections": sorted(ref_str(r) for r in detected),
+            "note": (
+                "No findings are labelled for this project, so precision and "
+                "recall are undefined. Reporting a score here would be "
+                "meaningless."
+            ),
+            "labels": [],
+            "true_positives": [],
+            "missed": [],
+            "unexpected": sorted(ref_str(r) for r in detected),
+            "recall": None,
+            "precision": None,
+            "planted": 0,
+            "planted_found": [],
+            "planted_recall": None,
+        }
+
+    labelled = fixture.labelled_refs
+    planted = {f.ref for f in fixture.planted}
+    tp = labelled & detected
+
+    # The engine's own snapshot of what it could and could not check, so a
+    # missed label can be read as "regressed" or "not yet unlockable".
     return {
-        "planted": len(truth),
+        "project_id": str(project.id),
+        "has_labels": True,
+        "engine_version": result.engine_version,
+        "tier_reached": result.tier_reached,
+        "checks_run": result.checks_run,
+        "labelled": len(labelled),
         "detected": len(detected),
-        "true_positives": tp,
-        "missed": sorted(truth - detected),
-        "extra": sorted(detected - truth),
-        "recall": len(tp) / len(truth) if truth else 0,
-        "precision_vs_planted": len(tp) / len(detected) if detected else 0,
-        "ground_truth": ground_truth,
+        "true_positives": sorted(ref_str(r) for r in tp),
+        "missed": sorted(ref_str(r) for r in labelled - detected),
+        "unexpected": sorted(ref_str(r) for r in detected - labelled),
+        "recall": len(tp) / len(labelled) if labelled else None,
+        "precision": len(tp) / len(detected) if detected else None,
+        "planted": len(planted),
+        "planted_found": sorted(ref_str(r) for r in planted & detected),
+        "planted_recall": (
+            len(planted & detected) / len(planted) if planted else None
+        ),
+        "labels": [
+            {
+                "kind": f.kind,
+                "root_cause": f.root_cause,
+                "description": f.description,
+                "planted": f.planted,
+                "detected": f.ref in detected,
+            }
+            for f in fixture.labelled
+        ],
     }
+
+
+async def risk(
+    db: AsyncSession,
+    project_id: uuid.UUID,
+    version_id: uuid.UUID | None = None,
+    weights: RiskWeights | None = None,
+    config: EngineConfig | None = None,
+) -> dict:
+    """Capability 2, Layer A: per-task risk with its factor decomposition.
+
+    Weights are inputs and are echoed in the response, so "18% riskier" can
+    never rest on numbers the reader cannot see (ARCHITECTURE H, risk #5).
+    """
+    project, version, snapshot, state, clock = await V.load_context(
+        db, project_id, version_id
+    )
+    result = core_evaluate(snapshot, state, clock, config, weights)
+    payload = dict(result.risk)
+    payload.update({
+        "project_id": str(project.id),
+        "version_id": str(version.id),
+        "engine_version": result.engine_version,
+        "input_hash": result.input_hash,
+        "tier_reached": result.tier_reached,
+        "feasibility": result.feasibility.as_dict(),
+        "projected_end_date": V.day_to_date(
+            project.start_date, result.projected_end
+        ),
+        "three_point_dates": {
+            band: V.day_to_date(project.start_date, day)
+            for band, day in (
+                ("optimistic", result.feasibility.three_point["optimistic_day"]),
+                ("likely", result.feasibility.three_point["likely_day"]),
+                ("pessimistic", result.feasibility.three_point["pessimistic_day"]),
+            )
+        } if result.feasibility.three_point else None,
+    })
+    return payload

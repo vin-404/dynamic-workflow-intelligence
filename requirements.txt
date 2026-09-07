@@ -1,3 +1,3 @@
-fastapi==0.141.1
-uvicorn==0.52.4
-networkx==3.6.1
+# Root requirements are a pointer to the backend's, so there is exactly one
+# source of truth for Python dependencies.
+-r backend/requirements.txt

@@ -1,16 +1,53 @@
-from backend.app.models.project import Project
-from backend.app.models.task import Task
-from backend.app.models.dependency import Dependency
-from backend.app.models.event import Event
-from backend.app.models.requirement import Requirement, RequirementConsumer
-from backend.app.models.department import DepartmentCapacity
+"""
+SQLAlchemy models.
+
+Organised by lifetime, not by entity: `identity` is mutable and long-lived,
+`version` is written-once and immutable, `analysis` is derived and disposable.
+
+`Department` is gone. `Resource {kind, name, capacity, skills, parent_key}`
+replaced it, which is the domain leak removed from the schema itself rather
+than papered over in the service layer.
+"""
+from backend.app.models.analysis import (
+    AIInteraction,
+    AnalysisRun,
+    Finding,
+    Mutation,
+    Scenario,
+)
+from backend.app.models.identity import Domain, Project, ProjectMember, User
+from backend.app.models.version import (
+    Assignment,
+    Calendar,
+    Constraint,
+    Dependency,
+    Event,
+    Requirement,
+    Resource,
+    Task,
+    WorkflowVersion,
+)
 
 __all__ = [
+    # identity & access
+    "User",
+    "Domain",
     "Project",
+    "ProjectMember",
+    # immutable workflow snapshot
+    "WorkflowVersion",
     "Task",
     "Dependency",
-    "Event",
+    "Resource",
+    "Assignment",
     "Requirement",
-    "RequirementConsumer",
-    "DepartmentCapacity",
+    "Constraint",
+    "Calendar",
+    "Event",
+    # change & analysis
+    "Scenario",
+    "Mutation",
+    "AnalysisRun",
+    "Finding",
+    "AIInteraction",
 ]

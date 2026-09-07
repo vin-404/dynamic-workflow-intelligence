@@ -1,58 +1,89 @@
-version: "3.9"
-
+# Local container run. The supported *development* path is still one process
+# plus one dev server on SQLite:
+#
+#   .venv/Scripts/python.exe -m uvicorn backend.app.main:app --reload --port 8001
+#   cd frontend && npm run dev
+#
+# This file exists so the deployment artifacts are exercised locally before
+# they are exercised in production.
+#
+#   docker compose up --build                 # SQLite on a named volume
+#   docker compose --profile postgres up -d db # a Postgres to point at
+#
+# To run the API against that Postgres:
+#
+#   DATABASE_URL=postgresql+asyncpg://dwi:dwi@db:5432/dwi docker compose up --build
+#
+# Nothing else changes - Postgres support is configuration, not code (9.2).
 services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: dwi
-      POSTGRES_PASSWORD: dwi_dev_password
-      POSTGRES_DB: dwi
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U dwi"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
-
   api:
     build:
       context: .
       dockerfile: backend/Dockerfile
     ports:
-      - "8000:8000"
+      - "8001:8001"
     environment:
-      DATABASE_URL: postgresql+asyncpg://dwi:dwi_dev_password@db:5432/dwi
-      DATABASE_URL_SYNC: postgresql://dwi:dwi_dev_password@db:5432/dwi
+      PORT: 8001
       ENVIRONMENT: development
-    depends_on:
-      db:
-        condition: service_healthy
+      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/dwi.db}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-sqlite:////data/dwi.db}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # Empty means POST /admin/reset-seed is disabled, which is the right
+      # default even locally - set it when you want the reset button.
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      # Optional. Absent selects the offline path, under which everything
+      # still works.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
-      - ./backend:/app/backend
-      - ./engine.py:/app/engine.py
-    command: >
-      sh -c "cd /app && alembic -c backend/alembic.ini upgrade head &&
-             uvicorn backend.app.main:app --host 0.0.0.0 --port 8000 --reload"
+      - dwidata:/data
+    healthcheck:
+      # /health, not /ready: this decides whether to restart the container,
+      # and restarting because the database blipped turns a recoverable
+      # outage into a crash loop.
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/health').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Inlined at build time, so it must be the URL the *browser* will use.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
     ports:
       - "3000:3000"
     environment:
-      # Client-side (browser) hits the host-mapped port
-      NEXT_PUBLIC_API_URL: http://localhost:8000
-      # Server-side rewrites use Docker service name
-      API_REWRITE_URL: http://api:8000
+      PORT: 3000
+      # Server-side rewrites run inside the container, where the backend is
+      # reachable by service name rather than on localhost.
+      API_REWRITE_URL: ${API_REWRITE_URL:-http://api:8001}
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+
+  # Not started by default: the default path is SQLite and needs nothing.
+  # `docker compose --profile postgres up -d db` when you want to exercise
+  # the Postgres path locally.
+  db:
+    profiles: ["postgres"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-dwi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-dwi}
+      POSTGRES_DB: ${POSTGRES_DB:-dwi}
+    ports:
+      - "5433:5432"
     volumes:
-      - ./frontend/src:/app/src
-      - ./frontend/public:/app/public
+      - dwipg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dwi}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
 volumes:
-  pgdata:
+  dwidata:
+  dwipg:
