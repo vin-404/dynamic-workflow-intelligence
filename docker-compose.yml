@@ -1,13 +1,13 @@
-# NOT the supported way to run this project.
+# Local container run. The supported *development* path is still one process
+# plus one dev server on SQLite:
 #
-# The supported path is one process plus one dev server, on SQLite:
 #   .venv/Scripts/python.exe -m uvicorn backend.app.main:app --reload --port 8001
 #   cd frontend && npm run dev
 #
-# This file is kept only so an existing `docker compose up` does not silently
-# start a Postgres the application no longer uses. It requires
-# backend/Dockerfile and frontend/Dockerfile, which are deliberately not in
-# this repo (modular monolith, no container ceremony -- ARCHITECTURE A.5).
+# This file exists so the deployment artifacts are exercised locally before
+# they are exercised in production. It runs SQLite on a named volume by
+# default; set DATABASE_URL to a Postgres URL to run against Postgres instead
+# (Phase 9.2) - nothing else changes.
 services:
   api:
     build:
@@ -16,29 +16,34 @@ services:
     ports:
       - "8001:8001"
     environment:
-      DATABASE_URL: sqlite+aiosqlite:////data/dwi.db
-      DATABASE_URL_SYNC: sqlite:////data/dwi.db
+      PORT: 8001
       ENVIRONMENT: development
+      DATABASE_URL: ${DATABASE_URL:-sqlite+aiosqlite:////data/dwi.db}
+      DATABASE_URL_SYNC: ${DATABASE_URL_SYNC:-sqlite:////data/dwi.db}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
     volumes:
-      - ./backend:/app/backend
       - dwidata:/data
-    command: >
-      sh -c "cd /app &&
-             uvicorn backend.app.main:app --host 0.0.0.0 --port 8001 --reload"
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8001/health').status==200 else 1)\""]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # Inlined at build time, so it must be the URL the *browser* will use.
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8001}
     ports:
       - "3000:3000"
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost:8001
-      API_REWRITE_URL: http://api:8001
+      PORT: 3000
     depends_on:
-      - api
-    volumes:
-      - ./frontend/src:/app/src
+      api:
+        condition: service_healthy
 
 volumes:
   dwidata:
