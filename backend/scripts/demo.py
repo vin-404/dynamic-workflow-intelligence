@@ -272,8 +272,58 @@ def run(fx) -> None:
     else:
         print("  No redundant dependencies found.")
 
-    # ------------------------------------------------------- 8. robustness
-    h("9. ROBUSTNESS  --  a circular dependency is reported, not swallowed")
+    # ---------------------------------------------------- 9. optimization
+    h("9. BETTER WORKFLOWS  (generate-and-verify, no LLM involved)")
+    from backend.app.core.optimization import ObjectiveWeights, optimize
+
+    opt = optimize(snapshot, state, clock, aggressive=True)
+    print(f"Generated {opt.generated} candidate(s), evaluated "
+          f"{opt.evaluated}, refused {len(opt.rejected)}. "
+          f"Stop: {opt.stop_reason}")
+    print(f"Weights: {ObjectiveWeights().as_dict()}")
+    print(NL + "Ranked candidates (the total is a ranking aid; read the table):")
+    print(f"{NL}{'total':>7}  {'candidate':<44}{'end':>10}{'scope':>7}")
+    print("-" * 78)
+    for c in opt.candidates[:6]:
+        completion = next(
+            x for x in c.score.criteria if x.name == "expected_completion"
+        )
+        scope = f"{c.effort_delta:+.0f}d" if c.scope_change else "same"
+        moves = f"{completion.before:.0f}->{completion.after:.0f}"
+        print(f"{c.score.total:+7.3f}  {c.name[:43]:<44}{moves:>10}{scope:>7}")
+
+    if opt.candidates:
+        best = opt.candidates[0]
+        print(f"{NL}Per-criterion table for '{best.name}':")
+        print(f"{'criterion':<24}{'before':>9}{'after':>9}{'delta':>9}"
+              f"{'weight':>8}{'contrib':>9}")
+        print("-" * 78)
+        for criterion in best.score.criteria:
+            print(f"{criterion.name:<24}{criterion.before:>9.2f}"
+                  f"{criterion.after:>9.2f}{criterion.delta:>+9.2f}"
+                  f"{criterion.weight:>8.2f}{criterion.contribution:>+9.3f}")
+
+    if opt.rejected:
+        print(f"{NL}REFUSED -- this is the point:")
+        for rj in opt.rejected:
+            violation = rj.rejections[0]
+            print(f"  {rj.name}")
+            print(f"    {violation.reason}")
+            print(f"    cites {violation.constraint}: "
+                  f"{violation.constraint_reason}")
+
+    print(f"{NL}Recommended : "
+          f"{opt.recommended.name if opt.recommended else 'none'}")
+    if opt.recommended_same_scope and (
+        opt.recommended_same_scope is not opt.recommended
+    ):
+        print(f"Same scope  : {opt.recommended_same_scope.name}")
+        print("  (the best option that does the same work differently rather")
+        print("   than less of it -- that choice is yours, not ours)")
+    print(f"{NL}{opt._recommendation_reason()}")
+
+    # ----------------------------------------------------- 10. robustness
+    h("10. ROBUSTNESS  --  a circular dependency is reported, not swallowed")
     if len(critical) >= 2:
         u, v = critical[0], critical[1]
         bad = G.copy()

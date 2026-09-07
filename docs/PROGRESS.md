@@ -963,3 +963,213 @@ D-32 … D-36 in `docs/DECISIONS.md`. The two that matter:
 5. **The band thresholds (0.55 / 0.30) are unexplained numbers.** They are
    labels on a continuum, not claims, and `band` is always accompanied by
    `score`, but a UI that shows only the band inherits an arbitrary cut.
+
+---
+
+# Phase 5 — Capability 4: optimization as generate-and-verify
+
+Implemented with **no LLM**. Phase 7 adds the Proposer as a third candidate
+*source*, through `extra_candidates`, subject to the same validation, the same
+gates and the same scoring.
+
+## 1 · CHANGED
+
+### `core/optimization.py`
+
+| Piece | What it is |
+|---|---|
+| 5 generators | `transitive_reduction`, `parallelize_zero_slack`, `drop_soft_ordering`, `resource_levelling`, `resequence_contended` — the ARCHITECTURE D.5 list |
+| `gen_drop_bottleneck_tasks` | opt-in via `aggressive=True`; this is "optimize with no limits", and it is what produces the refusal |
+| `gate()` | 7 hard constraint gates, run **before** scoring |
+| `score_candidate()` | 6 criteria, each decomposed |
+| `optimize()` | the bounded search |
+
+### The gates
+
+| Gate | Refuses |
+|---|---|
+| `MANDATORY_TASK` | removing a task the user declared mandatory |
+| `IMMUTABLE_DEPENDENCY` | breaking a protected ordering |
+| `NON_DIVISIBLE_TASK` | splitting work that cannot be divided |
+| `SKILL_REQUIREMENT` | assigning someone without the skills |
+| `FIXED_ASSIGNMENT` | reassigning work whose owner is fixed |
+| `MIN_DURATION` | dropping below a contractual floor |
+| `TOTAL_EFFORT_CONSERVATION` | reducing total effort with no mutation that explicitly changes it |
+
+Every rejection carries the constraint **and the reason on record**, so the
+refusal reads *"UN38.3 safety certification is a legal precondition to
+shipping"* rather than *"constraint violated"*.
+
+### The gates are lineage-aware — and that took two attempts
+
+The first version refused `Split T02 across 2 people` with
+`IMMUTABLE_DEPENDENCY`, reporting *"this candidate drops T02 -> T03"*. It
+does not: a `TASK_SPLIT` replaces `T02` with `T02.1`/`T02.2` and rewires every
+predecessor to every part and every part to every successor, so both the work
+and the ordering survive — only the endpoint names changed. **A misleading
+refusal is worse than none**, so `_lineage()` now tracks which keys carry a
+task's work through splits and merges, and:
+
+- a mandatory task may be split (a `NON_DIVISIBLE_TASK` constraint is the
+  right tool for "this must stay whole", and `TASK_SPLIT` already honours it)
+- an immutable ordering survives a split if every carrier of the predecessor
+  still precedes every carrier of the successor, checked by direct edge or by
+  reachability
+- a `MIN_DURATION` floor applies to the **parts' total** — splitting a task
+  with a contractual lead time does not shorten the lead time
+- a genuine deletion is still refused, tested explicitly so the leniency
+  cannot become a loophole
+
+### Scoring
+
+Six criteria, each with `before`, `after`, `delta`, `improvement` (signed so
+positive is always better), `weight`, `contribution`, `unit`, and a sentence.
+The blended total is returned **only ever alongside the table**, labelled *"a
+ranking aid, not a measurement. The per-criterion table below is the result;
+read that."*
+
+### Scope changes are priced in the open
+
+A candidate that changes *how much work there is* rather than how it is
+arranged carries `scope_change: true` and its `effort_delta_days`. And
+`optimize()` returns **two** recommendations:
+
+- `recommended` — the top scorer under the given weights
+- `recommended_same_scope` — the top scorer that preserves the work
+
+"Same work, faster" and "less work, faster" are different offers. Ranking one
+above the other is a scope decision, and it is the user's, so both are
+returned rather than one being quietly preferred.
+
+### Bounded, and cheap
+
+`max_candidates` plus a caller-supplied `should_stop`. `core/` has no clock —
+the time budget is injected the same way `Clock` is, which also makes the
+budget test deterministic rather than a race against a real timer.
+
+The base workflow is evaluated **once** and shared across every candidate, so
+N candidates cost N+1 evaluations rather than 2N. Asserted by a test that
+monkeypatches `evaluate` and counts the calls.
+
+### Persistence and API
+
+| File | What it is |
+|---|---|
+| `services/optimization.py` | supplies the wall-clock budget; persists each survivor as a real `Scenario` with `origin="heuristic_proposal"` |
+| `api/routers/optimize.py` | `POST /optimize`, `GET /optimize/objectives` |
+
+There is **no special apply path**. An optimizer candidate is a `Scenario`, so
+`GET /api/scenarios/{id}/diff` and `POST /api/scenarios/{id}/apply` already
+work on it — asserted end to end.
+
+## 2 · PRESERVED
+
+Nothing was replaced. `core/simulation._compare()` is reused verbatim for each
+candidate's diff, so an optimizer candidate and a hand-written what-if produce
+the same comparison payload.
+
+## 3 · REMOVED
+
+Nothing.
+
+## 4 · TESTS
+
+| Suite | Phase 4 | Phase 5 |
+|---|---|---|
+| `test_optimization.py` | — | **60** |
+| everything else | 578 | 580 |
+| **Total** | **578** | **640 pass / 0 fail / 0 skip** |
+
+### The brief's Phase-5 checklist
+
+| Requirement | Test |
+|---|---|
+| transitive reduction never changes project end when the edge is genuinely redundant | `test_removing_redundant_edges_never_moves_the_finish`, parametrised over **both** fixtures |
+| a candidate deleting a mandatory task is rejected with the constraint named | `test_a_candidate_deleting_a_mandatory_task_is_rejected`, `test_the_refusal_names_the_constraint_in_the_payload` |
+| optimization respects its budget | `test_the_candidate_budget_is_respected`, `test_the_time_budget_is_respected` |
+| the recommended candidate genuinely scores best under the given weights | `test_the_recommendation_is_the_top_scorer`, `test_changing_the_weights_changes_the_recommendation` |
+
+Also asserted: a refused candidate is **never scored** (`scores is None`) and
+never evaluated; the scorer cannot reach the AI module (AST check on the
+imports); the optimizer never mutates the base; two runs are identical.
+
+## 5 · HOW TO TEST
+
+    .venv/Scripts/python.exe -m pytest -q                                  # 640
+    .venv/Scripts/python.exe -m pytest backend/tests/test_optimization.py -q
+
+    # section 9 of the CLI is the whole capability, offline
+    .venv/Scripts/python.exe -m backend.scripts.demo battery-pilot-line
+
+    .venv/Scripts/python.exe -m uvicorn backend.app.main:app --port 8001
+    curl -s localhost:8001/api/projects/00000000-0000-0000-0000-000000000002/optimize/objectives
+    curl -s -X POST localhost:8001/api/projects/00000000-0000-0000-0000-000000000002/optimize \
+      -H 'Content-Type: application/json' -d '{"aggressive":true}'
+
+Verified CLI output on the battery project: 22 candidates generated, 21
+evaluated, 1 refused, and the refusal reading
+
+    Drop M09 entirely
+      M09 is a mandatory task and cannot be removed.
+      cites MANDATORY_TASK: UN38.3 safety certification is a legal
+      precondition to shipping.
+
+with `Recommended: Drop M05 entirely` (labelled `-8d` scope change) and
+`Same scope: Split M05 across 2 people` offered beside it, plus the full
+six-row criterion table for the winner.
+
+Timing: a full unbounded search over the 17-task fixture completes in ~250 ms,
+the 12-task one in ~75 ms.
+
+## 6 · DECISIONS
+
+D-38 … D-43 in `docs/DECISIONS.md`. The three that shaped it:
+
+- **D-39 — the gates follow task lineage.** A split is not a deletion.
+- **D-40 — two recommendations, not one.** A scope change must never quietly
+  outrank a restructuring.
+- **D-41 — the time budget is injected, not read.** Keeps `core/` pure and
+  makes the budget test deterministic.
+
+## 7 · DEVIATIONS
+
+1. **`gen_drop_bottleneck_tasks` is an extra generator** beyond the brief's
+   five. It exists to make the refusal reachable: an optimizer that never
+   proposes the cheat never demonstrates that it will not take it. Opt-in, and
+   the default mode generates nothing that cuts scope.
+2. **`scope_change` and `recommended_same_scope`** are not in ARCHITECTURE
+   D.5's response shape. Added because `TASK_REMOVE` is on the brief's own
+   "justified" list for the effort gate, which means a permitted deletion
+   would otherwise outrank every restructuring with no visible caveat.
+3. **`resequence_contended` usually makes the schedule *longer*.** It is
+   proposed anyway, because CPM is resource-blind and this is the only way a
+   resource-feasible ordering reaches the table at all. The score decides;
+   the rationale says plainly what it costs.
+4. **The optimizer persists candidates by default.** Not specified either way.
+   It is what lets the UI diff or apply one without re-running the search, and
+   `persist_candidates: false` turns it off.
+
+## 8 · RISKS
+
+1. **The optimizer writes a lot of `Scenario` rows.** A 20-candidate run
+   creates 20 scenarios, and nothing prunes them. Fine for a demo; a real
+   deployment wants either a TTL or `persist_candidates: false` by default
+   with an explicit "keep this one".
+2. **`test_optimization.py` takes ~40 s** because several API tests run a full
+   search. That is over half the suite's runtime. If it grows, the API tests
+   should share one module-scoped optimize call.
+3. **The six objective weights are mine**, exactly as the risk weights are.
+   Exposed, echoed and adjustable — but a UI that shows only the total inherits
+   my priorities silently. It must render the table.
+4. **`_improvement` normalises by `max(|before|, 1)`**, so a criterion whose
+   base value is near zero saturates immediately: going from 0 to 1 overloaded
+   resource scores the same as 0 to 5. Acceptable at this scale, wrong in
+   general.
+5. **Local search is not implemented.** ARCHITECTURE D.5 mentions combining
+   and perturbing candidates within the budget; this generates a flat pool and
+   ranks it. Combining the top candidates pairwise is the obvious next step and
+   the budget machinery already supports it.
+6. **`gen_resource_levelling` proposes moves to *any* less-loaded resource
+   with a matching skill**, including ones on other teams, which can produce
+   organisationally odd suggestions. The `FIXED_ASSIGNMENT` constraint is the
+   user's tool against that, but nothing in the seed data uses it.

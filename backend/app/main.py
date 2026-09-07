@@ -14,6 +14,7 @@ from backend.app.api.routers import (
     analysis,
     analysis_runs,
     domains,
+    optimize,
     projects,
     scenarios,
     seed,
@@ -61,6 +62,7 @@ app.include_router(analysis.router)
 app.include_router(analysis_runs.router)
 app.include_router(scenarios.project_router)
 app.include_router(scenarios.router)
+app.include_router(optimize.router)
 app.include_router(seed.router)
 
 
