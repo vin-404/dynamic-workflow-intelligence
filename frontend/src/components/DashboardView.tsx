@@ -2,6 +2,7 @@
 
 import { ProjectState } from "@/lib/api";
 import Card, { CardTitle } from "./Card";
+import AccuracyPanel from "./AccuracyPanel";
 
 function StatCard({
   value,
@@ -211,6 +212,9 @@ export default function DashboardView({
           </div>
         </Card>
       </div>
+
+      {/* Engine accuracy verification */}
+      <AccuracyPanel />
     </div>
   );
 }

@@ -10,6 +10,7 @@ import DependencyGraph from "@/components/DependencyGraph";
 import SimulationPanel from "@/components/SimulationPanel";
 import TasksView from "@/components/TasksView";
 import WhyLateView from "@/components/WhyLateView";
+import DemoWalkthrough from "@/components/DemoWalkthrough";
 
 const TABS = [
   { id: "dashboard", label: "Dashboard" },
@@ -27,6 +28,7 @@ export default function Home() {
   const [activeTab, setActiveTab] = useState<TabId>("dashboard");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [demoVisible, setDemoVisible] = useState(false);
 
   useEffect(() => {
     loadState();
@@ -90,13 +92,24 @@ export default function Home() {
         onChange={(id) => setActiveTab(id as TabId)}
       />
       <main className="flex-1 max-w-[1600px] w-full mx-auto p-5">
-        {activeTab === "dashboard" && <DashboardView state={state} onNavigate={(tab) => setActiveTab(tab as TabId)} />}
+        {activeTab === "dashboard" && (
+          <DashboardView
+            state={state}
+            onNavigate={(tab) => setActiveTab(tab as TabId)}
+          />
+        )}
         {activeTab === "why-late" && <WhyLateView state={state} />}
         {activeTab === "bottlenecks" && <BottleneckInbox state={state} />}
         {activeTab === "simulate" && <SimulationPanel state={state} />}
         {activeTab === "graph" && <DependencyGraph state={state} />}
         {activeTab === "tasks" && <TasksView state={state} />}
       </main>
+      <DemoWalkthrough
+        currentTab={activeTab}
+        onNavigate={(tab) => setActiveTab(tab as TabId)}
+        visible={demoVisible}
+        onToggle={() => setDemoVisible(!demoVisible)}
+      />
     </div>
   );
 }

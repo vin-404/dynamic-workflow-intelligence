@@ -2,6 +2,7 @@
 
 import { ProjectState, Bottleneck } from "@/lib/api";
 import Card, { CardTitle } from "./Card";
+import GanttChart from "./GanttChart";
 
 function kindLabel(kind: string): string {
   return kind.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -144,6 +145,12 @@ export default function WhyLateView({ state }: { state: ProjectState }) {
             </p>
           </div>
         )}
+      </Card>
+
+      {/* Timeline */}
+      <Card>
+        <CardTitle>Project Timeline</CardTitle>
+        <GanttChart state={state} />
       </Card>
 
       {/* Root causes ranked */}

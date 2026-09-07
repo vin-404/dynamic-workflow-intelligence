@@ -1,65 +1,171 @@
-# Workflow Intelligence — MVP
+# Dynamic Workflow Intelligence Platform
 
-TECHKNOTS 9. Five files, no database, no auth, no build step.
+**We don't just track work. We understand how work changes.**
 
-## Run
+A deterministic workflow intelligence platform that answers the questions project managers actually ask:
+
+- **Why are we late?** — Root cause analysis with evidence, not guesswork
+- **What if a task slips?** — Simulate delays and see downstream impact instantly
+- **What if a requirement changes?** — Identify which finished work is now invalid
+- **What should I do first?** — Ranked actions by impact score
+
+## Quick Start
+
+### Prerequisites
+- Python 3.12+
+- Node.js 20+
+
+### 1. Backend
 
 ```bash
-pip install fastapi uvicorn networkx
-python demo.py                                  # engine proof, prints to terminal
-uvicorn api:app --reload --port 8000            # then open http://localhost:8000
+# Create and activate virtual environment
+python -m venv .venv
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
+
+# Install dependencies
+pip install -r backend/requirements.txt
+
+# Start the API server (auto-creates SQLite DB and seeds demo data)
+uvicorn backend.app.main:app --port 8001 --reload
 ```
 
-## What's here
+The API is now running at http://localhost:8001 with demo data loaded.
 
-| File | Lines | What it is |
-|---|---|---|
-| `engine.py` | ~250 | CPM schedule, cycle detection, 4 detectors, diff, staleness. **The product.** |
-| `scenario.py` | ~120 | 17 tasks / 5 depts / 3 requirements / event log / 3 planted faults |
-| `demo.py` | ~130 | CLI walkthrough — verifies the engine with no UI involved |
-| `api.py` | ~110 | 4 FastAPI endpoints |
-| `index.html` | ~330 | Single page, vanilla JS, inline CSS, **zero CDN** (works on bad venue wifi) |
+### 2. Frontend
 
-## What it computes
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-- **Schedule** — CPM forward/backward pass → earliest start, slack, critical path.
-  Planned finish vs projected finish, because pretending a stalled task still
-  takes its estimate is how schedules lie.
-- **Bottlenecks** — four detectors, each emitting *evidence* and a *root cause*,
-  ranked by `impact = days lost × (1 + downstream tasks)`. A formula, not a model:
-  anyone can recompute it by hand.
-  - `critical_path_blocker` — walks back to the earliest incomplete zero-slack ancestor
-  - `resource_contention` — dept has more ready tasks than capacity
-  - `stalled_in_review` — no activity past threshold
-  - `ready_but_idle` — unblocked and nobody started it
-- **Change propagation** — diff two schedule states: tasks moved, slack consumed,
-  critical path shifts, new end date, who to notify.
-- **Requirement staleness** — the differentiator. A spec changes, and we separate
-  `must_redo` (consumed an artifact that is now wrong, propagated along *artifact*
-  edges only) from `must_recheck` (merely downstream). Blunt `descendants()` would
-  turn the whole project red and be useless.
-- **Accuracy** — 3 planted faults, 3 detected, 0 false positives.
+Open http://localhost:3000 — the dashboard loads automatically.
 
-## Deliberate non-goals for the MVP
+### 3. Verify (optional)
 
-No auth, no persistence, no live feed, no LLM, no Gantt, no Monte Carlo.
-Each of those is additive; none is load-bearing.
+```bash
+# Run engine regression tests (23 tests)
+python -m pytest backend/tests/test_engine.py -v
 
-## Next three things, in order
+# Run API integration tests (12 tests)
+python -m pytest backend/tests/test_api.py -v
 
-1. **Real event log.** Point `scenario.py`'s loader at a BPI Challenge log
-   (tf-pm.org/resources/logs) and derive durations from historical medians instead
-   of estimates. Removes the "you detect the bugs you planted" objection.
-2. **Live feed.** SSE endpoint replaying the event log at 60× with detectors firing
-   on screen. This is what earns the word "real time" in the problem title.
-3. **Requirement diff from text.** LLM reads a message, proposes a requirement
-   change as a card a human approves. Never auto-applied.
+# Run all tests
+python -m pytest backend/tests/ -v
 
-## Two answers to rehearse
+# Run the original CLI demo
+python demo.py
+```
 
-**"How is this not Jira?"** Jira stores state. We compute delay attribution, root
-cause, propagation and requirement invalidation. Then show panel B.
+### Docker Compose (PostgreSQL)
 
-**"How is this not process mining / Celonis?"** Process mining is retrospective —
-it tells you what the process did. We hold a live dependency model and answer what
-breaks *next* when a date or a spec moves. Diagnosis vs blast radius.
+```bash
+docker compose up
+```
+
+This starts PostgreSQL, the API server, and the frontend. Set environment variables in `.env` (see `.env.example`).
+
+## Architecture
+
+```
+Frontend (Next.js + React + TypeScript + Tailwind + React Flow)
+    |
+    | REST API
+    v
+Backend (FastAPI + SQLAlchemy)
+    |
+    v
+Intelligence Engine (engine.py) <-- deterministic, auditable, no ML
+    |
+    v
+Database (PostgreSQL / SQLite)
+```
+
+**Key principle:** Database + deterministic engine = source of truth. AI is an interpretation layer only — it explains findings but never modifies state directly.
+
+## What the Engine Computes
+
+| Feature | Description |
+|---------|-------------|
+| **CPM Schedule** | Forward/backward pass, earliest start/finish, slack, critical path |
+| **Bottleneck Detection** | 4 detectors with evidence and root cause attribution |
+| **Delay Simulation** | Propagate a task slip, show affected tasks, notify owners |
+| **Requirement Staleness** | Separate MUST REDO (consumed wrong artifact) from MUST RECHECK (merely downstream) |
+| **Schedule Diff** | Before/after comparison showing moved tasks, consumed slack, critical path changes |
+| **Cycle Detection** | Circular dependencies are caught and reported |
+
+### Bottleneck Detectors
+
+1. **Critical Path Blocker** — walks to earliest incomplete zero-slack ancestor
+2. **Resource Contention** — department has more ready tasks than capacity
+3. **Stalled in Review** — no activity past threshold
+4. **Ready but Idle** — unblocked and nobody started it
+
+Impact score = `days_lost x (1 + downstream_tasks)`. A formula, not a model — anyone can recompute it.
+
+## Demo Data
+
+The system ships with a pre-loaded demo scenario: a campus tech symposium with 17 tasks across 5 departments. Three faults are deliberately planted:
+
+- T03 (budget approval) stalled in review for 9 days on the critical path
+- MKT department has 2 ready tasks against capacity 1
+- T12 (registration site) unblocked for 10 days, never started
+
+The engine detects all three with 100% recall and 100% precision.
+
+## Project Structure
+
+```
+engine.py                    # Intelligence engine (DO NOT MODIFY)
+scenario.py                  # Original demo data
+demo.py                      # CLI proof / regression test
+backend/
+  app/
+    main.py                  # FastAPI application
+    api/routers/             # REST endpoints
+    core/                    # Config, database
+    models/                  # SQLAlchemy models
+    schemas/                 # Pydantic schemas
+    services/                # Business logic (intelligence, seed)
+  tests/                     # pytest (engine + API)
+  alembic/                   # Database migrations
+frontend/
+  src/
+    app/                     # Next.js pages
+    components/              # React components
+    lib/                     # API client, types
+docker-compose.yml           # Full stack with PostgreSQL
+```
+
+## API Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/projects` | List all projects |
+| GET | `/api/projects/{id}/state` | Full project intelligence state |
+| GET | `/api/projects/{id}/accuracy` | Detector accuracy vs ground truth |
+| POST | `/api/projects/{id}/simulate/delay` | Simulate task delay |
+| POST | `/api/projects/{id}/simulate/requirement` | Simulate requirement change |
+| GET | `/api/projects/{id}/tasks` | List project tasks |
+| POST | `/api/seed` | Seed demo data (idempotent) |
+
+## How is this different?
+
+**"How is this not Jira?"**
+Jira stores state. We compute delay attribution, root cause, propagation, and requirement invalidation.
+
+**"How is this not process mining / Celonis?"**
+Process mining is retrospective — it tells you what the process *did*. We hold a live dependency model and answer what breaks *next* when a date or a spec moves.
+
+## Test Results
+
+```
+35 tests passing:
+- 23 engine regression tests (schedule, bottlenecks, simulation, staleness, cycles)
+- 12 API integration tests (all endpoints, full regression contract)
+
+Engine accuracy: 3/3 planted faults detected, 0 false positives
+```
