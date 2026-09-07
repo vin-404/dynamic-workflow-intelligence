@@ -3,7 +3,7 @@
 What this is now, what it can and cannot do, what was deleted, what was
 decided, and what I would look at first if I were reviewing it.
 
-Written at the end of Phase 8 and updated at the end of Phase 9.
+All nine phases are complete, committed and tagged (`phase-0-plan` through `phase-9-deploy`).
 
 ---
 
@@ -29,8 +29,12 @@ In this order. It takes about twenty minutes.
    prose.
 6. **`backend/scripts/demo_check.py`** — every claim the demo makes out loud,
    as an assertion. Run it.
+7. **`backend/tests/test_hardening.py`** — what happens when things go wrong:
+   a refusal keeping its structure through the error envelope, readiness
+   failing while liveness passes, the optimizer returning partial results
+   when it runs out of budget.
 
-Then run the demo: `docs/HOW_TO_DEMO.md`.
+Then run the demo: `docs/HOW_TO_DEMO.md`. To deploy it: `docs/DEPLOY.md`.
 
 ---
 
@@ -144,7 +148,7 @@ Nothing else was deleted. `backend/alembic/` is inert but retained (D-03).
 
 ## 4 · Test inventory
 
-**738 passing, 0 failing, 0 skipped**, in about 18 seconds.
+**780 passing, 0 failing, 0 skipped**, in about 19 seconds — and the same 780 against real Postgres.
 
 | File | Tests | Covers |
 |---|---:|---|
@@ -157,6 +161,7 @@ Nothing else was deleted. `backend/alembic/` is inert but retained (D-03).
 | `test_simulation.py` | 53 | Scenarios, diffs, apply-is-the-only-write |
 | `test_risk.py` | 50 | The nine factors, the additive model, unavailability, the not-a-probability contract, display arithmetic |
 | `test_api.py` | 47 | Every endpoint, end to end, over HTTP |
+| `test_hardening.py` | 42 | Structured errors, liveness vs readiness, bounded work, the name picker, identity driving ownership, the guarded reset, seed idempotency |
 | `test_core_purity.py` | 44 | `core/` imports no framework, no ORM, no AI client, does no I/O, holds no mutable module state |
 | `test_authoring.py` | 25 | Creating and editing workflows, versions, sealing |
 | `test_domain_leak.py` | 8 | No domain field in the analysis payload; no `if domain ==` anywhere in `core/` |
@@ -170,7 +175,12 @@ Plus, outside pytest:
 | Playwright journey — seeded project, all six stages | 27 checks, no console errors |
 | Playwright journey — cold start in a user-defined domain | 20 checks, no console errors |
 | Playwright — the AI surfaces | 13 checks, no console errors |
-| Docker image build + `/health` + `/analyze` on both domains | Verified |
+| Playwright — the Phase 9 surfaces | 17 checks, no console errors |
+| `scripts/smoke.sh` — image built from scratch, SQLite | Passed, 30s including the build |
+| `scripts/smoke.sh` — same image, **Postgres, empty database** | Passed, 6s |
+| `scripts/smoke.ps1` — the PowerShell twin | Passed |
+| Full suite against real Postgres | 780 passed |
+| Container restarted twice against a populated Postgres | No duplicate rows |
 
 ### Run it
 
@@ -179,7 +189,24 @@ Plus, outside pytest:
 .venv/Scripts/python.exe -m backend.scripts.reset_db
 .venv/Scripts/python.exe -m backend.scripts.demo_check
 .venv/Scripts/python.exe -m backend.scripts.demo_check --provider recorded
+.venv/Scripts/python.exe -m backend.scripts.perf
+bash scripts/smoke.sh                    # or .\scripts\smoke.ps1
+cd frontend && npm run e2e:all
 ```
+
+### Measured
+
+Warm, over HTTP, SQLite, median of twelve runs:
+
+| Endpoint | Median | Floor in the brief |
+|---|---:|---|
+| `analyze` (17 tasks) | **23.9ms** | under 1s |
+| `simulate` (1 mutation, full diff) | 38.4ms | — |
+| `optimize` (40 candidates, persisted) | 706.5ms | respect the budget |
+
+The optimizer returns **partial ranked results** rather than failing when it
+runs out of time: 11 ranked candidates in 136ms against a 0.1s budget.
+Nothing is cached to make any of these look better.
 
 ---
 
@@ -274,6 +301,21 @@ The reasoning for each is in `docs/DECISIONS.md`. This is the index.
 - **D-59** The "LLM enabled" rehearsal runs against a recorded provider — no key exists.
 - **D-60** `demo_check` asserts what each beat claims, not that each endpoint returns 200.
 
+**Phase 9 — hardening and deployment**
+
+- **D-61** `CORS_ORIGINS` takes a comma-separated list; `*` is refused at startup rather than accepted and silently ignored by browsers.
+- **D-62** `NoDecode` on that field, because pydantic-settings JSON-decodes complex values before any validator runs — without it the app would not start.
+- **D-63** The error envelope passes `detail` through untouched, so a cited constraint survives it.
+- **D-64** `/health` never touches the database; `/ready` does. A liveness probe that fails on a database blip causes a crash loop.
+- **D-65** The request deadline is a backstop; the optimizer's real budget stays the injected `should_stop`, which returns partial results.
+- **D-66** The picked identity is sent and never checked. A test fails if a login endpoint appears.
+- **D-67** `POST /admin/reset-seed` is disabled when no token is configured, and the comparison is constant-time.
+- **D-68** Every stage gets its own error boundary, keyed on the stage.
+- **D-69** The walkthroughs move into `frontend/e2e/` with playwright as a devDependency.
+- **D-70** The frontend gets its own `.dockerignore`, because its build context is `./frontend`.
+- **D-71** The optimizer's spinner advances on a timer slower than the search, so it never overclaims.
+- **D-72** `docs/DEPLOY.md` supersedes the untracked `deploy-kit/` draft, which is left in place rather than deleted.
+
 ---
 
 ## 6 · Blocked
@@ -322,12 +364,24 @@ ever been made is listed as a risk below rather than treated as a blocker
    efficiency × (assignees − 1))` with efficiency 0.6, and a non-divisible
    task refuses speedup entirely. It is a defensible curve, not a measured
    one.
-8. **One process, one SQLite file, no authentication.** By design for this
-   scope. Concurrency beyond a handful of users is untested and multi-user
-   means a name picker, not accounts.
-9. **The dependency graph has no notion of partial completion.** A task is
-   not-started, in-progress, blocked or done. "60% done" cannot be expressed,
-   so a long task in progress carries its whole remaining duration.
-10. **Everything is one client component.** `page.tsx` fetches in the browser
+8. **No authentication, by design.** Multi-user means a name picker: you
+   choose a name, the browser remembers it, and it is checked against
+   nothing. Anyone with the URL can be anyone. Roles on a workflow are
+   advisory and nothing enforces them. The UI says all of this on screen
+   rather than implying otherwise.
+9. **Nothing has been deployed yet.** `docs/DEPLOY.md` is written from the
+   artifacts and verified locally in containers, including against Postgres
+   from an empty database — but the first real Render deploy is still a
+   first.
+10. **One process.** SQLite by default, Postgres by configuration.
+    Concurrency beyond a handful of simultaneous users is untested.
+11. **No notion of partial completion.** A task is not-started,
+    in-progress, blocked or done. "60% done" cannot be expressed, so a long
+    task in progress carries its whole remaining duration.
+12. **Everything is one client component.** `page.tsx` fetches in the browser
     and holds all the state. Correct at this size; it will not survive many
     more stages without splitting.
+13. **A timeout frees the request, not the CPU.** `asyncio.wait_for` cannot
+    interrupt synchronous work, so a pathological input finishes computing
+    after the client has gone. Safe because the work is pure, finite and
+    lock-free — and said plainly in the code rather than implied away.
