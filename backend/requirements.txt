@@ -10,6 +10,13 @@ pydantic-settings==2.15.0
 networkx==3.6.1
 python-dotenv==1.2.3
 
+# The AI service boundary. Optional at runtime: with no ANTHROPIC_API_KEY the
+# application selects NullProvider and every P0 capability still works
+# (D-49), and the import is lazy so the app starts without this installed.
+# Pinned because the structured-output surface this code targets
+# (output_config.format, thinking: adaptive) is 1.x only.
+anthropic==1.4.0
+
 # tests
 httpx==0.28.1
 pytest==9.1.1

@@ -822,3 +822,66 @@ export const optimize = (
     persist_candidates?: boolean;
   },
 ) => post<OptimizeResponse>(`/api/projects/${id}/optimize`, body ?? {});
+
+/* ---------------------------------------------------------------- ai */
+
+/**
+ * The AI layer, which is a boundary rather than a brain.
+ *
+ * Two things the types are shaped to make visible in the UI: `applied` is
+ * always false on an interpretation, and `method` says whether a model or the
+ * deterministic fallback produced the result. Both are worth showing.
+ */
+
+export type AiStatus = {
+  provider: string;
+  available: boolean;
+  model: string | null;
+  roles: string[];
+  cached_responses: number;
+  degraded_behaviour: Record<string, string>;
+  capabilities_without_model: Record<string, string>;
+  guarantees: string[];
+};
+
+export type Interpretation = {
+  understood: boolean;
+  intent: string;
+  method: string;
+  mutations: MutationIn[];
+  unsupported: string[];
+  clarification_needed: string;
+  confidence: string;
+  project_id: string;
+  base_version_id: string;
+  /** Always false. Interpreting never writes; applying is a separate act. */
+  applied: boolean;
+  scenario_id: string | null;
+  validation: {
+    valid: boolean;
+    rejections: {
+      mutation: string;
+      reason: string;
+      constraint?: string;
+      constraint_reason?: string;
+    }[];
+  };
+};
+
+export type Narration = {
+  headline: string;
+  explanation: string;
+  /** "model" or "engine_template" - shown, not hidden. */
+  method: string;
+  rejected_reason: string;
+  numbers_checked: string[];
+  note: string;
+};
+
+export const aiStatus = () => call<AiStatus>(`/api/ai/status`);
+
+export const interpret = (id: string, utterance: string, keep = true) =>
+  post<Interpretation>(`/api/projects/${id}/interpret`, { utterance, keep });
+
+export const explain = (id: string) =>
+  post<Narration>(`/api/projects/${id}/explain`, {});

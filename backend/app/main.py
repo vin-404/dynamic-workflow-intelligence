@@ -11,6 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from backend.app.api.routers import (
+    ai,
     analysis,
     analysis_runs,
     domains,
@@ -63,6 +64,8 @@ app.include_router(analysis_runs.router)
 app.include_router(scenarios.project_router)
 app.include_router(scenarios.router)
 app.include_router(optimize.router)
+app.include_router(ai.router)
+app.include_router(ai.status_router)
 app.include_router(seed.router)
 
 

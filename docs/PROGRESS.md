@@ -1348,3 +1348,188 @@ D-44 … D-48 in `docs/DECISIONS.md`.
 5. **No loading skeletons on stage switches**, only a spinner. Acceptable, but
    the optimize stage can take a couple of seconds and shows nothing but
    "Generating, gating and scoring candidates…".
+
+---
+
+# Phase 7 — The AI service boundary
+
+The model is a **boundary**, not a brain. Three narrow roles, three schemas,
+three fallbacks — and two invariants that are structural rather than
+promised: it cannot write, and it cannot state a number.
+
+## 1 · CHANGED
+
+### `backend/app/ai/` — a new package that imports no database
+
+| Module | Role |
+|---|---|
+| `provider.py` | `AIProvider` protocol, `NullProvider` (the default), `AnthropicProvider`, `AIRequest`/`AIResponse`, `get_provider()` |
+| `schemas.py` | Pydantic output models + the JSON schemas sent to the model. `MutationOut.kind` validates against the closed algebra, so an invented mutation kind never leaves this module |
+| `projection.py` | The compact workflow projection. Keys not names, findings capped, tasks capped. The **only** place a domain leaves the database for a prompt |
+| `runner.py` | Call → validate → **one** repair → reject. Plus `ResponseCache` keyed by prompt hash, and `Interaction` (the audit record) |
+| `interpreter.py` | Natural language → typed mutations, or a refusal |
+| `proposer.py` | Restructuring candidates for the Phase-5 search |
+| `narrator.py` | Rephrases an engine result, and `verify_numbers()` |
+
+Nothing under `ai/` imports SQLAlchemy, a model, a service, a router or the
+app. That is not a convention — a test parses every module in the package and
+fails on the import.
+
+### The three roles, and what each does with no model
+
+| Role | With a model | With `NullProvider` |
+|---|---|---|
+| Interpreter | Structured output → typed mutations | A **labelled** pattern matcher over the same shapes the what-if form offers. Refuses rather than guesses |
+| Proposer | Up to four restructuring candidates | Nothing, and says so. The six deterministic generators are the primary source either way |
+| Narrator | Rephrases the engine's result | The engine's own templated wording |
+
+### `backend/app/services/ai_service.py` — where `ai/` meets the database
+
+The one direction allowed. An interpretation becomes a **pending scenario** —
+the same row a hand-written what-if creates. Every interaction is logged as an
+`AIInteraction` row: role, provider, prompt hash, schema, valid, repaired,
+cached, rejection reason. That log is the evidence the model never had
+authority.
+
+### Endpoints
+
+| Endpoint | Does |
+|---|---|
+| `GET /api/ai/status` | provider, availability, what each role degrades to, the mechanism behind each capability, the guarantees |
+| `POST /api/projects/{id}/interpret` | a sentence → a **pending** scenario. Never applies |
+| `POST /api/projects/{id}/explain` | rephrases the current analysis. Presentation only |
+
+`POST /optimize` gained `use_llm` (default true) and an `llm_proposals` block
+saying what the Proposer contributed. There is deliberately **no**
+`POST /apply-what-the-model-said`: applying goes through
+`POST /api/scenarios/{id}/apply`, which is the single write path.
+
+### Frontend
+
+- **`AskPanel`** on the what-if stage. Type a sentence, see the **typed
+  mutations it produced** before anything runs, a badge saying whether a model
+  or the pattern matcher read it, a badge saying "nothing applied", and — when
+  the workflow refuses it — the constraint and the reason on record. The
+  simulate button evaluates the pending scenario into the existing diff view.
+- **`Explainer`** on the analysis stage. "Say this in plain language", labelled
+  `rephrased by model` or `engine wording`. If a model narration was discarded
+  for inventing a number, **the panel says so** — that is the guarantee
+  working, not an error to hide.
+
+## 2 · PRESERVED
+
+`core/` is untouched by this phase: no import, no call, no new argument. The
+engine does not know the AI layer exists. Every Phase 1–6 endpoint behaves
+identically with the model absent, which is the default.
+
+`anthropic==1.4.0` is now pinned in `requirements.txt`, but the import is lazy
+and the application starts, and the whole suite passes, without it.
+
+## 3 · REMOVED
+
+Nothing. This phase is additive.
+
+## 4 · TESTS
+
+**723 passing, up from 640.** `backend/tests/test_ai_boundary.py` adds 85.
+
+The two invariants, tested structurally:
+
+- **No write path.** Every module under `ai/` is parsed; an import of
+  `sqlalchemy`, `aiosqlite`, `backend.app.db`, `.models`, `.services`, `.api`,
+  `.seed` or `.main` fails the test, as does a call to `.commit()`,
+  `.flush()`, `.execute()` or `.apply_scenario()`. End to end: interpreting
+  leaves the project's `content_hash` byte-identical.
+- **Never the authority for a number.** `verify_numbers` directly, and end to
+  end — a narration claiming "87% likely to slip" is discarded and the
+  engine's own wording is returned with the reason.
+
+Named in the brief, and present:
+
+- Contract tests against **recorded responses**, never a live API. The
+  `AnthropicProvider` tests stub the SDK client and check the request against
+  the installed SDK's own parameter types (`MessageCreateParamsBase`,
+  `OutputConfigParam`) and the response against a real `anthropic.types.
+  Message`. Structured output, adaptive thinking, no prefill, refusal
+  handling, and the 4xx-rejects / 5xx-falls-back split are each asserted.
+- Malformed output **repaired once, then rejected** — with the provider call
+  count asserted at exactly 2, so "one repair" cannot quietly become a retry
+  loop.
+- An LLM proposal that violates a constraint is **rejected with the constraint
+  cited**: the recorded proposal deletes `M09`, and the optimizer returns it
+  refused with `MANDATORY_TASK` and the UN38.3 reason, unscored.
+- The **full P0 feature set under `NullProvider`** — all four capabilities
+  walked end to end over HTTP, plus the refusal beat.
+
+### Run it
+
+```bash
+.venv/Scripts/python.exe -m pytest backend/tests -q
+.venv/Scripts/python.exe -m pytest backend/tests/test_ai_boundary.py -q
+```
+
+### Verified in a browser
+
+13 checks over the two new surfaces, no console errors: the narration is
+labelled as engine wording; the sentence "Anitha is unavailable from day 14 to
+day 21" shows `RESOURCE_UNAVAILABLE_WINDOW {"resource_key":"anitha",...}` and
+"nothing applied" before anything runs; simulating it moves the finish to day
+33 against an unchanged base; "make the coffee" comes back not understood.
+
+## 5 · DECISIONS
+
+D-49 … D-56 in `docs/DECISIONS.md`.
+
+## 6 · DEVIATIONS
+
+None from the brief. One judgement call worth naming: the brief says the
+Interpreter "refuses rather than guesses" with no model, and a pure refusal
+would have been simpler than the pattern matcher. The matcher is **labelled**
+in the API (`method: "deterministic_patterns"`) and in the UI ("matched by
+pattern (no model configured)"), and refuses anything it does not recognise —
+so it adds capability without adding a claim.
+
+## 7 · BUGS FOUND AND FIXED
+
+Three the tests caught, all pre-existing in the Phase 7 source before it was
+covered:
+
+1. **`verify_numbers` crashed on every dict payload.** `out |= _numbers_in(...)`
+   inside a nested function made `out` a local, so the number check raised
+   `UnboundLocalError` — meaning the guarantee it enforces would have
+   fallen back silently. Fixed to `out.update(...)`.
+2. **A task key licensed its own digits.** `T03` in the payload made the
+   number 3 "available", so a narration claiming "3 days" would have passed.
+   The numeric token regex now requires the number not be glued to letters, on
+   both sides — so `T03` is an identifier on the payload side and on the
+   narration side.
+3. **The projection could be talked back to full size.** 300 isolated tasks
+   produce 300 findings that between them name every task, and each one pulled
+   its tasks back into the "worth sending" set. Now capped: the 12 top findings
+   contribute at most 5 tasks each, and a hard `MAX_TASKS_SENT` ceiling keeps
+   the critical path whole and fills the rest by tightest slack.
+
+Plus one cosmetic fix found in the browser: the interpreter built its intent
+sentence from the resource **key**, so it read "anitha is unavailable" — a
+person's name in lower case. Intents now read back the display name while the
+mutation still carries the key.
+
+## 8 · RISKS
+
+1. **The `AnthropicProvider` has never made a real call.** Every test is
+   against a stub or a recorded response, because CI has no key and the brief
+   forbids a live API in tests. The request shape is checked against the
+   installed SDK's own types, which is the strongest guarantee available
+   offline — but the first live call is still a first.
+2. **The pattern matcher is a demo crutch.** It handles four shapes. A user
+   with a key gets a real interpreter; a user without one gets something that
+   looks like one until it does not. It is labelled everywhere, which is the
+   mitigation, not a fix.
+3. **The response cache is process-wide and never evicted.** Fine for one
+   process and a demo; it is a slow leak in a long-running server.
+4. **The Proposer is untested against a real model.** Its prompt forbids
+   stating numbers and the schema constrains its mutations, but whether it
+   proposes anything *useful* is unknown until it runs live. The design
+   degrades safely: a bad proposal is gated and scored like any other, and
+   loses.
+5. **`AIInteraction` rows accumulate with no retention policy.**

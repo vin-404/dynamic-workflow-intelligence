@@ -46,6 +46,7 @@ async def optimize(
     config: EngineConfig | None = None,
     aggressive: bool = False,
     persist_candidates: bool = True,
+    use_llm: bool = True,
 ) -> dict:
     """Run the search and return the per-criterion comparison table.
 
@@ -59,6 +60,22 @@ async def optimize(
     )
     b = budget or Budget()
 
+    # The LLM Proposer is a third candidate *source*, nothing more. Its
+    # proposals go through the same semantic validation, the same hard
+    # constraint gates and the same deterministic scoring as the five
+    # heuristic generators - it gets no shortcut, and with no model configured
+    # the search simply runs on the heuristics.
+    extra: list = []
+    llm_note = {"available": False, "count": 0, "note": "not requested"}
+    if use_llm:
+        from backend.app.core.engine import evaluate as core_evaluate
+        from backend.app.services import ai_service
+
+        base_for_proposals = core_evaluate(snapshot, state, clock, config)
+        extra, llm_note = await ai_service.proposals_for(
+            db, project_id, snapshot, state, base_for_proposals
+        )
+
     started = time.monotonic()
     result: OptimizationResult = core_optimize(
         snapshot,
@@ -68,6 +85,7 @@ async def optimize(
         weights,
         b,
         should_stop=_stopper(b),
+        extra_candidates=extra,
         aggressive=aggressive,
     )
     elapsed = time.monotonic() - started
@@ -78,6 +96,7 @@ async def optimize(
         "base_version_id": str(version.id),
         "elapsed_seconds": round(elapsed, 4),
         "project_start": project.start_date.isoformat(),
+        "llm_proposals": llm_note,
     })
     payload["current"]["projected_end_date"] = V.day_to_date(
         project.start_date, result.base.projected_end

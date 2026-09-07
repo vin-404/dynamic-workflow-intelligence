@@ -26,6 +26,8 @@ import {
   listProjects,
 } from "@/lib/api";
 import DependencyGraph from "@/components/DependencyGraph";
+import AskPanel from "@/components/AskPanel";
+import Explainer from "@/components/Explainer";
 import FindingsPanel from "@/components/FindingsPanel";
 import OptimizePanel from "@/components/OptimizePanel";
 import RiskPanel from "@/components/RiskPanel";
@@ -376,6 +378,7 @@ export default function Home() {
               <div className="space-y-4">
                 <Headline analysis={analysis} />
                 <FindingsPanel analysis={analysis} />
+                <Explainer projectId={project.id} />
                 <DependencyGraph analysis={analysis} />
               </div>
             )}
@@ -412,7 +415,10 @@ export default function Home() {
             title="What if something changes?"
             subtitle="Composed from a closed set of typed changes, evaluated against a copy. Your workflow is not touched, and the panel proves it."
           >
-            <WhatIfPanel workflow={workflow} />
+            <div className="space-y-6">
+              <AskPanel workflow={workflow} />
+              <WhatIfPanel workflow={workflow} />
+            </div>
           </Section>
         )}
 

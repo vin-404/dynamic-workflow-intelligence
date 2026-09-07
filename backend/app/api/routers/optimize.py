@@ -55,6 +55,10 @@ class OptimizeIn(BaseModel):
     aggressive: bool = False
     #: False evaluates without storing the candidates as scenarios.
     persist_candidates: bool = True
+    #: Whether to ask the LLM Proposer for extra candidates. With no model
+    #: configured this changes nothing - the search runs on its deterministic
+    #: generators either way.
+    use_llm: bool = True
 
 
 @router.post("/optimize")
@@ -81,6 +85,7 @@ async def optimize(
             ) if body.budget else None,
             aggressive=body.aggressive,
             persist_candidates=body.persist_candidates,
+            use_llm=body.use_llm,
         )
     except V.NotFound as e:
         raise HTTPException(status_code=404, detail=str(e))
