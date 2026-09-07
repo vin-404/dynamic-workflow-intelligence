@@ -12,8 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.api.limits import bounded
 from backend.app.core.engine.risk import RiskWeights
 from backend.app.db import get_db
+from backend.app.settings import settings
 from backend.app.services import analysis_runs, intelligence, versions as V
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["analysis"])
@@ -64,8 +66,13 @@ async def analyze(
     the tier the evidence reached, and an explicit list of what could not be
     assessed and why."""
     try:
-        return await intelligence.analyze(
-            db, project_id, payload.version_id if payload else None
+        return await bounded(
+            intelligence.analyze(
+                db, project_id, payload.version_id if payload else None
+            ),
+            settings.ANALYZE_TIMEOUT_SECONDS,
+            "Analyzing this workflow",
+            "A workflow large enough to hit this is worth reporting.",
         )
     except V.NotFound as e:
         raise HTTPException(status_code=404, detail=str(e))

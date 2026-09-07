@@ -18,9 +18,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.api.limits import bounded
 from backend.app.core.mutations import MutationKind, payload_schema
 from backend.app.db import get_db
 from backend.app.services import scenarios, versions as V
+from backend.app.settings import settings
 
 project_router = APIRouter(prefix="/api/projects/{project_id}", tags=["scenarios"])
 router = APIRouter(prefix="/api/scenarios", tags=["scenarios"])
@@ -185,7 +187,12 @@ async def evaluate_scenario(
     untouched.
     """
     try:
-        return await scenarios.evaluate_scenario(db, scenario_id)
+        return await bounded(
+            scenarios.evaluate_scenario(db, scenario_id),
+            settings.SIMULATE_TIMEOUT_SECONDS,
+            "Evaluating this scenario",
+            "Your workflow was not modified.",
+        )
     except V.NotFound as e:
         raise _not_found(e)
 
@@ -254,13 +261,18 @@ async def what_if(
     rather than as a second code path that could drift.
     """
     try:
-        return await scenarios.what_if(
-            db,
-            project_id,
-            [m.model_dump(mode="json") for m in payload.mutations],
-            name=payload.name,
-            base_version_id=payload.base_version_id,
-            keep=payload.keep,
+        return await bounded(
+            scenarios.what_if(
+                db,
+                project_id,
+                [m.model_dump(mode="json") for m in payload.mutations],
+                name=payload.name,
+                base_version_id=payload.base_version_id,
+                keep=payload.keep,
+            ),
+            settings.SIMULATE_TIMEOUT_SECONDS,
+            "Simulating this change",
+            "Your workflow was not modified.",
         )
     except scenarios.Invalid as e:
         raise _unprocessable(e)

@@ -17,9 +17,11 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from backend.app.api.limits import bounded
 from backend.app.core.optimization import Budget, ObjectiveWeights
 from backend.app.db import get_db
 from backend.app.services import optimization, versions as V
+from backend.app.settings import settings
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["optimize"])
 
@@ -73,19 +75,30 @@ async def optimize(
     response says whether it stopped early and why.
     """
     body = payload or OptimizeIn()
+    budget = Budget(
+        max_candidates=body.budget.max_candidates,
+        max_seconds=body.budget.max_seconds,
+    ) if body.budget else Budget()
     try:
-        return await optimization.optimize(
-            db,
-            project_id,
-            body.version_id,
-            weights=body.objectives.to_weights() if body.objectives else None,
-            budget=Budget(
-                max_candidates=body.budget.max_candidates,
-                max_seconds=body.budget.max_seconds,
-            ) if body.budget else None,
-            aggressive=body.aggressive,
-            persist_candidates=body.persist_candidates,
-            use_llm=body.use_llm,
+        # Two ceilings, doing different jobs. `budget.max_seconds` is injected
+        # into the pure search, which stops between candidates and returns the
+        # partial ranked results it already has - that is the one that should
+        # ever fire. The request deadline below is the backstop for everything
+        # the search cannot see, and it is deliberately looser.
+        return await bounded(
+            optimization.optimize(
+                db,
+                project_id,
+                body.version_id,
+                weights=body.objectives.to_weights() if body.objectives else None,
+                budget=budget,
+                aggressive=body.aggressive,
+                persist_candidates=body.persist_candidates,
+                use_llm=body.use_llm,
+            ),
+            max(settings.OPTIMIZE_TIMEOUT_SECONDS, (budget.max_seconds or 0) + 10),
+            "The search",
+            "Lower max_candidates or max_seconds and try again.",
         )
     except V.NotFound as e:
         raise HTTPException(status_code=404, detail=str(e))

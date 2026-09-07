@@ -1,0 +1,14 @@
+# The frontend build context is ./frontend, so the repo-root .dockerignore
+# does not apply here. Without this file, `npm ci` copies a node_modules built
+# for the host OS into the image and the build fails in a confusing way.
+node_modules/
+.next/
+out/
+.env
+.env.*
+!.env.example
+npm-debug.log*
+.git
+.DS_Store
+Thumbs.db
+e2e/

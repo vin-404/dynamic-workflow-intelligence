@@ -1,9 +1,14 @@
 # Pinned to what is actually installed in ./.venv and verified green
-# (decision D-01). SQLite only -- no Postgres driver is needed (D-04).
+# (decision D-01). SQLite is the default and Postgres is a URL away.
 fastapi==0.141.1
 uvicorn==0.52.4
 sqlalchemy[asyncio]==2.0.52
 aiosqlite==0.22.1
+# Postgres, by configuration alone (Phase 9.2). Installed always, used only
+# when DATABASE_URL names it: `postgresql+asyncpg://...`. The async driver is
+# the only one needed - nothing in this application takes a synchronous
+# database connection, so psycopg2-binary stays out.
+asyncpg==0.31.0
 alembic==1.19.2
 pydantic==2.13.5
 pydantic-settings==2.15.0
