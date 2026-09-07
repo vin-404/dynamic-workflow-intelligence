@@ -44,7 +44,10 @@ services:
     ports:
       - "3000:3000"
     environment:
+      # Client-side (browser) hits the host-mapped port
       NEXT_PUBLIC_API_URL: http://localhost:8000
+      # Server-side rewrites use Docker service name
+      API_REWRITE_URL: http://api:8000
     depends_on:
       - api
     volumes:
