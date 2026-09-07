@@ -36,3 +36,10 @@ Thumbs.db
 # Build
 dist/
 build/
+
+# added before autonomous run: never commit local db or secrets
+dwi.db
+*.db
+.env
+.env.local
+.pytest_cache/
