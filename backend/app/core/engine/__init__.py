@@ -2,37 +2,71 @@
 Workflow Intelligence - core engine.
 
 Pure. Imports no web framework, no ORM, no AI client, and performs no I/O.
-Enforced by `backend/tests/test_core_purity.py`.
+Enforced by `backend/tests/test_core_purity.py`, which parses every module
+under `core/` and fails on a forbidden import.
 
 Everything here is deterministic arithmetic on a DAG. No ML, no LLM. That is
 deliberate: schedule claims have to be auditable.
 
 This package is the prototype `engine.py` moved (not reimplemented) into
-`core/`, split by responsibility. The public surface below is the same set of
-names the prototype exposed, so `import engine as E` becomes
-`from backend.app.core import engine as E` with no other change.
+`core/` and split by responsibility, plus the `evaluate()` primitive the four
+capabilities are all expressed through.
 """
 from backend.app.core.engine.calendar_ import day_to_date
 from backend.app.core.engine.cpm import apply_delay, diff, schedule
-from backend.app.core.engine.detectors import (
-    DONE,
-    Bottleneck,
-    detect,
-    root_blocker,
+from backend.app.core.engine.detectors import Bottleneck, detect, root_blocker
+from backend.app.core.engine.effort import (
+    EffortModel,
+    duration_for,
+    observed_durations,
+    planned_durations,
+    three_point_durations,
 )
-from backend.app.core.engine.graph import CycleError, build_graph
+from backend.app.core.engine.evaluate import (
+    ENGINE_VERSION,
+    EvaluationResult,
+    Feasibility,
+    evaluate,
+)
+from backend.app.core.engine.graph import (
+    CycleError,
+    assert_acyclic,
+    build_graph,
+    build_graph_from_snapshot,
+    find_cycles,
+    transitive_redundant_edges,
+)
 from backend.app.core.engine.staleness import stale_tasks
 
 __all__ = [
+    # graph
     "CycleError",
     "build_graph",
+    "build_graph_from_snapshot",
+    "assert_acyclic",
+    "find_cycles",
+    "transitive_redundant_edges",
+    # schedule
     "schedule",
     "diff",
     "apply_delay",
-    "stale_tasks",
+    # effort
+    "EffortModel",
+    "duration_for",
+    "planned_durations",
+    "observed_durations",
+    "three_point_durations",
+    # findings
     "Bottleneck",
     "detect",
     "root_blocker",
-    "DONE",
+    # staleness
+    "stale_tasks",
+    # the primitive
+    "evaluate",
+    "EvaluationResult",
+    "Feasibility",
+    "ENGINE_VERSION",
+    # boundary
     "day_to_date",
 ]

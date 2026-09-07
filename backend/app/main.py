@@ -1,35 +1,34 @@
 """
-Dynamic Workflow Intelligence Platform — FastAPI application.
+Dynamic Workflow Intelligence Platform - FastAPI application.
+
+A modular monolith: one process, one SQLite database, one frontend app. The
+only boundaries that earn their complexity are `core/` (purity) and `ai/`
+(swappability plus an offline fallback).
 """
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.app.api.routers import analysis, domains, projects, seed, workflow
+from backend.app.db import Base, async_session, engine
+from backend.app.models import *  # noqa: F401,F403 - register models with Base
+from backend.app.seed import loader
 from backend.app.settings import settings
-from backend.app.db import engine, async_session
-from backend.app.db import Base
-from backend.app.models import (  # noqa: F401 — register models with Base
-    Project, Task, Dependency, Event, Requirement, RequirementConsumer,
-    DepartmentCapacity,
-)
-from backend.app.api.routers import projects, simulate, tasks, seed
-from backend.app.services.seed import seed_demo_project
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # On startup: create tables (for dev; Alembic handles production)
+    # Dev-time schema management: create_all plus a reset-and-seed command,
+    # deliberately instead of migrations (decision D-03).
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    # Seed demo data
     async with async_session() as db:
-        await seed_demo_project(db)
+        await loader.seed_all(db)
 
     yield
 
-    # On shutdown
     await engine.dispose()
 
 
@@ -39,7 +38,6 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
@@ -48,10 +46,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Routers
+app.include_router(domains.router)
 app.include_router(projects.router)
-app.include_router(simulate.router)
-app.include_router(tasks.router)
+app.include_router(workflow.router)
+app.include_router(analysis.router)
 app.include_router(seed.router)
 
 

@@ -10,7 +10,7 @@ import networkx as nx
 def stale_tasks(G: nx.DiGraph, seeds: set[str]) -> dict:
     """A requirement changed.  `seeds` are the tasks that consumed it.
 
-    must_redo    -- reachable from a seed along ARTIFACT edges: this work
+    must_redo    -- reachable from a seed along CONSUMING edges: this work
                     consumed something that is now wrong.
     must_recheck -- merely downstream in time: probably fine, but a human
                     should look.
@@ -24,7 +24,7 @@ def stale_tasks(G: nx.DiGraph, seeds: set[str]) -> dict:
         nxt = set()
         for u in frontier:
             for v in G.successors(u):
-                if G.edges[u, v]["kind"] == "artifact" and v not in must_redo:
+                if G.edges[u, v]["consumes"] and v not in must_redo:
                     must_redo.add(v)
                     nxt.add(v)
         frontier = nxt
