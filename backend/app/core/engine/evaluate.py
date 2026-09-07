@@ -10,9 +10,6 @@ made of (ARCHITECTURE A.0):
 Pure: no I/O, no ORM, no framework, no clock of its own, and no domain. If you
 find yourself writing a second scheduler for simulation or optimization, the
 answer is a second call to this function.
-
-Phase 1 delivers schedule + the ported detectors + feasibility. Phase 2 adds
-the tiered detector registry and `unavailable_checks`; Phase 4 adds risk.
 """
 from __future__ import annotations
 
@@ -21,8 +18,14 @@ from typing import Any
 
 from backend.app.core.engine import effort as effort_model
 from backend.app.core.engine.cpm import schedule
-from backend.app.core.engine.detectors import Bottleneck, detect
-from backend.app.core.engine.graph import build_graph_from_snapshot
+from backend.app.core.engine.detectors import (
+    DetectorContext,
+    available_tier,
+    run_all,
+    unavailable_checks,
+)
+from backend.app.core.engine.findings import Finding, Tier
+from backend.app.core.engine.graph import build_graph_from_snapshot, find_cycles
 from backend.app.core.workflow import (
     Clock,
     EngineConfig,
@@ -31,8 +34,21 @@ from backend.app.core.workflow import (
 )
 
 #: Bumped whenever a change would alter numeric output. Persisted on every
-#: AnalysisRun so a stored result can be told apart from a fresh one.
-ENGINE_VERSION = "2.0.0-phase1"
+#: AnalysisRun, so a stored result can be told apart from a fresh one.
+ENGINE_VERSION = "2.1.0-phase2"
+
+def _empty_schedule(durations: dict[str, float]) -> dict:
+    """A schedule-shaped object for a workflow that cannot be scheduled.
+
+    Every consumer can then read `schedule["critical"]` without a special
+    case, and an unschedulable graph cannot take a page down.
+    """
+    return {
+        "ES": {}, "EF": {}, "LS": {}, "LF": {},
+        "slack": {}, "critical": [],
+        "project_end": 0.0,
+        "durations": dict(durations),
+    }
 
 
 @dataclass
@@ -47,6 +63,9 @@ class Feasibility:
     projected_end_day: float
     margin_days: float | None        # positive = slack against the deadline
     statement: str
+    #: Three deterministic schedule runs, not a distribution. Phase 4 fills
+    #: this in; it stays absent rather than faked until then.
+    three_point: dict | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -55,6 +74,7 @@ class Feasibility:
             "projected_end_day": self.projected_end_day,
             "margin_days": self.margin_days,
             "statement": self.statement,
+            "three_point": self.three_point,
             "is_probability": False,
         }
 
@@ -65,12 +85,16 @@ class EvaluationResult:
     input_hash: str
     schedule: dict
     baseline_schedule: dict
-    findings: list[Bottleneck]
+    findings: list[Finding]
+    suppressed_findings: list[Finding]
     feasibility: Feasibility
     effort_model: dict
     config: dict
     tier_reached: int
+    checks_run: list[str] = field(default_factory=list)
     unavailable_checks: list[dict] = field(default_factory=list)
+    schedulable: bool = True
+    cycles: list[list[str]] = field(default_factory=list)
     risk: dict[str, Any] = field(default_factory=dict)
 
     @property
@@ -85,12 +109,20 @@ class EvaluationResult:
     def slip_days(self) -> float:
         return self.projected_end - self.planned_end
 
+    def findings_by_tier(self) -> dict[int, list[Finding]]:
+        out: dict[int, list[Finding]] = {}
+        for finding in self.findings:
+            out.setdefault(int(finding.tier), []).append(finding)
+        return out
+
     def as_dict(self) -> dict:
         """A stable, JSON-safe projection. This is what the domain-leak test
-        compares byte for byte."""
+        compares byte for byte, and what an `AnalysisRun` stores."""
         return {
             "engine_version": self.engine_version,
             "input_hash": self.input_hash,
+            "schedulable": self.schedulable,
+            "cycles": [list(c) for c in self.cycles],
             "planned_end": self.planned_end,
             "projected_end": self.projected_end,
             "slip_days": self.slip_days,
@@ -105,10 +137,16 @@ class EvaluationResult:
                 "project_end": self.schedule["project_end"],
             },
             "findings": [f.to_dict() for f in self.findings],
+            "suppressed_findings": [f.to_dict() for f in self.suppressed_findings],
+            "finding_counts_by_tier": {
+                str(tier): len(items)
+                for tier, items in sorted(self.findings_by_tier().items())
+            },
             "feasibility": self.feasibility.as_dict(),
             "effort_model": self.effort_model,
             "config": self.config,
             "tier_reached": self.tier_reached,
+            "checks_run": list(self.checks_run),
             "unavailable_checks": self.unavailable_checks,
             "risk": self.risk,
         }
@@ -154,65 +192,6 @@ def _feasibility(
     )
 
 
-def _tier_and_gaps(state: WorkflowState) -> tuple[int, list[dict]]:
-    """How far the evidence actually reaches, and what that leaves unassessed.
-
-    ARCHITECTURE D.1: a brand-new project has no statuses and no history, so
-    most stateful checks are *unavailable*, not clean. Saying so is both the
-    correct engineering answer and the demo beat where the system shows it
-    knows the limits of its own evidence.
-    """
-    gaps: list[dict] = []
-    tier = 0
-    if state.has_statuses:
-        tier = 1
-    else:
-        gaps.append({
-            "tier": 1,
-            "checks": [
-                "critical_path_blocker",
-                "resource_contention",
-                "projected_vs_planned_finish",
-            ],
-            "requires": "task statuses",
-            "why": (
-                "No task has moved off not_started, so there is no way to tell "
-                "which work is actually held up."
-            ),
-            "unlocked_by": "Set a status on your tasks as work progresses.",
-        })
-
-    if state.has_history:
-        tier = max(tier, 2)
-    else:
-        gaps.append({
-            "tier": 2,
-            "checks": ["stalled_in_review", "ready_but_idle", "handoff_latency"],
-            "requires": "an event log of status transitions",
-            "why": (
-                "Aging and staleness are measured from when a status changed. "
-                "With no history there is no elapsed time to measure."
-            ),
-            "unlocked_by": "Record status changes; they accumulate as you work.",
-        })
-
-    gaps.append({
-        "tier": 3,
-        "checks": [
-            "chronic_underestimation",
-            "per_resource_velocity",
-            "calibrated_duration_variance",
-        ],
-        "requires": "actuals from completed past projects",
-        "why": (
-            "Calibration needs history from outside this project. Duration "
-            "spread is currently an assumption, and is labelled as one."
-        ),
-        "unlocked_by": "Complete a project; its actuals feed the next one.",
-    })
-    return tier, gaps
-
-
 def evaluate(
     snapshot: WorkflowSnapshot,
     state: WorkflowState | None = None,
@@ -224,41 +203,90 @@ def evaluate(
 
     `state=None` means cold start: every task not started, no history. That is
     a first-class case, not an error - it is what a judge creating their own
-    project will hit.
+    project will hit, and it still returns real structural findings plus an
+    explicit list of what cannot be assessed yet.
+
+    A cyclic workflow does not raise. It returns `schedulable=False`, the
+    cycles, and a `dependency_cycle` finding - which is far more useful to a
+    UI than an exception, and means a bad graph cannot take the page down.
     """
     st = state if state is not None else WorkflowState.empty(snapshot)
     clk = clock or Clock()
     cfg = config or EngineConfig()
 
     G = build_graph_from_snapshot(snapshot)
-
     planned, model = effort_model.planned_durations(snapshot, cfg)
-    observed = effort_model.observed_durations(snapshot, st, clk, cfg)
 
+    cycles = find_cycles(G)
+    if cycles:
+        ctx = DetectorContext(
+            graph=G,
+            schedule=_empty_schedule(planned),
+            snapshot=snapshot,
+            state=st,
+            clock=clk,
+            config=cfg,
+        )
+        from backend.app.core.engine.detectors import tier0
+
+        return EvaluationResult(
+            engine_version=ENGINE_VERSION,
+            input_hash=snapshot.content_hash(),
+            schedule=_empty_schedule(planned),
+            baseline_schedule=_empty_schedule(planned),
+            findings=tier0.cycles(ctx),
+            suppressed_findings=[],
+            feasibility=Feasibility(
+                verdict="unschedulable",
+                deadline_day=snapshot.deadline_day,
+                projected_end_day=0.0,
+                margin_days=None,
+                statement=(
+                    "This workflow contains a circular dependency, so it has "
+                    "no finish date to compare against a deadline. Break the "
+                    "cycle first."
+                ),
+            ),
+            effort_model=model.as_dict(),
+            config=cfg.as_dict(),
+            tier_reached=int(Tier.STRUCTURAL),
+            checks_run=["dependency_cycle"],
+            unavailable_checks=unavailable_checks(Tier.STRUCTURAL),
+            schedulable=False,
+            cycles=cycles,
+        )
+
+    observed = effort_model.observed_durations(snapshot, st, clk, cfg)
     baseline = schedule(G, planned)
     current = schedule(G, observed)
+    # The slip detector needs both, and a detector only ever sees `ctx`.
+    current_with_baseline = {
+        **current,
+        "baseline_project_end": baseline["project_end"],
+    }
 
-    tier, gaps = _tier_and_gaps(st)
-
-    # Every detector in this module is Tier 1 or above: each of them reasons
-    # about status or elapsed time. Running them against an empty state would
-    # report every first task as "blocking" its own successors, which is
-    # noise dressed as insight. With no statuses the honest output is no
-    # stateful findings plus the `unavailable_checks` block above. Phase 2's
-    # registry adds the Tier-0 structural detectors that *can* run here.
-    findings = (
-        detect(G, current, snapshot, st, clk, cfg) if st.has_statuses else []
+    tier = available_tier(st)
+    ctx = DetectorContext(
+        graph=G,
+        schedule=current_with_baseline,
+        snapshot=snapshot,
+        state=st,
+        clock=clk,
+        config=cfg,
     )
+    active, suppressed, ran = run_all(ctx, tier)
 
     return EvaluationResult(
         engine_version=ENGINE_VERSION,
         input_hash=snapshot.content_hash(),
         schedule=current,
         baseline_schedule=baseline,
-        findings=findings,
+        findings=active,
+        suppressed_findings=suppressed,
         feasibility=_feasibility(snapshot, current["project_end"]),
         effort_model=model.as_dict(),
         config=cfg.as_dict(),
-        tier_reached=tier,
-        unavailable_checks=gaps,
+        tier_reached=int(tier),
+        checks_run=ran,
+        unavailable_checks=unavailable_checks(tier),
     )

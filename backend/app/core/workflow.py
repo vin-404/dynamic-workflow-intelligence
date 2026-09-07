@@ -489,6 +489,10 @@ class EngineConfig:
     fan_out_threshold: int = 3
     #: Serial chain length with no parallelism worth reporting.
     serial_chain_threshold: int = 4
+    #: Share of tasks with zero slack above which the workflow is reported as
+    #: having no absorbing capacity. Half the tasks being critical is common
+    #: and unremarkable; two thirds is a plan with no shock absorber.
+    critical_share_threshold: float = 0.6
 
     def as_dict(self) -> dict:
         return {
@@ -498,4 +502,5 @@ class EngineConfig:
             "duration_spread_provenance": self.duration_spread_provenance,
             "fan_out_threshold": self.fan_out_threshold,
             "serial_chain_threshold": self.serial_chain_threshold,
+            "critical_share_threshold": self.critical_share_threshold,
         }

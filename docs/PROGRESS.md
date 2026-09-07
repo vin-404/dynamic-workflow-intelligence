@@ -313,3 +313,222 @@ D-10 through D-16 in `docs/DECISIONS.md`. The two that shaped the phase:
 6. **`alembic/` still sits there with an empty `versions/`**, inviting someone
    to generate a migration against 18 new tables. Left inert deliberately
    (D-03); `POST /api/seed/reset` is the supported path.
+
+---
+
+# Phase 2 — Capability 1: explainable current bottlenecks
+
+## 1 · CHANGED
+
+### The detector registry
+
+`core/engine/detectors.py` became a package. A detector is now a pure function
+`(DetectorContext) -> Finding[]` registered by name with a **declared data
+tier**, which is what lets `evaluate()` answer two questions instead of one:
+what is wrong with this workflow, and what could it not yet assess.
+
+| File | What it is |
+|---|---|
+| `core/engine/findings.py` | `Tier`, `Impact`, `Suppression`, `Finding`. A `Finding` refuses to be constructed without evidence, an explanation and a valid severity — "never a bare score" is enforced in `__post_init__`, not just intended. |
+| `core/engine/detectors/context.py` | `DetectorContext` — graph, schedule, snapshot, state, clock, config, plus derived lookups computed once (`descendants`, `ancestors`, `last_event`, `resource_label`, `ready_since`). |
+| `core/engine/detectors/__init__.py` | the registry: `all_detectors()` returns a tuple, `run_all()` executes those the evidence supports, `unavailable_checks()` describes the rest. |
+| `core/engine/detectors/tier0.py` | **nine new structural detectors** |
+| `core/engine/detectors/tier1.py` | ported `critical_path_blocker`, `resource_contention`, plus new `projected_vs_planned_finish` |
+| `core/engine/detectors/tier2.py` | ported `stalled_in_review`, `ready_but_idle`, and the contention-age suppression |
+
+The registry is assembled by a **function returning a tuple**, not by a
+decorator writing into a module-level list, because `core/` holds no mutable
+module state. The purity test caught three real violations while I was writing
+this — `TIER_NAMES`, `TIER_REQUIRES`, `TIER_UNLOCKED_BY` and `_WHY` were plain
+module dicts; they are `MappingProxyType` now, and `EMPTY_SCHEDULE` became a
+function.
+
+### The Tier-0 detectors (all nine ARCHITECTURE D.1 names)
+
+| Detector | Fires when | Impact magnitude |
+|---|---|---|
+| `dependency_cycle` | the graph has a cycle, reported **with the cycle** | days in the loop |
+| `deadline_infeasible` | the plan overruns the deadline on structure alone | overshoot days |
+| `single_point_of_failure` | fan-out at or above the threshold | the task's duration |
+| `serial_chain_no_parallelism` | a single-file run at or above the length threshold | the chain's duration |
+| `zero_slack_chain` | the critical share exceeds `critical_share_threshold` | the critical chain's duration |
+| `resource_overallocated` | the schedule needs a resource in more places at once than its capacity | days that must move |
+| `unassigned_critical_task` | critical-path work with no assignee | the task's duration |
+| `redundant_dependency` | an edge implied by a longer path | **0 days, honestly** |
+| `isolated_task` | a task with no edges in an otherwise connected workflow | the task's duration |
+
+### `evaluate()` rewired
+
+- runs the registry, gated by declared tier
+- reports `checks_run`, so **"checked and clean" is distinguishable from "never checked"**
+- reports `unavailable_checks` generated *from the registry* rather than from a hand-maintained list, and including five `PLANNED_CHECKS` that are design commitments not yet built — marked `(not built yet)` so nothing can be mistaken for a check that ran and found nothing
+- reports `suppressed_findings` separately
+- **a cyclic workflow no longer raises.** It returns `schedulable=False`, the cycles, and a `dependency_cycle` finding. A bad graph cannot take a page down.
+
+### `AnalysisRun` persistence
+
+| File | What it is |
+|---|---|
+| `services/analysis_runs.py` | `record()` stores the evaluation with `engine_version` + `input_hash`, findings included; identical re-analysis reuses the existing row rather than writing a duplicate. `get()`, `list_for_project()`. |
+| `api/routers/analysis_runs.py` | `GET /api/analysis/{run_id}` |
+| `api/routers/analysis.py` | `GET /api/projects/{id}/analysis-runs` |
+
+`analyze` now returns `analysis_run_id`. Writing that row is the only write an
+analysis endpoint performs, and it touches no workflow state.
+
+### Impact, decomposed and unit-named
+
+`Impact` carries `magnitude`, `downstream_affected`, the `formula`, and a
+`worked` string (`"9 days lost x (1 + 7 downstream) = 72"`). It also carries
+`magnitude_kind`: at Tier 1+ the magnitude is **days already lost**, measured
+from evidence; at Tier 0 there is no history, so it is **days of work
+exposed**. Conflating those two would be exactly the quiet dishonesty this
+project is trying to avoid, so the unit is named in the payload.
+
+## 2 · PRESERVED
+
+| Prototype behaviour | Where it is now, and proof |
+|---|---|
+| D1 critical-path blocker + root-cause walkback | `tier1.critical_path_blocker` / `tier1.root_blocker`. `test_root_cause_walkback_names_the_blocker_not_the_blocked` |
+| D1 dedupe to one finding per root cause | same function, unchanged |
+| D2 resource contention arithmetic | `tier1.resource_contention`. `test_contention_reports_capacity_not_headcount` still asserts capacity 1, 2 ready, queue `[T11, T12]` |
+| D3 stalled-in-review | `tier2.stalled_in_review`, threshold behaviour unchanged |
+| D4 ready-but-idle, aged from when the last predecessor closed | `tier2.ready_but_idle` |
+| **D4 contention-age suppression** | `tier2.suppress_idle_explained_by_contention`. Kept exactly — the two ages are compared, not blanket-dropped — and now the suppressed finding **survives with its reason attached** (ARCHITECTURE D.2). New test builds the case where it fires. |
+| Impact as a recomputable formula | `Impact`, with both operands and the worked arithmetic in the payload |
+| Every prototype number | 22 / 26 / slip 4 / seven-task critical path / four stateful findings / three root causes. `test_the_original_four_detectors_still_find_exactly_four` |
+| The planted-fault harness | generalised across both domains, `services/intelligence.get_accuracy` |
+
+## 3 · REMOVED
+
+| Removed | Why | Replacement |
+|---|---|---|
+| `detect(G, sched, snapshot, state, clock, config)` as the single entry point | a monolithic `detect()` cannot declare per-detector data requirements, which is what tiering needs | `run_all(ctx)` over the registry |
+| `Bottleneck` | had no `tier`, no `explanation`, and let a caller construct a finding with empty evidence | `Finding`, which refuses to be built without them |
+| `Finding.tasks` → `task_ids`, `attributed_delay_days` → `impact.magnitude` | the brief specifies `task_ids`; and `attributed_delay_days` is a lie at Tier 0, where nothing has been lost yet | `task_ids`, `impact.magnitude` + `impact.magnitude_kind` |
+| `accuracy.precision_vs_planted` | **it punished the detectors for being right.** With three planted faults labelled and eleven real findings, "precision" would have read 33% while every one of the eleven was correct and expected | `recall`, `precision` against fully labelled fixtures, plus `planted_recall` as the headline |
+| `ProjectFixture.ground_truth: dict[str, str]` | keyed by root cause only, so two different findings on one task collided | `labelled: tuple[LabelledFinding, ...]`, keyed by `(kind, root_cause)` with a description and a `planted` flag |
+| `evaluate()` raising `CycleError` | an exception is a worse answer than a finding for a UI | `schedulable=False` + a `dependency_cycle` finding. `schedule()` still raises for direct callers, and that test still passes. |
+
+## 4 · TESTS
+
+| Suite | Phase 1 | Phase 2 | Notes |
+|---|---|---|---|
+| `test_engine.py` | 51 | **64** | prototype regressions + registry + suppression |
+| `test_api.py` | 36 | **46** | tier counts, checks_run, suppressed findings, persisted runs |
+| `test_detectors.py` | — | **43** | precision/recall in both domains; each Tier-0 detector fired *and* silenced; the cold-start contract |
+| `test_core_purity.py` | 24 | **34** | grew with the module count |
+| `test_domain_leak.py` | 7 | 7 | projection now strips `explanation` too |
+| `test_properties.py` | 168 | 168 | unchanged |
+| `test_authoring.py` | 25 | 25 | unchanged |
+| **Total** | **309** | **388 pass / 0 fail / 0 skip** | |
+
+Detector accuracy, measured by the harness itself:
+
+| Fixture | Labelled | Detected | Recall | Precision | Planted found |
+|---|---|---|---|---|---|
+| Campus Tech Symposium | 11 | 11 | **100%** | **100%** | **3 of 3** |
+| Battery Pack Pilot Line | 7 | 7 | **100%** | **100%** | none planted |
+
+Zero missed, zero unexpected, on both.
+
+**Every Tier-0 detector has a negative test.** A detector that fires on
+everything is not a detector, so each one is asserted silent on a workflow it
+should not fire on — and three thresholds (`fan_out_threshold`,
+`critical_share_threshold`, `serial_chain_threshold`) are asserted
+configurable and echoed in the evidence.
+
+Two more assertions of mine turned out wrong and the behaviour right, or the
+behaviour genuinely too lenient:
+
+- `zero_slack_chain` fired at 50% critical, which is common and unremarkable.
+  I raised the threshold to a configurable 0.6 rather than weakening the test.
+- The domain-leak projection needed `explanation` stripped as well as
+  `suggested_action` — both quote the user's own words by design, and
+  `test_findings_quote_the_users_words_but_not_the_engines` asserts they
+  genuinely differ, so the comparison cannot pass by the engine going silent.
+
+## 5 · HOW TO TEST
+
+    .venv/Scripts/python.exe -m pytest -q                              # 388 passed
+    .venv/Scripts/python.exe -m pytest backend/tests/test_detectors.py -q -v
+
+    # the cold-start beat, on a workflow with no history whatsoever
+    .venv/Scripts/python.exe -m backend.scripts.demo battery-pilot-line
+
+    # over HTTP
+    .venv/Scripts/python.exe -m uvicorn backend.app.main:app --reload --port 8001
+    curl -s -X POST localhost:8001/api/projects/00000000-0000-0000-0000-000000000002/analyze
+    curl -s localhost:8001/api/projects/00000000-0000-0000-0000-000000000002/accuracy
+    curl -s localhost:8001/api/projects/00000000-0000-0000-0000-000000000001/analysis-runs
+
+What you should see on the **battery** project: seven Tier-0 findings on a
+workflow with no statuses, no events and no actuals — an infeasible deadline
+by 5 days, a single point of failure, no absorbing slack, two resource
+overloads, two redundant dependencies — `tier_reached: 0`, `checks_run` listing
+exactly the nine structural checks, and `unavailable_checks` naming all five
+that could not run plus five more that are not built yet, each with what it
+needs and what unlocks it.
+
+On the **campus** project: eleven findings across three tiers, `checks_run` of
+14, one suppressed roll-up overload with its reason, and `accuracy` reporting
+recall 100%, precision 100%, planted 3 of 3.
+
+## 6 · DECISIONS
+
+D-17 … D-22 in `docs/DECISIONS.md`. The three that matter most:
+
+- **D-18 — `precision_vs_planted` had to go.** It is the one metric in the
+  prototype that actively misleads: adding correct detectors lowers it. Fully
+  labelling both fixtures costs eighteen labelled findings with descriptions
+  and makes recall *and* precision meaningful.
+- **D-19 — a cyclic workflow returns a finding, not an exception.**
+- **D-21 — `ready_but_idle` is Tier 2, not Tier 1** as ARCHITECTURE D.1's
+  table has it. It ages from a recorded event; with no event log the age is
+  measured from day 0 and it over-reports on every fresh project. The tier is
+  a data requirement, and this detector's requirement is history.
+
+## 7 · DEVIATIONS
+
+1. **`ready_but_idle` moved from ARCHITECTURE's Tier 1 to Tier 2** (D-21).
+   Reasoning above.
+2. **Two detectors beyond the brief's Tier-0 list.**
+   `projected_vs_planned_finish` (Tier 1) is in ARCHITECTURE D.1's table but
+   not in the prompt's list, and it is the number a delivery lead actually
+   asks for. `isolated_task` implements D.1's "orphan/unreachable tasks".
+3. **`PLANNED_CHECKS`.** Five checks appear in `unavailable_checks` marked
+   `(not built yet)` although nothing implements them. Not asked for, but the
+   alternative is a Tier-3 gap that lists nothing, which would imply
+   cross-project calibration is available once you have history. It is not.
+4. **`Impact.magnitude_kind`.** The brief says impact is
+   `days_lost x (1 + |downstream|)`. At Tier 0 nothing has been lost yet, so
+   the same formula runs over "days of work exposed" and the payload names
+   which. Renaming the field is a deviation; silently calling exposure a loss
+   would have been worse.
+5. **`critical_share_threshold` added to `EngineConfig`**, so
+   `zero_slack_chain` is not hardcoded at a number I picked.
+
+## 8 · RISKS
+
+1. **Eleven findings on the campus fixture is a lot to read**, and three of
+   them share the root cause T03 (blocker, single point of failure, stalled in
+   review). All three are true and distinct, but the UI must group by root
+   cause or Phase 6 will ship a wall of red. Noted for the findings panel.
+2. **`resource_overallocated` does a boundary sweep per resource** — fine at
+   this scale, but combined with `transitive_redundant_edges`' graph-copy per
+   edge it is the slowest thing in `evaluate()`. Both need attention before
+   the Phase 5 optimizer calls `evaluate()` thousands of times; measuring it
+   is the first task of that phase.
+3. **The labelled fixtures are now a strict regression lock.** Any new
+   detector that fires on either seed fixture fails `test_precision_is_100_percent`
+   until it is labelled. That is the intended behaviour — it forces a
+   deliberate review of every new detection — but it will feel like friction,
+   and the fix is to add the label, never to loosen the test.
+4. **`suppress_idle_explained_by_contention` runs after all detectors, in
+   `run_all`.** It is the only cross-detector interaction, and it is currently
+   hardcoded rather than declared. If a second suppression rule appears it
+   should become a declared post-pass, not a second `if` in `run_all`.
+5. **`projected_vs_planned_finish` reads `baseline_project_end`**, which
+   `evaluate()` injects into the schedule dict. That is a slightly smelly
+   channel — a detector reading a key no scheduler produces. It works and it is
+   tested, but a `DetectorContext.baseline_schedule` field would be cleaner.

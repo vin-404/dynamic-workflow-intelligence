@@ -24,10 +24,16 @@ from backend.app.core.engine import evaluate as core_evaluate
 from backend.app.core.engine import stale_tasks
 from backend.app.core.engine.graph import build_graph_from_snapshot
 from backend.app.core.workflow import EngineConfig, WorkflowSnapshot
-from backend.app.services import versions as V
+from backend.app.services import analysis_runs, versions as V
 from backend.app.services.versions import NotFound  # re-exported for routers
 
-__all__ = ["NotFound", "get_workflow", "analyze", "requirement_impact", "get_accuracy"]
+__all__ = [
+    "NotFound",
+    "get_workflow",
+    "analyze",
+    "requirement_impact",
+    "get_accuracy",
+]
 
 
 def _resource_labels(snapshot: WorkflowSnapshot) -> dict[str, str]:
@@ -139,11 +145,14 @@ async def analyze(
     project_id: uuid.UUID,
     version_id: uuid.UUID | None = None,
     config: EngineConfig | None = None,
+    persist: bool = True,
 ) -> dict:
     """Capability 1: `evaluate(W)`, serialised.
 
-    A pure read over an immutable snapshot. Nothing here writes workflow
-    state (ARCHITECTURE E's contract rule).
+    A pure read over the immutable snapshot. The only row it writes is an
+    `AnalysisRun` recording `engine_version` and `input_hash` so the result is
+    reproducible and comparable - **no workflow state is touched**, which is
+    the contract rule in ARCHITECTURE E.
     """
     project, version, snapshot, state, clock = await V.load_context(
         db, project_id, version_id
@@ -179,7 +188,22 @@ async def analyze(
         })
 
     payload = result.as_dict()
+
+    run_id = None
+    if persist:
+        run = await analysis_runs.record(
+            db,
+            project.id,
+            result,
+            subject_type="version",
+            subject_id=version.id,
+            params={"today_day": project.today_day},
+        )
+        run_id = str(run.id)
+        await db.commit()
+
     payload.update({
+        "analysis_run_id": run_id,
         "project_id": str(project.id),
         "project_name": project.name,
         "version_id": str(version.id),
@@ -281,12 +305,24 @@ async def requirement_impact(
 async def get_accuracy(
     db: AsyncSession, project_id: uuid.UUID, version_id: uuid.UUID | None = None
 ) -> dict:
-    """Detector precision/recall against the fixture's planted faults.
+    """Detector precision and recall against a fully labelled fixture.
 
-    The prototype hardcoded the ground truth in this function. It now comes
-    from the fixture that planted it, so the harness generalises to every seed
-    domain instead of one. A fixture with nothing planted reports that
-    honestly rather than claiming 100%.
+    The prototype hardcoded three planted faults in this function and reported
+    `precision_vs_planted`. That metric punished the detectors for being right
+    about anything nobody had written down - and once the Tier-0 detectors
+    landed, being right about eight more things would have "dropped precision"
+    from 100% to 33%. So the fixtures now label **every** problem they are
+    known to contain, and the numbers below mean what they say:
+
+    * `planted_recall` - the headline: did we find the faults authored
+      deliberately to be found?
+    * `recall` - of everything this fixture is known to contain, how much did
+      we find? A drop means a detector regressed.
+    * `precision` - of everything we reported, how much was expected? A drop
+      means a detector started firing spuriously.
+
+    A project with no labels says so and reports no score, rather than
+    inventing one.
     """
     from backend.app.seed.fixtures import FIXTURE_BUILDERS
     from backend.app.seed.loader import PROJECT_IDS
@@ -298,46 +334,75 @@ async def get_accuracy(
     fixture_key = next(
         (k for k, pid in PROJECT_IDS.items() if pid == project.id), None
     )
-    ground_truth = (
-        dict(FIXTURE_BUILDERS[fixture_key]().ground_truth)
+    fixture = (
+        FIXTURE_BUILDERS[fixture_key]()
         if fixture_key in FIXTURE_BUILDERS
-        else {}
+        else None
     )
 
     result = core_evaluate(snapshot, state, clock)
-    detected = {f.root_cause for f in result.findings if f.root_cause}
+    detected = {
+        (f.kind, f.root_cause) for f in result.findings if f.root_cause
+    }
 
-    if not ground_truth:
+    def ref_str(ref: tuple[str, str]) -> str:
+        return f"{ref[0]}@{ref[1]}"
+
+    if fixture is None or not fixture.labelled:
         return {
             "project_id": str(project.id),
-            "has_ground_truth": False,
-            "planted": 0,
+            "has_labels": False,
+            "labelled": 0,
             "detected": len(detected),
-            "detections": sorted(detected),
+            "detections": sorted(ref_str(r) for r in detected),
             "note": (
-                "No planted faults are labelled for this project, so precision "
-                "and recall are undefined. Reporting a score here would be "
+                "No findings are labelled for this project, so precision and "
+                "recall are undefined. Reporting a score here would be "
                 "meaningless."
             ),
-            "ground_truth": {},
+            "labels": [],
             "true_positives": [],
             "missed": [],
-            "extra": sorted(detected),
+            "unexpected": sorted(ref_str(r) for r in detected),
             "recall": None,
-            "precision_vs_planted": None,
+            "precision": None,
+            "planted": 0,
+            "planted_found": [],
+            "planted_recall": None,
         }
 
-    truth = set(ground_truth)
-    tp = sorted(truth & detected)
+    labelled = fixture.labelled_refs
+    planted = {f.ref for f in fixture.planted}
+    tp = labelled & detected
+
+    # The engine's own snapshot of what it could and could not check, so a
+    # missed label can be read as "regressed" or "not yet unlockable".
     return {
         "project_id": str(project.id),
-        "has_ground_truth": True,
-        "planted": len(truth),
+        "has_labels": True,
+        "engine_version": result.engine_version,
+        "tier_reached": result.tier_reached,
+        "checks_run": result.checks_run,
+        "labelled": len(labelled),
         "detected": len(detected),
-        "true_positives": tp,
-        "missed": sorted(truth - detected),
-        "extra": sorted(detected - truth),
-        "recall": len(tp) / len(truth) if truth else None,
-        "precision_vs_planted": len(tp) / len(detected) if detected else None,
-        "ground_truth": ground_truth,
+        "true_positives": sorted(ref_str(r) for r in tp),
+        "missed": sorted(ref_str(r) for r in labelled - detected),
+        "unexpected": sorted(ref_str(r) for r in detected - labelled),
+        "recall": len(tp) / len(labelled) if labelled else None,
+        "precision": len(tp) / len(detected) if detected else None,
+        "planted": len(planted),
+        "planted_found": sorted(ref_str(r) for r in planted & detected),
+        "planted_recall": (
+            len(planted & detected) / len(planted) if planted else None
+        ),
+        "labels": [
+            {
+                "kind": f.kind,
+                "root_cause": f.root_cause,
+                "description": f.description,
+                "planted": f.planted,
+                "detected": f.ref in detected,
+            }
+            for f in fixture.labelled
+        ],
     }

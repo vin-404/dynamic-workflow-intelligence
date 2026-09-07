@@ -13,7 +13,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.db import get_db
-from backend.app.services import intelligence, versions as V
+from backend.app.services import analysis_runs, intelligence, versions as V
 
 router = APIRouter(prefix="/api/projects/{project_id}", tags=["analysis"])
 
@@ -87,3 +87,18 @@ async def accuracy(
         return await intelligence.get_accuracy(db, project_id, version_id)
     except V.NotFound as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@router.get("/analysis-runs")
+async def list_analysis_runs(
+    project_id: uuid.UUID,
+    limit: int = 20,
+    db: AsyncSession = Depends(get_db),
+):
+    """History of analyses for this project, newest first. Each row carries
+    the engine version and input hash that produced it."""
+    try:
+        await V.get_project(db, project_id)
+    except V.NotFound as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    return await analysis_runs.list_for_project(db, project_id, limit)

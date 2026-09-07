@@ -89,10 +89,56 @@ class TestAnalysisRegression:
         assert len(analysis["tasks"]) == 17
 
     async def test_finding_count_and_root_causes(self, analysis):
-        assert len(analysis["findings"]) == 4
-        assert {f["root_cause"] for f in analysis["findings"]} == {
-            "T03", "mkt", "T12"
+        """The prototype reported four findings from four stateful detectors.
+        Phase 2 adds the Tier-0 structural ones, so this fixture reports
+        eleven - all eleven labelled on the fixture, so none is noise."""
+        assert len(analysis["findings"]) == 11
+        original = {
+            "critical_path_blocker", "resource_contention",
+            "stalled_in_review", "ready_but_idle",
         }
+        prototype = [f for f in analysis["findings"] if f["kind"] in original]
+        assert len(prototype) == 4
+        assert {f["root_cause"] for f in prototype} == {"T03", "mkt", "T12"}
+
+    async def test_findings_declare_their_tier(self, analysis):
+        by_tier = analysis["finding_counts_by_tier"]
+        assert by_tier == {"0": 6, "1": 3, "2": 2}
+        for f in analysis["findings"]:
+            assert f["tier"] in (0, 1, 2, 3)
+            assert f["tier_name"] in (
+                "structural", "stateful", "historical", "cross-project"
+            )
+
+    async def test_analysis_reports_which_checks_ran(self, analysis):
+        """"Checked and clean" must be distinguishable from "never checked"."""
+        assert len(analysis["checks_run"]) == 14
+        assert "stalled_in_review" in analysis["checks_run"]
+
+    async def test_suppressed_findings_are_returned_with_their_reason(
+        self, analysis
+    ):
+        rolled_up = [
+            f for f in analysis["suppressed_findings"]
+            if f["root_cause"] == "fac"
+        ]
+        assert rolled_up, "the roll-up overload should be kept, not dropped"
+        assert rolled_up[0]["suppressed"]["by"] == "resource_overallocated"
+        assert "Suresh" in rolled_up[0]["suppressed"]["reason"]
+
+    async def test_analysis_run_is_persisted_with_provenance(
+        self, api_client, analysis
+    ):
+        assert analysis["analysis_run_id"]
+        r = await api_client.get(
+            f"/api/analysis/{analysis['analysis_run_id']}"
+        )
+        assert r.status_code == 200
+        run = r.json()
+        assert run["engine_version"] == analysis["engine_version"]
+        assert run["input_hash"] == analysis["input_hash"]
+        assert run["scores"]["projected_end"] == 26.0
+        assert len(run["findings"]) == 12       # 11 active + 1 suppressed
 
     async def test_resources_replaced_departments(self, analysis):
         """The prototype returned `departments: {ORG: 2, FIN: 1, ...}`. It now
@@ -152,8 +198,20 @@ class TestAnalysisRegression:
         for f in analysis["findings"]:
             assert f["evidence"], f"{f['kind']} emitted a bare score"
             assert f["suggested_action"]
+            assert f["explanation"]
+
+    async def test_impact_is_a_visible_formula(self, analysis):
+        """Never a bare score: both operands and the worked arithmetic travel
+        with every number, so a reader can recompute it by hand."""
+        for f in analysis["findings"]:
+            impact = f["impact"]
             assert f["impact_score"] == pytest.approx(
-                f["attributed_delay_days"] * (1 + len(f["downstream_affected"]))
+                impact["magnitude"] * (1 + impact["downstream_affected"])
+            )
+            assert impact["formula"]
+            assert impact["worked"]
+            assert impact["magnitude_kind"] in (
+                "observed_delay_days", "exposed_days"
             )
 
     async def test_analysis_is_available_as_a_get(self, api_client, analysis):
@@ -186,15 +244,54 @@ class TestColdStartProject:
         assert analysis["feasibility"]["verdict"] == "infeasible"
         assert analysis["feasibility"]["margin_days"] == -5.0
 
-    async def test_accuracy_refuses_to_score_without_labelled_faults(
+    async def test_it_finds_real_structural_problems_with_no_history(
+        self, analysis
+    ):
+        """The cold-start payoff: seven findings on a workflow with no
+        statuses, no events and no actuals at all."""
+        assert len(analysis["findings"]) == 7
+        assert all(f["tier"] == 0 for f in analysis["findings"])
+        kinds = {f["kind"] for f in analysis["findings"]}
+        assert {
+            "deadline_infeasible", "single_point_of_failure",
+            "zero_slack_chain", "resource_overallocated",
+            "redundant_dependency",
+        } <= kinds
+
+    async def test_it_ran_only_the_structural_checks(self, analysis):
+        assert len(analysis["checks_run"]) == 9
+        for name in ("critical_path_blocker", "resource_contention",
+                     "stalled_in_review", "ready_but_idle"):
+            assert name not in analysis["checks_run"]
+
+    async def test_unavailable_checks_name_the_detectors_that_did_not_run(
+        self, analysis
+    ):
+        listed = " ".join(
+            check
+            for gap in analysis["unavailable_checks"]
+            for check in gap["checks"]
+        )
+        assert "critical_path_blocker" in listed
+        assert "stalled_in_review" in listed
+        assert "calibrated_duration_variance" in listed
+
+    async def test_accuracy_reports_no_planted_faults_but_does_score_labels(
         self, api_client
     ):
+        """This fixture plants nothing in the "stalled task" sense, so the
+        planted-recall headline is undefined - but every structural problem it
+        contains is labelled, so recall and precision are real."""
         r = await api_client.get(f"/api/projects/{MFG_PROJECT_ID}/accuracy")
         assert r.status_code == 200
         d = r.json()
-        assert d["has_ground_truth"] is False
-        assert d["recall"] is None
-        assert d["precision_vs_planted"] is None
+        assert d["has_labels"] is True
+        assert d["planted"] == 0
+        assert d["planted_recall"] is None
+        assert d["recall"] == 1.0
+        assert d["precision"] == 1.0
+        assert d["missed"] == []
+        assert d["unexpected"] == []
 
 
 class TestWorkflowView:
@@ -270,17 +367,47 @@ class TestRequirementImpact:
 
 
 class TestAccuracyHarness:
-    async def test_recall_and_precision_still_100_percent(self, api_client):
+    """Precision and recall against a *fully* labelled fixture.
+
+    The prototype labelled three planted faults and reported
+    `precision_vs_planted`. Once the Tier-0 detectors landed, being right
+    about eight more real problems would have "dropped precision" to 33%, so
+    the fixtures now label everything they are known to contain and these
+    numbers mean what they say.
+    """
+
+    @pytest_asyncio.fixture
+    async def accuracy(self, api_client):
         r = await api_client.get(f"/api/projects/{EVENT_PROJECT_ID}/accuracy")
         assert r.status_code == 200
-        d = r.json()
-        assert d["recall"] == 1.0
-        assert d["precision_vs_planted"] == 1.0
-        assert sorted(d["true_positives"]) == ["T03", "T12", "mkt"]
+        return r.json()
 
-    async def test_ground_truth_comes_from_the_fixture(self, api_client):
-        r = await api_client.get(f"/api/projects/{EVENT_PROJECT_ID}/accuracy")
-        assert r.json()["has_ground_truth"] is True
+    async def test_all_three_planted_faults_are_still_found(self, accuracy):
+        assert accuracy["planted"] == 3
+        assert accuracy["planted_recall"] == 1.0
+        assert accuracy["planted_found"] == [
+            "ready_but_idle@T12",
+            "resource_contention@mkt",
+            "stalled_in_review@T03",
+        ]
+
+    async def test_recall_and_precision_are_both_100_percent(self, accuracy):
+        assert accuracy["recall"] == 1.0
+        assert accuracy["precision"] == 1.0
+        assert accuracy["missed"] == []
+        assert accuracy["unexpected"] == []
+
+    async def test_labels_come_from_the_fixture_with_descriptions(self, accuracy):
+        assert accuracy["has_labels"] is True
+        assert len(accuracy["labels"]) == 11
+        for label in accuracy["labels"]:
+            assert label["description"]
+            assert label["detected"] is True
+
+    async def test_accuracy_reports_the_engine_it_measured(self, accuracy):
+        assert accuracy["engine_version"]
+        assert accuracy["tier_reached"] == 2
+        assert len(accuracy["checks_run"]) == 14
 
 
 class TestNotFound:

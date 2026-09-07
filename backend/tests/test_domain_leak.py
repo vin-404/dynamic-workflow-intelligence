@@ -119,21 +119,38 @@ def kitchen():
     return _build(_KITCHEN_NAMES, "Kitchen Brigade", ["Cook A", "Cook B"])
 
 
-def _numeric_projection(result) -> dict:
-    """Everything the engine computed, with the human-readable strings that
-    legitimately echo the input's own words stripped out.
+#: Fields that legitimately quote the workflow's own words. A finding that
+#: said "unblock the task" instead of "unblock Security review" would be
+#: useless, so prose is *expected* to differ between two domains. What must
+#: not differ is any number, any structural conclusion, or any verdict.
+PROSE_FIELDS = ("suggested_action", "explanation")
+PROSE_EVIDENCE_KEYS = ("resource_name", "assigned_to", "chain")
 
-    Names, resource labels and suggested actions quote the user's data by
-    design - a finding that said "unblock the task" instead of "unblock
-    Security review" would be useless. What must not differ is any number,
-    any structural conclusion, or any verdict.
+
+def _numeric_projection(result) -> dict:
+    """Everything the engine computed, with the prose that quotes user data
+    removed.
+
+    `test_findings_quote_the_users_words_but_not_the_engines` asserts that the
+    stripped prose genuinely *does* differ, so this projection cannot pass by
+    the engine having gone silent.
     """
     payload = result.as_dict()
     payload.pop("input_hash", None)  # hashes the names, so it differs by design
-    for finding in payload["findings"]:
-        finding.pop("suggested_action", None)
-        finding["evidence"].pop("resource_name", None)
-        finding["evidence"].pop("assigned_to", None)
+
+    def scrub(finding: dict) -> dict:
+        for field in PROSE_FIELDS:
+            finding.pop(field, None)
+        for key in PROSE_EVIDENCE_KEYS:
+            finding["evidence"].pop(key, None)
+        if finding.get("suppressed"):
+            finding["suppressed"].pop("reason", None)
+        return finding
+
+    payload["findings"] = [scrub(f) for f in payload["findings"]]
+    payload["suppressed_findings"] = [
+        scrub(f) for f in payload["suppressed_findings"]
+    ]
     payload["feasibility"].pop("statement", None)
     return payload
 

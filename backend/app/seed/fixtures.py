@@ -56,6 +56,31 @@ class DomainFixture:
 
 
 @dataclass(frozen=True)
+class LabelledFinding:
+    """One problem this fixture is known to contain.
+
+    Labelling every finding a fixture legitimately produces - not only the
+    three faults planted for the original demo - is what makes precision and
+    recall mean something. Recall against a partial label set flatters the
+    detectors; precision against one punishes them for being right about
+    something nobody wrote down.
+
+    `planted=True` marks a fault authored deliberately to be found. The rest
+    are structural facts of the fixture that the Tier-0 detectors correctly
+    identify.
+    """
+
+    kind: str
+    root_cause: str
+    description: str
+    planted: bool = False
+
+    @property
+    def ref(self) -> tuple[str, str]:
+        return (self.kind, self.root_cause)
+
+
+@dataclass(frozen=True)
 class MemberFixture:
     email: str
     name: str
@@ -74,10 +99,19 @@ class ProjectFixture:
     snapshot: WorkflowSnapshot
     state: WorkflowState
     members: tuple[MemberFixture, ...] = ()
-    #: Planted faults, for the detector precision/recall harness. Keyed by the
-    #: root cause the detectors are expected to name.
-    ground_truth: Mapping[str, str] = field(default_factory=dict)
+    #: Every problem this fixture is known to contain, for the detector
+    #: precision/recall harness.
+    labelled: tuple[LabelledFinding, ...] = ()
     owner_email: str = "owner@example.com"
+
+    @property
+    def planted(self) -> tuple[LabelledFinding, ...]:
+        """The subset authored deliberately as faults to be found."""
+        return tuple(f for f in self.labelled if f.planted)
+
+    @property
+    def labelled_refs(self) -> set[tuple[str, str]]:
+        return {f.ref for f in self.labelled}
 
 
 # ---------------------------------------------------------------------------
@@ -218,11 +252,65 @@ _EVENT_REQUIREMENTS = [
     ("R3", "On-site only, no streaming", ("T05", "T12", "T17")),
 ]
 
-_EVENT_GROUND_TRUTH = {
-    "T03": "budget approval stalled in review for 9 days (critical path)",
-    "mkt": "marketing has 2 ready tasks (T11, T12) against capacity 1",
-    "T12": "registration site unblocked for 10 days, never started",
-}
+#: Everything this fixture is known to contain. The three `planted=True`
+#: entries are the faults the original prototype authored deliberately and
+#: measured recall against; the rest are structural facts of the same
+#: workflow, which the Tier-0 detectors correctly identify.
+_EVENT_LABELLED = (
+    # -- the three planted faults, preserved verbatim from the prototype
+    LabelledFinding(
+        "stalled_in_review", "T03",
+        "budget approval stalled in review for 9 days (critical path)",
+        planted=True,
+    ),
+    LabelledFinding(
+        "resource_contention", "mkt",
+        "marketing has 2 ready tasks (T11, T12) against capacity 1",
+        planted=True,
+    ),
+    LabelledFinding(
+        "ready_but_idle", "T12",
+        "registration site unblocked for 10 days, never started",
+        planted=True,
+    ),
+    # -- consequences of those faults, at other tiers
+    LabelledFinding(
+        "critical_path_blocker", "T03",
+        "T03 is the earliest unfinished zero-slack task, so it is the root "
+        "cause of every blocked task behind it",
+    ),
+    LabelledFinding(
+        "projected_vs_planned_finish", "T03",
+        "T03 running 7 days over its estimate is what makes the projection "
+        "day 26 against a planned day 22",
+    ),
+    # -- structural facts of the workflow, findable with no history at all
+    LabelledFinding(
+        "single_point_of_failure", "T01",
+        "T01 gates five workstreams directly: scope, budget, sponsorship, "
+        "brand and speakers",
+    ),
+    LabelledFinding(
+        "single_point_of_failure", "T03",
+        "budget approval gates facilities, vendors and the speaker track",
+    ),
+    LabelledFinding(
+        "deadline_infeasible", "T17",
+        "day 26 projected against a day 24 deadline: infeasible by 2 days",
+    ),
+    LabelledFinding(
+        "resource_overallocated", "suresh",
+        "Suresh is scheduled on T04 and T05 in the same window with capacity 1",
+    ),
+    LabelledFinding(
+        "redundant_dependency", "T01->T04",
+        "already implied by T01 -> T02 -> T03 -> T04",
+    ),
+    LabelledFinding(
+        "redundant_dependency", "T01->T13",
+        "already implied by T01 -> T02 -> T03 -> T13",
+    ),
+)
 
 
 def event_operations_fixture() -> ProjectFixture:
@@ -320,7 +408,7 @@ def event_operations_fixture() -> ProjectFixture:
             MemberFixture("priya@example.com", "Priya", "editor"),
             MemberFixture("viewer@example.com", "Sponsor Liaison", "viewer"),
         ),
-        ground_truth=dict(_EVENT_GROUND_TRUTH),
+        labelled=_EVENT_LABELLED,
     )
 
 
@@ -406,6 +494,46 @@ _MFG_REQUIREMENTS = [
     ("RQ2", "Enclosure IP67, no active cooling", ("M04", "M06", "M07")),
     ("RQ3", "Certified to UN38.3 before any customer shipment", ("M09", "M12")),
 ]
+
+
+#: This fixture plants nothing in the "stalled task" sense - it has no history
+#: at all. Everything labelled here is a structural fact of the plan, findable
+#: at Tier 0, which is exactly the cold-start case the tiering exists for.
+_MFG_LABELLED = (
+    LabelledFinding(
+        "deadline_infeasible", "M12",
+        "day 31 projected against a day 26 deadline: infeasible by 5 days "
+        "before anything has gone wrong",
+    ),
+    LabelledFinding(
+        "single_point_of_failure", "M01",
+        "the cell specification gates sourcing, supplier qualification, "
+        "enclosure design and line layout",
+    ),
+    LabelledFinding(
+        "zero_slack_chain", "M01",
+        "8 of 12 tasks have zero slack, so the plan has almost no capacity to "
+        "absorb a delay anywhere",
+    ),
+    LabelledFinding(
+        "resource_overallocated", "vikram",
+        "Vikram is scheduled on sourcing and tooling in overlapping windows "
+        "with capacity 1",
+    ),
+    LabelledFinding(
+        "resource_overallocated", "testrig",
+        "the thermal and electrical tests are both booked on the single test "
+        "rig in the same window",
+    ),
+    LabelledFinding(
+        "redundant_dependency", "M01->M02",
+        "already implied by M01 -> M03 -> M02",
+    ),
+    LabelledFinding(
+        "redundant_dependency", "M04->M06",
+        "already implied by M04 -> M05 -> M06",
+    ),
+)
 
 
 def hardware_manufacturing_fixture() -> ProjectFixture:
@@ -518,7 +646,7 @@ def hardware_manufacturing_fixture() -> ProjectFixture:
             MemberFixture("meera@example.com", "Meera", "editor"),
             MemberFixture("lena@example.com", "Lena", "viewer"),
         ),
-        ground_truth={},
+        labelled=_MFG_LABELLED,
     )
 
 

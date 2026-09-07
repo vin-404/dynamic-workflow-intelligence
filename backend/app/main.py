@@ -10,7 +10,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.api.routers import analysis, domains, projects, seed, workflow
+from backend.app.api.routers import (
+    analysis,
+    analysis_runs,
+    domains,
+    projects,
+    seed,
+    workflow,
+)
 from backend.app.db import Base, async_session, engine
 from backend.app.models import *  # noqa: F401,F403 - register models with Base
 from backend.app.seed import loader
@@ -50,6 +57,7 @@ app.include_router(domains.router)
 app.include_router(projects.router)
 app.include_router(workflow.router)
 app.include_router(analysis.router)
+app.include_router(analysis_runs.router)
 app.include_router(seed.router)
 
 

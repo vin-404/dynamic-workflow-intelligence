@@ -47,22 +47,38 @@ class TestSchedule:
 
 
 class TestBottleneckDetection:
-    """Bottleneck detector regression tests."""
+    """Detector regression tests.
+
+    The prototype's four detectors are now registered members of a tiered
+    registry. Their arithmetic is unchanged, which is what these assertions
+    hold. `detect()` became `run_all(ctx)`, and the resource-contention root
+    cause is the resource key "mkt" rather than the department string.
+    """
 
     @pytest.fixture
-    def found(self, graph, current_schedule, snapshot, state, clock, config):
-        return E.detect(graph, current_schedule, snapshot, state, clock, config)
+    def found(self, evaluation):
+        return evaluation.findings
 
-    def test_detects_four_bottlenecks(self, found):
-        assert len(found) == 4
+    @pytest.fixture
+    def stateful(self, found):
+        """Only the findings the prototype's four detectors produced, so the
+        original counts remain directly comparable."""
+        original = {
+            "critical_path_blocker", "resource_contention",
+            "stalled_in_review", "ready_but_idle",
+        }
+        return [f for f in found if f.kind in original]
 
-    def test_recall_100_percent(self, found):
-        detected = {b.root_cause for b in found}
+    def test_the_original_four_detectors_still_find_exactly_four(self, stateful):
+        assert len(stateful) == 4
+
+    def test_recall_100_percent(self, stateful):
+        detected = {b.root_cause for b in stateful}
         truth = {"T03", "mkt", "T12"}
         assert truth.issubset(detected), f"Missed: {truth - detected}"
 
-    def test_precision_100_percent(self, found):
-        detected = {b.root_cause for b in found}
+    def test_precision_100_percent(self, stateful):
+        detected = {b.root_cause for b in stateful}
         truth = {"T03", "mkt", "T12"}
         extra = detected - truth
         assert len(extra) == 0, f"Extra detections: {extra}"
@@ -95,14 +111,157 @@ class TestBottleneckDetection:
 
     def test_impact_score_is_a_recomputable_formula(self, found):
         for b in found:
-            expected = b.attributed_delay_days * (1 + len(b.downstream_affected))
-            assert b.impact_score == expected
+            assert b.impact_score == (
+                b.impact.magnitude * (1 + b.impact.downstream_affected)
+            )
+            assert b.impact.as_dict()["formula"]
+            assert b.impact.as_dict()["worked"]
+
+    def test_impact_names_its_unit(self, found):
+        """Tier 0 has no history, so its magnitude is days of work *exposed*,
+        not days already lost. Conflating the two would be dishonest, so the
+        payload names the unit."""
+        for b in found:
+            if b.tier == 0:
+                assert b.impact.magnitude_kind == "exposed_days"
+            else:
+                assert b.impact.magnitude_kind == "observed_delay_days"
 
     def test_every_finding_carries_evidence(self, found):
         for b in found:
             assert b.evidence, f"{b.kind} emitted a bare score"
             assert b.suggested_action
+            assert b.explanation
             assert b.severity in {"low", "medium", "high"}
+
+    def test_every_finding_declares_its_tier(self, found):
+        for b in found:
+            assert b.tier in (0, 1, 2, 3)
+
+    def test_root_cause_walkback_names_the_blocker_not_the_blocked(self, found):
+        """A board shows you the blocked task. We name the blocker."""
+        blocker = next(b for b in found if b.kind == "critical_path_blocker")
+        assert blocker.root_cause == "T03"
+        assert "T04" not in blocker.task_ids
+        assert "T13" in blocker.evidence["blocks_directly"]
+
+    def test_findings_are_ranked_by_impact(self, found):
+        scores = [b.impact_score for b in found]
+        assert scores == sorted(scores, reverse=True)
+
+
+class TestDetectorRegistry:
+    """The registry is what makes tiering expressible."""
+
+    def test_every_detector_declares_a_tier_and_what_it_detects(self):
+        from backend.app.core.engine import all_detectors
+
+        detectors = all_detectors()
+        assert len(detectors) >= 14
+        for det in detectors:
+            assert det.name
+            assert det.detects
+            assert det.tier in (0, 1, 2, 3)
+
+    def test_detector_names_are_unique(self):
+        from backend.app.core.engine import all_detectors
+
+        names = [d.name for d in all_detectors()]
+        assert len(names) == len(set(names))
+
+    def test_the_tier_zero_detectors_the_brief_names_all_exist(self):
+        from backend.app.core.engine import Tier, all_detectors
+
+        structural = {
+            d.name for d in all_detectors() if d.tier == Tier.STRUCTURAL
+        }
+        assert {
+            "zero_slack_chain",
+            "single_point_of_failure",
+            "serial_chain_no_parallelism",
+            "deadline_infeasible",
+            "resource_overallocated",
+            "redundant_dependency",
+            "dependency_cycle",
+            "unassigned_critical_task",
+            "isolated_task",
+        } <= structural
+
+    def test_evaluation_reports_which_checks_ran(self, evaluation):
+        assert len(evaluation.checks_run) == 14
+        assert "stalled_in_review" in evaluation.checks_run
+
+    def test_cold_start_runs_only_the_structural_checks(self, mfg_fixture):
+        result = E.evaluate(mfg_fixture.snapshot, mfg_fixture.state, Clock(0.0))
+        assert len(result.checks_run) == 9
+        assert "stalled_in_review" not in result.checks_run
+
+
+class TestSuppression:
+    """One detector may silence another only with a stated reason."""
+
+    def test_nested_resource_overload_is_suppressed_with_a_reason(self, evaluation):
+        """Suresh has capacity 1 and is booked on T04 and T05 in the same
+        window; Facilities, his team, has capacity 1 too. Reporting both would
+        double-count one problem, so the roll-up is suppressed - and kept,
+        with its reason attached."""
+        active = {(f.kind, f.root_cause) for f in evaluation.findings}
+        assert ("resource_overallocated", "suresh") in active
+        assert ("resource_overallocated", "fac") not in active
+
+        rolled_up = next(
+            f for f in evaluation.suppressed_findings if f.root_cause == "fac"
+        )
+        assert rolled_up.suppressed.by == "resource_overallocated"
+        assert "Suresh" in rolled_up.suppressed.reason
+        assert "double-count" in rolled_up.suppressed.reason
+
+    def test_contention_suppresses_idleness_it_fully_explains(
+        self, snapshot, config
+    ):
+        """The prototype's insight, preserved: a queue explains idleness only
+        for as long as the queue has existed. Here the queue is exactly as old
+        as the idleness, so contention accounts for it and the idle finding is
+        suppressed rather than reported twice."""
+        from backend.app.core.workflow import (
+            EventRecord, TaskStatus, WorkflowState,
+        )
+
+        state = WorkflowState(
+            statuses={
+                **{k: TaskStatus.NOT_STARTED for k in snapshot.task_keys},
+                "T01": TaskStatus.DONE, "T02": TaskStatus.DONE,
+                "T03": TaskStatus.DONE, "T07": TaskStatus.DONE,
+                "T08": TaskStatus.DONE, "T09": TaskStatus.DONE,
+                "T10": TaskStatus.DONE,
+            },
+            events=(
+                EventRecord(4.0, "T09", "Nisha", TaskStatus.IN_PROGRESS,
+                            TaskStatus.DONE),
+                EventRecord(4.0, "T10", "Priya", TaskStatus.IN_PROGRESS,
+                            TaskStatus.DONE),
+            ),
+        )
+        result = E.evaluate(snapshot, state, Clock(14.0), config)
+
+        contention = [
+            f for f in result.findings if f.kind == "resource_contention"
+        ]
+        assert contention, "the marketing queue should be reported"
+
+        suppressed_idle = [
+            f for f in result.suppressed_findings if f.kind == "ready_but_idle"
+        ]
+        assert suppressed_idle, "idleness fully explained by the queue"
+        for f in suppressed_idle:
+            assert f.suppressed.by == "resource_contention"
+            assert "fully accounts for it" in f.suppressed.reason
+
+    def test_suppressed_findings_are_never_silently_dropped(self, evaluation):
+        for f in evaluation.suppressed_findings:
+            assert f.suppressed is not None
+            assert f.suppressed.by
+            assert f.suppressed.reason
 
 
 class TestDelaySimulation:
@@ -233,8 +392,29 @@ class TestEvaluate:
         assert evaluation.slip_days == 4
 
     def test_evaluate_reproduces_the_findings(self, evaluation):
-        assert len(evaluation.findings) == 4
-        assert {f.root_cause for f in evaluation.findings} == {"T03", "mkt", "T12"}
+        """The prototype produced four findings from four stateful detectors.
+        Phase 2 adds the Tier-0 structural detectors, so this fixture now
+        reports eleven - and every one of them is labelled on the fixture, so
+        the extras are expected findings rather than noise."""
+        assert len(evaluation.findings) == 11
+        original = {
+            "critical_path_blocker", "resource_contention",
+            "stalled_in_review", "ready_but_idle",
+        }
+        prototype_findings = [
+            f for f in evaluation.findings if f.kind in original
+        ]
+        assert len(prototype_findings) == 4
+        assert {f.root_cause for f in prototype_findings} == {
+            "T03", "mkt", "T12"
+        }
+
+    def test_every_finding_is_a_labelled_fixture_fault(
+        self, evaluation, event_fixture
+    ):
+        """No unexpected detections at all on a fully labelled fixture."""
+        detected = {(f.kind, f.root_cause) for f in evaluation.findings}
+        assert detected == event_fixture.labelled_refs
 
     def test_evaluate_is_pure_and_repeatable(self, snapshot, state, clock, config):
         a = E.evaluate(snapshot, state, clock, config).as_dict()
@@ -290,9 +470,33 @@ class TestColdStart:
 
     def test_stateful_detectors_do_not_fire_without_statuses(self, mfg_fixture):
         """Running a Tier-1 detector against an empty state would report every
-        first task as blocking its own successors: noise dressed as insight."""
+        first task as blocking its own successors: noise dressed as insight.
+
+        The registry gates by declared tier, so those detectors do not run at
+        all - and `checks_run` says so, which is different from running them
+        and finding nothing."""
         result = E.evaluate(mfg_fixture.snapshot, mfg_fixture.state, Clock(0.0))
-        assert result.findings == []
+        assert all(f.tier == 0 for f in result.findings)
+        for name in ("critical_path_blocker", "resource_contention",
+                     "stalled_in_review", "ready_but_idle"):
+            assert name not in result.checks_run
+
+    def test_no_history_still_finds_real_structural_problems(self, mfg_fixture):
+        """The cold-start payoff: eight structural findings on a workflow with
+        no statuses, no events and no actuals whatsoever."""
+        result = E.evaluate(mfg_fixture.snapshot, mfg_fixture.state, Clock(0.0))
+        assert len(result.findings) == 7
+        kinds = {f.kind for f in result.findings}
+        assert "deadline_infeasible" in kinds
+        assert "single_point_of_failure" in kinds
+        assert "zero_slack_chain" in kinds
+        assert "resource_overallocated" in kinds
+        assert "redundant_dependency" in kinds
+
+    def test_cold_start_findings_are_all_labelled(self, mfg_fixture):
+        result = E.evaluate(mfg_fixture.snapshot, mfg_fixture.state, Clock(0.0))
+        detected = {(f.kind, f.root_cause) for f in result.findings}
+        assert detected == mfg_fixture.labelled_refs
 
     def test_a_project_with_history_declares_only_tier_three_missing(self, evaluation):
         tiers = {g["tier"] for g in evaluation.unavailable_checks}

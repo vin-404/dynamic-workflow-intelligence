@@ -14,7 +14,15 @@ capabilities are all expressed through.
 """
 from backend.app.core.engine.calendar_ import day_to_date
 from backend.app.core.engine.cpm import apply_delay, diff, schedule
-from backend.app.core.engine.detectors import Bottleneck, detect, root_blocker
+from backend.app.core.engine.detectors import (
+    Detector,
+    DetectorContext,
+    all_detectors,
+    available_tier,
+    run_all,
+    unavailable_checks,
+)
+from backend.app.core.engine.detectors.tier1 import root_blocker
 from backend.app.core.engine.effort import (
     EffortModel,
     duration_for,
@@ -27,6 +35,16 @@ from backend.app.core.engine.evaluate import (
     EvaluationResult,
     Feasibility,
     evaluate,
+)
+from backend.app.core.engine.findings import (
+    HIGH,
+    LOW,
+    MEDIUM,
+    Finding,
+    Impact,
+    Suppression,
+    Tier,
+    rank,
 )
 from backend.app.core.engine.graph import (
     CycleError,
@@ -57,8 +75,21 @@ __all__ = [
     "observed_durations",
     "three_point_durations",
     # findings
-    "Bottleneck",
-    "detect",
+    "Finding",
+    "Impact",
+    "Suppression",
+    "Tier",
+    "rank",
+    "LOW",
+    "MEDIUM",
+    "HIGH",
+    # detectors
+    "Detector",
+    "DetectorContext",
+    "all_detectors",
+    "available_tier",
+    "run_all",
+    "unavailable_checks",
     "root_blocker",
     # staleness
     "stale_tasks",
