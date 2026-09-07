@@ -1173,3 +1173,178 @@ D-38 … D-43 in `docs/DECISIONS.md`. The three that shaped it:
    with a matching skill**, including ones on other teams, which can produce
    organisationally odd suggestions. The `FIXED_ASSIGNMENT` constraint is the
    user's tool against that, but nothing in the seed data uses it.
+
+---
+
+# Phase 6 — Frontend: the authoring experience first
+
+## 1 · CHANGED
+
+### Built first, because nothing else mattered until it existed
+
+The repo had **no way to author a workflow**. Every component was a read-only
+view over a hardcoded seeded project.
+
+| Component | What it does |
+|---|---|
+| `SetupPanel.ProjectCreate` | name, goal, dates, and a domain you pick **or define on the spot** |
+| `WorkflowBuilder` | resources, tasks, dependencies — the whole graph, editable |
+| `SetupPanel.MemberList` | add/remove collaborators, roles advisory |
+
+`WorkflowBuilder` is three panels:
+
+- **Who and what does the work** — person / team / equipment / budget, each
+  with a capacity and an optional roll-up parent. The copy says plainly that a
+  team's capacity can be lower than its headcount, because that gap is how a
+  bottleneck gets found.
+- **The work** — a table with inline editing of name, effort, divisibility,
+  status and assignees. Constraint badges (`mandatory`, `indivisible`) appear
+  on the tasks that carry them, and the divisibility control is disabled where
+  a constraint fixes it.
+- **What waits on what** — dependency list and editor, distinguishing
+  `artifact` edges (which carry requirement invalidation) from `ordering`
+  ones, with protected edges shown as `locked` instead of deletable.
+
+Every rejection renders the backend's own reason. A cycle shows the cycle; a
+constraint violation shows the constraint **and the reason on record**.
+
+### Then the analysis surfaces
+
+| Component | The commitment it carries |
+|---|---|
+| `FindingsPanel` | groups by root cause; every finding shows tier, evidence, and impact as `magnitude × (1 + downstream)` with the worked arithmetic; suppressed findings are shown *with the reason they were suppressed* |
+| `RiskPanel` | every task expands to nine factors as `value × weight = contribution` with a sentence each; labelled a structural estimate; weights editable on screen |
+| `WhatIfPanel` + `DiffView` | typed mutations, full before/after diff, and the base version's content hash **before and after** evaluation |
+| `OptimizePanel` | per-criterion table, weights, refused candidates with cited constraints, and both recommendations |
+| `VersionHistory` | every version with hash, parent and provenance; accuracy lives here |
+| `ui.tsx` | shared primitives, including `TierBanner` and `Assumptions` — the two that carry product commitments rather than styling |
+
+### Demoted and removed
+
+`DashboardView`, `GanttChart`, `DemoWalkthrough`, `TasksView`, `WhyLateView`,
+`BottleneckInbox`, `SimulationPanel`, `AccuracyPanel`, `Header`, `TabNav`,
+`Card`. That is the dashboard drift being corrected. There is **no dashboard
+home page**: the landing surface is the list of workflows and a button to make
+one, and the analysis stages are disabled until a workflow exists.
+
+`DependencyGraph` is kept and de-domained. It coloured nodes from a hardcoded
+`{ORG, FIN, FAC, MKT, SPON}` palette — the frontend's domain leak. Colour now
+means **slack**, which is true of every workflow in every domain, and the
+resource is rendered as text from the data.
+
+### The journey
+
+`page.tsx` is a six-stage shell in the order a person actually works:
+build → bottlenecks → predicted risk → what if → better workflows → history.
+
+## 2 · PRESERVED
+
+| Kept | Where |
+|---|---|
+| dagre + xyflow graph layout | `DependencyGraph`, same libraries, new colouring |
+| the accuracy harness view | `VersionHistory`, reachable but off the landing surface (as the brief requires) |
+| the dark theme tokens | `globals.css`, untouched |
+| the API rewrite proxy | `next.config.ts`, plus a `turbopack.root` fix so the build stops reading a lockfile from the user's home directory |
+
+## 3 · REMOVED
+
+All eleven components above, plus the prototype's `api.ts` types
+(`ProjectState`, `TaskRow` with `department`/`owner`, `DelayResult`,
+`AccuracyResult`). Every one carried the old contract; the new client is typed
+against the current API and has no domain vocabulary in it.
+
+## 4 · TESTS
+
+Verified **in a real browser**, twice, as the brief requires — driven with
+Playwright against the running stack.
+
+| Walkthrough | Checks | Result |
+|---|---|---|
+| Seeded domains (`journey.mjs`) — every stage over *both* fixtures, the what-if diff, the refusal | 27 | all pass |
+| Cold start (`coldstart.mjs`) — define a domain, build 4 tasks and 3 dependencies from empty, get a cycle refused, then analyse / risk / what-if / optimize | 20 | all pass |
+
+Backend suite unchanged: **640 passed**. Frontend `tsc --noEmit` clean and
+`next build` succeeds.
+
+### Two real bugs the browser found
+
+Both were invisible from the API and from unit tests:
+
+1. **A refresh lost your workflow.** There was no routing state at all, so
+   reloading dropped you back to the project list. The open project and stage
+   now live in the URL hash — which also makes links deep-link, and is a
+   prerequisite for Phase 9's "two browsers open the same project".
+   Subtlety: the hash-sync effect fired on mount with `project === null` and
+   *wiped the hash it was about to read*, so the sync is gated on the initial
+   restore completing.
+2. **Two buttons were both labelled "Add"** — ambiguous for anyone navigating
+   by accessible name. Now "Add resource" and "Add member".
+
+Four other failures during the walkthrough were **harness** defects, not
+product ones, and are recorded here so the distinction is not lost: task names
+render in `<input value>` which `getByText` cannot see; `select` elements
+indexed off the whole page shift as rows are added; the dependency count was
+read mid-update. Each was confirmed against the API before being dismissed —
+the workflow genuinely had all four tasks and all three edges.
+
+## 5 · HOW TO TEST
+
+    # backend
+    .venv/Scripts/python.exe -m uvicorn backend.app.main:app --port 8001
+    # frontend
+    cd frontend && npm run dev
+    # then open http://localhost:3000
+
+What to try, in order:
+
+1. **New workflow** → pick "+ define my own…" → name a domain that does not
+   exist. Create it. You land on an empty builder that tells you what to do.
+2. Add a resource, then four tasks, then dependencies. Try drawing a cycle:
+   it is refused *with the cycle drawn out*.
+3. **Bottlenecks** — note the evidence tier and "what this analysis cannot
+   assess yet", which is populated from the detector registry.
+4. **Predicted risk** — expand a task to see nine factors with their
+   arithmetic. Change a weight and re-rank.
+5. **What if** — "Someone is unavailable", pick a person, simulate. Scroll to
+   the bottom: the base version's hash, before and after.
+6. **Better workflows** — tick "No limits" on the battery project. It refuses
+   to delete the safety certification and quotes UN38.3.
+7. Refresh at any point: you stay where you were.
+
+## 6 · DECISIONS
+
+D-44 … D-48 in `docs/DECISIONS.md`.
+
+## 7 · DEVIATIONS
+
+1. **The what-if panel offers five phrased questions rather than a raw
+   mutation editor.** The algebra is published at
+   `GET /api/scenarios/mutation-kinds` and the panel shows each queued change's
+   `kind` as a badge, so nothing is hidden — but "A task slips" is a question a
+   delivery lead asks and `TASK_DELAY_ADD` is not.
+2. **URL hash rather than real routes.** Smaller and reversible; a proper
+   `/projects/[id]` route is a later change if it earns one.
+3. **No test runner for the frontend.** The verification is the two Playwright
+   walkthroughs, which is what the brief asked for ("complete the full journey
+   in a browser for both seed domains"). Component-level tests would be a
+   second, weaker check of the same thing.
+
+## 8 · RISKS
+
+1. **The Playwright walkthroughs live in the scratch directory, not the repo.**
+   They are verification I ran, not a suite anyone can re-run from a clean
+   checkout. If the frontend is going to keep working, they belong in
+   `frontend/e2e/` with a script entry — a Phase 9 candidate.
+2. **Everything is one client component.** `page.tsx` fetches in the browser
+   and holds all the state. Fine at this size; it will not survive many more
+   stages without splitting.
+3. **No optimistic updates.** Every edit round-trips and re-renders the whole
+   workflow, which is why the harness kept reading mid-update. It is correct
+   but it will feel slow on a large workflow.
+4. **`RiskPanel`'s re-rank merges the risk block into the existing analysis
+   object**, so the weights change the ranking but not the findings around it.
+   Correct today because findings do not depend on risk weights — a trap if
+   that ever changes.
+5. **No loading skeletons on stage switches**, only a spinner. Acceptable, but
+   the optimize stage can take a couple of seconds and shows nothing but
+   "Generating, gating and scoring candidates…".
