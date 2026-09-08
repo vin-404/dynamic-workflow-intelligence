@@ -26,7 +26,7 @@
 
 import { useMemo, useState } from "react";
 import { Lock, X } from "lucide-react";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import {
   ApiError,
   Workflow,
@@ -82,6 +82,20 @@ const STATUS_LABEL: Record<string, string> = {
  * it never leaves the component - state still holds `""`.
  */
 const NONE = "__none__";
+
+/** One inline icon size across every panel. */
+const ICON = "size-3.5 shrink-0";
+
+/**
+ * A constraint id on record, not a status.
+ *
+ * `violet` used to carry this - a constraint badge in a fourth hue, next to
+ * three severity states. It is distinguished by *form* now: a bordered mono
+ * chip on the inset surface, matching how the other panels spell an
+ * identifier, so the token can be deleted.
+ */
+const TOKEN =
+  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
 
 /** A borderless cell input: the border arrives on hover and focus. */
 const CELL =
@@ -167,7 +181,7 @@ function Remove({
       title={title ?? label}
       className="text-dim transition-colors hover:text-severity-high disabled:opacity-40"
     >
-      <X className="size-3.5" />
+      <X className={ICON} />
     </button>
   );
 }
@@ -225,9 +239,7 @@ export default function WorkflowBuilder({
           )}
           {error.constraint && (
             <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-              <span className="font-mono text-foreground">
-                {error.constraint.constraint}
-              </span>
+              <span className={TOKEN}>{error.constraint.constraint}</span>
               <span className="text-dim">
                 {error.constraint.constraint_reason}
               </span>
@@ -522,7 +534,7 @@ function TaskRow({
           {mandatory && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="shrink-0 font-mono text-[10px] text-dim">
+                <span className={cn(TOKEN, "shrink-0 text-dim")}>
                   mandatory
                 </span>
               </TooltipTrigger>
@@ -532,7 +544,7 @@ function TaskRow({
           {locked && (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="shrink-0 font-mono text-[10px] text-dim">
+                <span className={cn(TOKEN, "shrink-0 text-dim")}>
                   indivisible
                 </span>
               </TooltipTrigger>
@@ -908,8 +920,13 @@ function DependencyPanel({
                     {isProtected ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span className="flex shrink-0 items-center gap-1 text-[11px] text-dim">
-                            <Lock className="size-3" />
+                          <span
+                            className={cn(
+                              TOKEN,
+                              "flex shrink-0 items-center gap-1 text-dim",
+                            )}
+                          >
+                            <Lock className={ICON} />
                             locked
                           </span>
                         </TooltipTrigger>

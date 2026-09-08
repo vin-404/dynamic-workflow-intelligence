@@ -7,9 +7,27 @@
  * A domain is a row, and defining your own is a first-class path rather than
  * a settings page - which is what "domain-agnostic" has to mean in the UI if
  * it is to mean anything in the engine.
+ *
+ * Two presentation decisions, wave 2:
+ *
+ *   - `ProjectCreate` keeps a bounded surface. It is a focused task on an
+ *     otherwise empty screen, and a create form with no edges has nothing to
+ *     tell you where it begins. Everything else in this pass loses its box.
+ *   - `MemberList` loses its box, because it sits under the builder and is
+ *     subordinate to it.
+ *
+ * The roles copy here changed, and it is the one copy change in this pass:
+ * `backend/app/api/deps.py` enforces `ProjectMember.role` whenever the app is
+ * configured with a proxy secret, which it now is. A viewer may read and ask
+ * questions; an editor may change the workflow; an owner may additionally
+ * change who is on the project. The old line - "Roles are advisory - they say
+ * who owns this, not what the software will let anyone do" - was true when it
+ * was written and is now false, so it is corrected rather than softened.
  */
 
 import { useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
+import { X } from "lucide-react";
 import {
   ApiError,
   Domain,
@@ -21,22 +39,58 @@ import {
   listMembers,
   removeMember,
 } from "@/lib/api";
+import { Button } from "@/components/ui/button";
 import {
-  Badge,
-  Button,
   Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
   CardTitle,
-  ErrorNote,
-  Field,
-  Input,
+} from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
   Select,
-  Textarea,
-} from "./ui";
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ErrorNote } from "./ui";
+
+/** Radix's Select will not take `""` as a value; this is "nothing chosen". */
+const NONE = "__none__";
+const DEFINE_OWN = "__new__";
 
 function today(offsetDays = 0): string {
   const d = new Date();
   d.setDate(d.getDate() + offsetDays);
   return d.toISOString().slice(0, 10);
+}
+
+/** A composer field: label above control, tight. */
+function Lbl({
+  label,
+  hint,
+  className,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className={cn("flex flex-col gap-1", className)}>
+      <span className="text-[11px] leading-none text-dim">{label}</span>
+      {children}
+      {hint && (
+        <span className="text-[10px] leading-none text-dim">{hint}</span>
+      )}
+    </label>
+  );
 }
 
 export function ProjectCreate({
@@ -58,10 +112,12 @@ export function ProjectCreate({
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    listDomains().then(setDomains).catch(() => setDomains([]));
+    listDomains()
+      .then(setDomains)
+      .catch(() => setDomains([]));
   }, []);
 
-  const defining = domainId === "__new__";
+  const defining = domainId === DEFINE_OWN;
 
   async function submit() {
     if (!name.trim()) return;
@@ -97,99 +153,108 @@ export function ProjectCreate({
 
   return (
     <Card>
-      <CardTitle>Start a workflow</CardTitle>
-      <p className="text-sm text-dim mb-4">
-        Two questions first: what are you trying to accomplish, and roughly
-        what kind of work is it? The second one only ever feeds suggestions and
-        vocabulary — the analysis engine never sees it.
-      </p>
+      <CardHeader>
+        <CardTitle>Start a workflow</CardTitle>
+        <CardDescription>
+          Two questions first: what are you trying to accomplish, and roughly
+          what kind of work is it? The second one only ever feeds suggestions
+          and vocabulary — the analysis engine never sees it.
+        </CardDescription>
+      </CardHeader>
 
-      {error && (
-        <div className="mb-3">
+      <CardContent className="flex flex-col gap-3">
+        {error && (
           <ErrorNote hint={error.hint} requestId={error.requestId}>
             {error.userMessage}
           </ErrorNote>
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <Field label="What is this workflow called?">
-          <Input
-            value={name}
-            placeholder="Battery pack pilot line"
-            onChange={(e) => setName(e.target.value)}
-          />
-        </Field>
-        <Field label="Kind of work" hint="context and templates only">
-          <Select
-            value={domainId}
-            onChange={(e) => setDomainId(e.target.value)}
-          >
-            <option value="">not sure yet</option>
-            {domains.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.name}
-                {d.is_custom ? " (yours)" : ""}
-              </option>
-            ))}
-            <option value="__new__">+ define my own…</option>
-          </Select>
-        </Field>
-
-        {defining && (
-          <>
-            <Field label="Name your domain">
-              <Input
-                value={customName}
-                placeholder="Clinical trial start-up"
-                onChange={(e) => setCustomName(e.target.value)}
-              />
-            </Field>
-            <Field label="What is it, in a sentence?">
-              <Input
-                value={customHints}
-                placeholder="Site activation across regulated sites"
-                onChange={(e) => setCustomHints(e.target.value)}
-              />
-            </Field>
-          </>
         )}
 
-        <Field
-          label="What are you accomplishing?"
-          className="sm:col-span-2"
-          hint="one sentence; it appears on every analysis"
-        >
-          <Textarea
-            rows={2}
-            value={goal}
-            placeholder="Reach a certified pilot run before the customer design freeze."
-            onChange={(e) => setGoal(e.target.value)}
-          />
-        </Field>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <Lbl label="What is this workflow called?">
+            <Input
+              value={name}
+              placeholder="Battery pack pilot line"
+              onChange={(e) => setName(e.target.value)}
+            />
+          </Lbl>
+          <Lbl label="Kind of work" hint="context and templates only">
+            <Select
+              value={domainId || NONE}
+              onValueChange={(v) => setDomainId(v === NONE ? "" : v)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value={NONE}>not sure yet</SelectItem>
+                  {domains.map((d) => (
+                    <SelectItem key={d.id} value={d.id}>
+                      {d.name}
+                      {d.is_custom ? " (yours)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+                <SelectSeparator />
+                <SelectGroup>
+                  <SelectItem value={DEFINE_OWN}>+ define my own…</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Lbl>
 
-        <Field label="Starts">
-          <Input
-            type="date"
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-          />
-        </Field>
-        <Field label="Deadline" hint="optional, but it unlocks feasibility">
-          <Input
-            type="date"
-            value={deadline}
-            onChange={(e) => setDeadline(e.target.value)}
-          />
-        </Field>
-      </div>
+          {defining && (
+            <>
+              <Lbl label="Name your domain">
+                <Input
+                  value={customName}
+                  placeholder="Clinical trial start-up"
+                  onChange={(e) => setCustomName(e.target.value)}
+                />
+              </Lbl>
+              <Lbl label="What is it, in a sentence?">
+                <Input
+                  value={customHints}
+                  placeholder="Site activation across regulated sites"
+                  onChange={(e) => setCustomHints(e.target.value)}
+                />
+              </Lbl>
+            </>
+          )}
 
-      <div className="flex gap-2 mt-4">
-        <Button
-          variant="primary"
-          onClick={submit}
-          disabled={busy || !name.trim()}
-        >
+          <Lbl
+            label="What are you accomplishing?"
+            className="sm:col-span-2"
+            hint="one sentence; it appears on every analysis"
+          >
+            <textarea
+              rows={2}
+              value={goal}
+              placeholder="Reach a certified pilot run before the customer design freeze."
+              onChange={(e) => setGoal(e.target.value)}
+              className="w-full rounded-lg border border-input bg-transparent px-2.5 py-1.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30"
+            />
+          </Lbl>
+
+          <Lbl label="Starts">
+            <Input
+              type="date"
+              value={start}
+              onChange={(e) => setStart(e.target.value)}
+            />
+          </Lbl>
+          <Lbl label="Deadline" hint="optional, but it unlocks feasibility">
+            <Input
+              type="date"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+            />
+          </Lbl>
+        </div>
+      </CardContent>
+
+      <CardFooter className="gap-2 border-t pt-4">
+        <Button onClick={submit} disabled={busy || !name.trim()}>
           Create and start building
         </Button>
         {onCancel && (
@@ -197,7 +262,7 @@ export function ProjectCreate({
             Cancel
           </Button>
         )}
-      </div>
+      </CardFooter>
     </Card>
   );
 }
@@ -210,7 +275,9 @@ export function MemberList({ projectId }: { projectId: string }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    listMembers(projectId).then(setMembers).catch(() => setMembers([]));
+    listMembers(projectId)
+      .then(setMembers)
+      .catch(() => setMembers([]));
   }, [projectId]);
 
   async function run(action: () => Promise<unknown>) {
@@ -228,13 +295,22 @@ export function MemberList({ projectId }: { projectId: string }) {
   }
 
   return (
-    <Card>
-      <CardTitle right={<span className="text-xs text-dim">{members.length}</span>}>
-        Who is collaborating
-      </CardTitle>
+    <section>
+      <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+        <h2 className="text-sm font-medium">Who is collaborating</h2>
+        <span className="font-mono text-[11px] text-dim">{members.length}</span>
+      </div>
+
+      {/* Enforced, not advisory. See the note at the top of this file. */}
+      <p className="max-w-3xl text-[11px] text-dim">
+        Roles are enforced, not advisory: a viewer may read and ask questions,
+        an editor may also change the workflow, and an owner may additionally
+        change who is on the project. Reads stay open to anyone signed in —
+        what a role protects is who can change the plan.
+      </p>
 
       {error && (
-        <div className="mb-2">
+        <div className="mt-2">
           <ErrorNote hint={error.hint} requestId={error.requestId}>
             {error.userMessage}
           </ErrorNote>
@@ -242,49 +318,65 @@ export function MemberList({ projectId }: { projectId: string }) {
       )}
 
       {members.length === 0 ? (
-        <p className="text-dim text-sm mb-3">
-          Nobody yet. Roles are advisory — they say who owns this, not what the
-          software will let anyone do.
-        </p>
+        <p className="mt-2 text-sm text-dim">Nobody yet.</p>
       ) : (
-        <ul className="space-y-1 mb-3">
+        <ul className="mt-2">
           {members.map((m) => (
             <li
               key={m.user_id}
-              className="flex items-center gap-2 text-sm bg-panel2/50 border border-line/60 rounded px-2 py-1"
+              className="flex items-baseline gap-3 border-b border-line/50 py-1 text-sm"
             >
-              <span className="flex-1 truncate">{m.name || m.email}</span>
-              <span className="text-xs text-dim truncate">{m.email}</span>
-              <Badge tone={m.role === "owner" ? "accent" : "neutral"}>
+              <span className="w-48 shrink-0 truncate">
+                {m.name || m.email}
+              </span>
+              <span className="flex-1 truncate font-mono text-[11px] text-dim">
+                {m.email}
+              </span>
+              <span
+                className={cn(
+                  "shrink-0 font-mono text-[11px]",
+                  m.role === "owner" ? "text-foreground" : "text-dim",
+                )}
+              >
                 {m.role}
-              </Badge>
+              </span>
               <button
+                type="button"
                 onClick={() => run(() => removeMember(projectId, m.user_id))}
                 disabled={busy}
-                className="text-dim hover:text-red"
+                aria-label={`Remove ${m.email}`}
+                title="Remove"
+                className="text-dim transition-colors hover:text-severity-high disabled:opacity-40"
               >
-                ×
+                <X className="size-3.5" />
               </button>
             </li>
           ))}
         </ul>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
-        <Field label="Email" className="sm:col-span-1">
+      <div className="mt-4 grid grid-cols-1 items-end gap-2 sm:grid-cols-3">
+        <Lbl label="Email">
           <Input
             value={email}
             placeholder="priya@example.com"
             onChange={(e) => setEmail(e.target.value)}
           />
-        </Field>
-        <Field label="Role">
-          <Select value={role} onChange={(e) => setRole(e.target.value)}>
-            <option value="owner">owner</option>
-            <option value="editor">editor</option>
-            <option value="viewer">viewer</option>
+        </Lbl>
+        <Lbl label="Role">
+          <Select value={role} onValueChange={setRole}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="owner">owner</SelectItem>
+                <SelectItem value="editor">editor</SelectItem>
+                <SelectItem value="viewer">viewer</SelectItem>
+              </SelectGroup>
+            </SelectContent>
           </Select>
-        </Field>
+        </Lbl>
         <Button
           disabled={busy || !email.includes("@")}
           onClick={() => {
@@ -295,6 +387,6 @@ export function MemberList({ projectId }: { projectId: string }) {
           Add member
         </Button>
       </div>
-    </Card>
+    </section>
   );
 }

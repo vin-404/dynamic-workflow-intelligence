@@ -2177,3 +2177,211 @@ Not reasoned about — run:
    is compiled out of a production build by design, so they can never verify a
    production bundle's app behaviour — only its signed-out behaviour, which is
    what section 5 checks by hand.
+
+---
+
+# PHASE 10, WAVE 2 — the visual overhaul
+
+Three agents in parallel, partitioned by file ownership, integrated by hand.
+Tagged `wave-2-design`. Decisions D-101 … D-128.
+
+## 1 · WHAT CHANGED
+
+The instruction was to fix a UI that reads as generated, **mostly by
+subtraction**. The result is measurable rather than a matter of taste:
+
+| | Before | After |
+|---|---|---|
+| Findings for the seeded symposium | 11 bordered cards, three levels of border around one sentence, ~4 screens | one ruled list, all 11 findings **and** their arithmetic on one screen |
+| The nine risk factors | behind a per-row accordion, collapsible to nothing | permanently on screen; the score is the smallest number in the section |
+| The headline numbers | four equal-weight tiles in a `grid-cols-4` | one dense typographic line where the projected finish carries the weight |
+| The dependency map | a dagre node graph with dark-mode hexes baked into JS | time on the x-axis, resources as lanes, float drawn, one `today` marker |
+| The diff | stacked lists | one table, real `Before` / `After` / `Delta` columns |
+| `npm run lint` | 2 errors, 2 warnings | **0 problems** |
+
+Everything the brief said to remove is gone: no gradients, no emoji as icons,
+no "AI-powered" or "✨ Smart" badge anywhere, and no uniform card grid. The
+`violet` token is now unused by every component, which closes the half of D-97
+that wave 1 had to leave open.
+
+## 2 · WHAT EACH AGENT PRODUCED
+
+**UI-WORKFLOW** — `DependencyGraph.tsx` rebuilt as a time × resource-lane
+timeline (D-119 … D-123); `WorkflowBuilder.tsx` as a dense table whose cells
+are borderless real inputs (D-124); `SetupPanel.tsx` with the roles copy
+corrected (D-126); `VersionHistory.tsx` as a dense table with the real UTC
+instant (D-127).
+
+**UI-ANALYSIS** — `FindingsPanel.tsx` from cards to rows (D-106);
+`RiskPanel.tsx` with the decomposition permanently open and the bars showing
+contribution against weight (D-108, D-109); `Explainer.tsx`;
+`ErrorBoundary.tsx` restyled with its class and lifecycle untouched (D-114).
+
+**UI-CHANGE** — `DiffView.tsx` as a genuine three-column comparison (D-101);
+`WhatIfPanel.tsx`, `OptimizePanel.tsx` and `AskPanel.tsx`, with `violet`
+retired (D-102) and the pre-existing lint error fixed (D-103).
+
+**Integration (not delegated)** — `page.tsx`: the hero-and-rail layout (D-115)
+and the headline line (D-116). `ui.tsx`: the accent taken off the primary
+button, the spinner and the disclosure triggers (D-117), and `TierBanner` and
+`Assumptions` turned from boxes into rules (D-118). Plus `src/lib/severity.ts`
+as one shared three-state mapping, `VersionOut.created_at` projected so
+`VersionHistory` had a real "when" to show, `e2e/journey.mjs`'s dead locator
+removed, and the dead `.react-flow__minimap` rules deleted from `globals.css`.
+
+## 3 · TESTS — and an honest note on the number
+
+| Check | Result |
+|---|---|
+| `pytest backend/tests -q` | **963 passed** |
+| `demo_check` | **ALL BEATS PASSED** |
+| `npm run e2e` | **ALL CHECKS PASSED** |
+| `npm run e2e:ai` | **ALL CHECKS PASSED** |
+| `npm run e2e:hardening` | **ALL CHECKS PASSED** |
+| `npx tsc --noEmit` | clean |
+| `npm run build` | succeeds |
+| `npm run lint` | **0 problems** (was 4) |
+
+**963 is not all this work's doing.** Wave 1 took the suite from 780 to 819.
+Wave 2 is a visual pass and adds no backend tests. The remainder — including
+`test_requirements.py` and `test_stream.py` — belongs to a *different task
+running concurrently in this same working tree* (see §5). This work's own
+contribution to the count is the 39 tests in `test_auth.py`, which still pass,
+plus one schema field. Quoting 963 as a wave-2 achievement would be borrowing
+someone else's number.
+
+All three walkthroughs were run against a **freshly seeded database and a
+backend in enforcing mode** (`PROXY_SHARED_SECRET` set), which is the
+configuration a deployment uses rather than the permissive one.
+
+## 4 · WHAT WAS VERIFIED BY LOOKING
+
+Every agent was required to screenshot its own panels in **both colour
+schemes** and read the images back, on both seeded projects — the tier-2
+symposium and the tier-0 cold start. That requirement earned its keep: it is
+how the filled-input regression in dark mode was found (`Input`'s own
+`dark:bg-input/30` beating a `bg-transparent`), how the float strip was caught
+reading as a dependency edge, and how three alignment faults in the optimizer
+were found. None of those are visible in a class list.
+
+The orchestrator independently screenshotted the findings, risk, dependency-map
+and history stages in both schemes rather than accepting the reports.
+
+Two facts checked rather than assumed:
+
+* **A viewer can still ask a what-if.** The role matrix looked
+  self-contradictory — creating a scenario needs `editor`, and D-86 claims a
+  viewer may simulate. The UI uses the one-shot `POST /what-if`, which is
+  exempt, so both are true. `journey.mjs` passes as a non-member.
+* **The version timestamp is UTC.** SQLite returns `created_at` with no offset
+  (`2026-09-08T00:36:32.…`). Rendering it in `Asia/Kolkata` and confirming the
+  instant came back unchanged is the difference between a correct provenance
+  panel and one that lies by 5½ hours per reader.
+
+## 5 · A CONCURRENT SESSION WAS EDITING THIS TREE
+
+Recorded because it shaped the wave and would otherwise be invisible in the
+history.
+
+Partway through wave 2, commit **`7f4d342` ("chore: line endings after wave 1")**
+appeared, containing 3,438 changed lines across ten of this wave's in-flight
+component files plus two documents (`docs/PHASE_11_PROMPT.md`,
+`docs/POSITIONING.md`), followed by four new backend routers. It was **another
+Claude Code session** running a different brief in the same directory.
+
+**The orchestrator got this wrong first.** Seeing forbidden backend files and a
+misleading commit message, it concluded its own UI-WORKFLOW agent had gone
+outside its brief and **killed it mid-task**. That was wrong: `PHASE_11_PROMPT.md`
+names a completely different agent roster (FORECAST, INGEST, LIVE, REQUIRE),
+`forecast.py`'s own docstring says "Owned by Agent FORECAST", and the agent's
+last action was `SetupPanel.tsx` — the next file on its assigned list. It was
+resumed and finished normally. The lesson is narrow and worth keeping: *an
+unexplained change in a shared tree is not evidence about your own agent.*
+
+Resolution, by direct negotiation between the two sessions: frontend belongs to
+this task until wave 2 is committed, backend to the other; no more `git add -A`
+from either side; the other session's overlapping wave 3 waits for this commit
+and will build on these panels rather than on `7f4d342`. **Nothing of the other
+session's was deleted or reverted** — its docs and routers are untouched — and
+`7f4d342` is left in place rather than rewritten, because the other session may
+be building on it.
+
+Its `088c21e` was checked rather than trusted: 819 still passed, and it had
+added exactly one entry to `test_auth.py`'s exemption list with a justification
+(an HMAC-signed webhook — a higher bar, not a lower one) instead of weakening
+the guard. Its claim that `requirements/{key}/apply` stays guarded was verified
+against `deps.py`.
+
+That session's agents have also modified `backend/app/core/engine/`
+(`feasibility.py`, `risk.py`, `staleness.py`). This brief declared the engine
+settled and did not touch it; the purity tests still pass.
+
+## 6 · DEVIATIONS FROM THE BRIEF, STATED PLAINLY
+
+1. **One interaction changed.** The nine-factor table can no longer be
+   collapsed (D-108). The brief said the table must not hide behind a single
+   score, and an accordion whose default is closed does exactly that. Every
+   other change in the wave is visual only.
+2. **Two disclaimers were made *more* visible, not less.** "Why the total is
+   not the answer" came out of a disclosure and the per-task risk disclaimer
+   moved above the numbers it governs (D-105). Nothing moved in the other
+   direction; no sentence stating a limit was shortened, softened or hidden.
+3. **One factual copy line was changed, because it had become false.**
+   `SetupPanel`'s "roles are advisory" (D-126), for the same reason as the name
+   picker's copy in wave 1. It now also states that reads stay open, because
+   "roles are enforced" alone over-claims.
+4. **One backend change**, outside the frontend scope: `VersionOut.created_at`.
+   The brief asked for timestamps on the version row and the API did not return
+   one. The alternative was fabricating a "when" client-side in the one panel
+   whose job is provenance.
+5. **`page.tsx` was not fully migrated off the legacy primitives.** Its shell
+   still uses `ui.tsx`'s `Card`, `Section`, `Button`, `Badge`, `EmptyState` and
+   `Spinner`. The brief's `page.tsx` requirements — the hero-and-rail layout and
+   removing the equal-weight tile grid — are done; a wholesale mechanical
+   migration was not asked for and would have been churn for its own sake.
+   Consequence: `ui.tsx` still exports the legacy set, so wave 1's
+   "thin re-exports" item is still open.
+
+## 7 · RISKS
+
+1. **The concurrent session is still running.** Its wave 3 targets six of the
+   same panel files. The agreement is that it builds on these versions, but
+   nothing enforces that, and a `git add -A` from either side would repeat
+   `7f4d342`.
+2. **A real Google sign-in has still never happened.** Unchanged from wave 1
+   and unchanged by anything here: it needs a human at a consent screen.
+3. **Seven shadcn primitives the skill's own rules assume are not installed** —
+   `field`, `empty`, `spinner`, `input-group`, `alert`, `toggle-group`,
+   `native-select`. So forms are hand-built `<label>`s, empty states are
+   headings and paragraphs, and callouts are token markup. Every one of those
+   is a documented rule knowingly not followed because the primitive is absent
+   and adding files to `src/components/ui/` mid-wave would have collided across
+   three agents. `npx shadcn@latest add field empty spinner input-group alert`
+   is the fix, in a quiet tree.
+4. **Severity and band chips override the `Badge` variant's colours via
+   `className`** (D-113), which the shadcn styling rule forbids. Taken
+   deliberately: three severity states with one implementation has a
+   correctness consequence, the styling rule does not. The clean home is a
+   `severity` variant in `badge.tsx`.
+5. **`severity-medium` in light mode (`#8a6300`) is the weakest of the three
+   as a large colour field.** It passes contrast as text; as a 6px bar next to
+   red and grey it reads muddy. A token change, not a panel change.
+6. **The lane view grows taller with contention.** Sub-row packing (D-121) is
+   the honest trade against unreadable overlap, but a workflow with heavy
+   contention across many resources will need vertical panning past the 560px
+   canvas.
+7. **The lane join is by display label, not key.** `AnalysisTaskRow` gives
+   assignee *labels*, so two resources with identical labels would merge into
+   one lane. `resources[].label` is built to be unique, so it holds today; a
+   `resource_keys` field on the task row would make it structural.
+8. **`impact.formula` repeats identically on all eleven findings**
+   (`impact = magnitude x (1 + downstream_affected)`). It is factual and it was
+   visible before, so it was left alone rather than de-duplicated — the "change
+   no factual copy" constraint is explicit and this is the sort of edit that
+   erodes it one defensible step at a time. It is the one piece of genuine
+   noise left in the findings list.
+9. **`@dagrejs/dagre` is now an unused dependency.** Harmless; left in
+   `package.json` rather than churning the lockfile during a live wave.
+10. **The truly-empty findings state is unreachable from either seed.** It was
+    seen only by intercepting the API response, so no walkthrough would catch a
+    regression in it.

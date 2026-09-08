@@ -85,8 +85,9 @@ async function main() {
     ok("the three-point range is shown", await waitText(page, "pessimistic"));
     ok("no percentage is claimed", await waitText(page, "not a probability"));
     ok("weights are on screen", await waitText(page, "weights are yours to move"));
-    // Expand the top task's factor table.
-    const firstRisk = page.locator("text=/^slack ratio$/").first();
+    // No expanding: the nine-factor decomposition is permanently on screen
+    // now, because hiding it behind a single score is what the risk panel is
+    // written against.
     ok(
       "factor decomposition is visible",
       (await page.getByText("slack ratio", { exact: false }).count()) > 0,

@@ -8,7 +8,7 @@ sized in effort, optionally divisible, and assigned to resources by key.
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -161,5 +161,11 @@ class VersionOut(BaseModel):
     content_hash: str
     is_draft: bool
     deadline_day: float | None
+    #: When this version was written. The column has always existed on
+    #: `WorkflowVersion` and was simply never projected, which left the
+    #: history panel - the one surface whose whole job is provenance - with
+    #: no "when" to show. There is still no author column, so "who" is
+    #: genuinely unavailable rather than merely unexposed.
+    created_at: datetime
 
     model_config = {"from_attributes": True}

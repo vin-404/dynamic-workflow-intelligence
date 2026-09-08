@@ -7,18 +7,62 @@
  * where that is visible. Each version carries its content hash, its parent,
  * and the scenario it was applied from - so a change has provenance rather
  * than just a timestamp.
+ *
+ * Wave 2: a dense table rather than a stack of bordered tiles. Everything a
+ * version knows about itself is on its row - number, when, state, note,
+ * deadline, content hash, parent - because that is the evidence, and evidence
+ * behind a click is evidence nobody reads. The known-faults list is likewise
+ * open rather than folded away. The only colour is the accent on the version
+ * being viewed.
+ *
+ * The timestamp is the real instant, to the second, labelled UTC. No relative
+ * form ("3 days ago") stands in for it: this is the provenance panel, and a
+ * reader here needs the actual moment a version was written, not a rounded
+ * impression of it.
+ *
+ * **An author is still not on the row**, and not because it was dropped for
+ * density. `WorkflowVersion` has no author column at all, so "who" needs a
+ * schema migration rather than a projection - unlike `created_at`, which
+ * always existed and merely was not exposed. Inventing a "who" from the
+ * client would be a fabricated fact, so the column stays absent until the
+ * database can answer it.
  */
 
 import { useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
 import { Accuracy, Version, getAccuracy, listVersions } from "@/lib/api";
+import { severityText } from "@/lib/severity";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Badge,
-  Card,
-  CardTitle,
-  Disclose,
-  EmptyState,
-  Spinner,
-} from "./ui";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+
+/**
+ * The instant a version was written, in UTC, to the second.
+ *
+ * The column is `DateTime(timezone=True)`, but SQLite has no timezone type,
+ * so the value arrives with no `Z` and no offset. It is UTC either way - the
+ * default is `datetime.now(timezone.utc)` - so a suffix-less string is read
+ * as UTC rather than as the reader's local time, which would silently shift
+ * every timestamp in the panel by the viewer's offset.
+ */
+function instantUTC(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(iso);
+  const t = Date.parse(zoned ? iso : `${iso}Z`);
+  if (Number.isNaN(t)) return null;
+  const d = new Date(t);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}` +
+    ` ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
+  );
+}
 
 export default function VersionHistory({
   projectId,
@@ -33,129 +77,204 @@ export default function VersionHistory({
   const [accuracy, setAccuracy] = useState<Accuracy | null>(null);
 
   useEffect(() => {
-    listVersions(projectId).then(setVersions).catch(() => setVersions([]));
-    getAccuracy(projectId).then(setAccuracy).catch(() => setAccuracy(null));
+    listVersions(projectId)
+      .then(setVersions)
+      .catch(() => setVersions([]));
+    getAccuracy(projectId)
+      .then(setAccuracy)
+      .catch(() => setAccuracy(null));
   }, [projectId, currentVersionId]);
 
-  if (!versions) return <Spinner label="Loading history…" />;
+  if (!versions) {
+    return (
+      <div className="flex flex-col gap-2">
+        <Skeleton className="h-4 w-64" />
+        <Skeleton className="h-6 w-full" />
+        <Skeleton className="h-6 w-full" />
+        <Skeleton className="h-6 w-3/4" />
+      </div>
+    );
+  }
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardTitle right={<span className="text-xs text-dim">{versions.length}</span>}>
-          Every version this workflow has had
-        </CardTitle>
+    <div className="flex flex-col gap-8">
+      <section>
+        <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <h2 className="text-sm font-medium">
+            Every version this workflow has had
+          </h2>
+          <span className="font-mono text-[11px] text-dim">
+            {versions.length}
+          </span>
+        </div>
+
         {versions.length === 0 ? (
-          <EmptyState title="No versions yet">
-            A version is created when you start a project and whenever you apply
-            a change.
-          </EmptyState>
+          <p className="max-w-2xl text-sm text-dim">
+            No versions yet. A version is created when you start a project and
+            whenever you apply a change.
+          </p>
         ) : (
-          <ul className="space-y-1.5">
-            {[...versions].reverse().map((v) => (
-              <li
-                key={v.id}
-                className={`border rounded-md px-2.5 py-2 ${
-                  v.id === currentVersionId
-                    ? "border-accent/40 bg-accent/5"
-                    : "border-line bg-panel2/40"
-                }`}
-              >
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-mono text-sm">v{v.version_no}</span>
-                  {v.id === currentVersionId && (
-                    <Badge tone="accent">current</Badge>
-                  )}
-                  {v.is_draft ? (
-                    <Badge tone="neutral">draft</Badge>
-                  ) : (
-                    <Badge tone="green">sealed</Badge>
-                  )}
-                  {v.created_from_scenario_id && (
-                    <Badge tone="violet" title="Applied from a scenario">
-                      applied
-                    </Badge>
-                  )}
-                  <span className="flex-1" />
-                  <button
-                    onClick={() =>
-                      onView(v.id === currentVersionId ? null : v.id)
-                    }
-                    className="text-xs text-accent hover:underline"
+          <Table className="min-w-[920px]">
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                {[
+                  ["Version", "w-20"],
+                  ["When · UTC", "w-40"],
+                  ["State", "w-24"],
+                  ["Note", ""],
+                  ["Deadline", "w-20"],
+                  ["Content hash", "w-52"],
+                  ["From", "w-16"],
+                  ["", "w-24"],
+                ].map(([label, width], i) => (
+                  <TableHead
+                    key={i}
+                    className={cn(
+                      "h-7 px-1.5 text-[11px] font-medium tracking-wider text-dim uppercase",
+                      width,
+                    )}
                   >
-                    {v.id === currentVersionId ? "viewing" : "view this one"}
-                  </button>
-                </div>
-                {v.note && (
-                  <p className="text-xs text-foreground/80">{v.note}</p>
-                )}
-                <p className="text-[11px] text-dim font-mono mt-0.5">
-                  {v.content_hash.slice(0, 24)}…
-                  {v.parent_version_id && (
-                    <span className="ml-2">
-                      parent v
-                      {versions.find((p) => p.id === v.parent_version_id)
-                        ?.version_no ?? "?"}
-                    </span>
-                  )}
-                </p>
-              </li>
-            ))}
-          </ul>
+                    {label}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {[...versions].reverse().map((v) => {
+                const isCurrent = v.id === currentVersionId;
+                const parent = versions.find(
+                  (p) => p.id === v.parent_version_id,
+                );
+                return (
+                  <TableRow
+                    key={v.id}
+                    className={cn(
+                      "border-line/60",
+                      isCurrent && "bg-accent/5 hover:bg-accent/10",
+                    )}
+                  >
+                    <TableCell className="px-1.5 py-1 font-mono text-xs">
+                      <span
+                        className={cn(
+                          isCurrent ? "text-accent" : "text-foreground",
+                        )}
+                      >
+                        v{v.version_no}
+                      </span>
+                    </TableCell>
+                    <TableCell className="px-1.5 py-1 font-mono text-[11px] text-dim">
+                      {instantUTC(v.created_at) ?? "—"}
+                    </TableCell>
+                    <TableCell className="px-1.5 py-1 font-mono text-[11px] text-dim">
+                      {v.is_draft ? "draft" : "sealed"}
+                      {v.created_from_scenario_id ? " · applied" : ""}
+                    </TableCell>
+                    <TableCell className="px-1.5 py-1 text-xs whitespace-normal">
+                      {v.note || <span className="text-dim">no note</span>}
+                    </TableCell>
+                    {/* The deadline this version was authored against, in
+                        the day offset the engine works in. It moves between
+                        versions, so it is provenance, not decoration. */}
+                    <TableCell className="px-1.5 py-1 font-mono text-[11px] text-dim">
+                      {v.deadline_day === null ? "none" : `d${v.deadline_day}`}
+                    </TableCell>
+                    <TableCell className="px-1.5 py-1 font-mono text-[11px] text-dim">
+                      {v.content_hash.slice(0, 24)}…
+                    </TableCell>
+                    <TableCell className="px-1.5 py-1 font-mono text-[11px] text-dim">
+                      {parent ? `v${parent.version_no}` : v.parent_version_id ? "v?" : "—"}
+                    </TableCell>
+                    <TableCell className="px-1.5 py-1 text-right">
+                      <button
+                        type="button"
+                        onClick={() => onView(isCurrent ? null : v.id)}
+                        className="text-xs text-accent hover:underline"
+                      >
+                        {isCurrent ? "viewing" : "view this one"}
+                      </button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
         )}
-      </Card>
+      </section>
 
       {accuracy && (
-        <Card>
-          <CardTitle>Detector accuracy on this project</CardTitle>
+        <section>
+          <h2 className="mb-2 text-sm font-medium">
+            Detector accuracy on this project
+          </h2>
           {accuracy.has_labels ? (
             <>
-              <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm mb-3">
-                <span>
-                  <span className="text-dim">recall </span>
-                  {accuracy.recall !== null
-                    ? `${Math.round(accuracy.recall * 100)}%`
-                    : "—"}
-                </span>
-                <span>
-                  <span className="text-dim">precision </span>
-                  {accuracy.precision !== null
-                    ? `${Math.round(accuracy.precision * 100)}%`
-                    : "—"}
-                </span>
+              <dl className="mb-3 flex flex-wrap items-baseline gap-x-8 gap-y-1 text-sm">
+                <div className="flex items-baseline gap-1.5">
+                  <dt className="text-dim">recall</dt>
+                  <dd className="font-mono">
+                    {accuracy.recall !== null
+                      ? `${Math.round(accuracy.recall * 100)}%`
+                      : "—"}
+                  </dd>
+                </div>
+                <div className="flex items-baseline gap-1.5">
+                  <dt className="text-dim">precision</dt>
+                  <dd className="font-mono">
+                    {accuracy.precision !== null
+                      ? `${Math.round(accuracy.precision * 100)}%`
+                      : "—"}
+                  </dd>
+                </div>
                 {accuracy.planted > 0 && (
-                  <span>
-                    <span className="text-dim">planted faults found </span>
-                    {accuracy.planted_found.length}/{accuracy.planted}
-                  </span>
+                  <div className="flex items-baseline gap-1.5">
+                    <dt className="text-dim">planted faults found</dt>
+                    <dd className="font-mono">
+                      {accuracy.planted_found.length}/{accuracy.planted}
+                    </dd>
+                  </div>
                 )}
-                <span className="text-dim">
-                  {accuracy.labelled} labelled · {accuracy.detected} detected
-                </span>
-              </div>
-              <Disclose summary="Every problem this fixture is known to contain">
-                <ul className="text-xs space-y-1">
-                  {accuracy.labels.map((label, i) => (
-                    <li key={i} className="flex gap-2">
-                      <Badge tone={label.detected ? "green" : "red"}>
-                        {label.detected ? "found" : "missed"}
-                      </Badge>
-                      <span className="text-dim font-mono shrink-0">
-                        {label.kind}@{label.root_cause}
+                <div className="flex items-baseline gap-1.5">
+                  <dt className="text-dim">labelled · detected</dt>
+                  <dd className="font-mono">
+                    {accuracy.labelled} · {accuracy.detected}
+                  </dd>
+                </div>
+              </dl>
+
+              <h3 className="mb-1 text-[11px] tracking-wider text-dim uppercase">
+                Every problem this fixture is known to contain
+              </h3>
+              <ul className="text-xs">
+                {accuracy.labels.map((label, i) => (
+                  <li
+                    key={i}
+                    className="flex items-baseline gap-2 border-b border-line/50 py-1"
+                  >
+                    <span
+                      className={cn(
+                        "w-14 shrink-0 font-mono",
+                        label.detected ? "text-dim" : severityText("high"),
+                      )}
+                    >
+                      {label.detected ? "found" : "missed"}
+                    </span>
+                    <span className="w-56 shrink-0 truncate font-mono text-dim">
+                      {label.kind}@{label.root_cause}
+                    </span>
+                    <span className="flex-1">{label.description}</span>
+                    {label.planted && (
+                      <span className="shrink-0 font-mono text-dim">
+                        planted
                       </span>
-                      <span className="text-foreground/80">
-                        {label.description}
-                      </span>
-                      {label.planted && <Badge tone="violet">planted</Badge>}
-                    </li>
-                  ))}
-                </ul>
-              </Disclose>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </>
           ) : (
-            <p className="text-sm text-dim">{accuracy.note}</p>
+            <p className="max-w-2xl text-sm text-dim">{accuracy.note}</p>
           )}
-        </Card>
+        </section>
       )}
     </div>
   );

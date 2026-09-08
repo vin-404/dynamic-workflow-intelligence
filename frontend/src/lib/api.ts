@@ -167,6 +167,8 @@ export interface Version {
   content_hash: string;
   is_draft: boolean;
   deadline_day: number | null;
+  /** ISO 8601 UTC, from `WorkflowVersion.created_at`. */
+  created_at: string;
 }
 
 export interface WorkflowTask {

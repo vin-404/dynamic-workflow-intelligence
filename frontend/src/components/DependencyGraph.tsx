@@ -21,6 +21,14 @@
  * part that was worth keeping. The layout engine (dagre) is gone; positions
  * are now arithmetic on `es` and the lane index.
  *
+ * The scale is derived from the container, not fixed. A chart whose x-axis is
+ * time has to show all of the time by default, and this panel is not
+ * full-bleed - it sits in a main column with an inspector rail beside it, so
+ * a fixed pixels-per-day clipped the projected end off the right edge at
+ * common widths. Pixels per day is now `usable width / horizon`, re-derived
+ * on resize, and the tick interval follows it so labels never collide.
+ * Zooming is therefore opt-in rather than the price of reading the chart.
+ *
  * Colour rules, deliberately narrow:
  *   - the accent is the zero-slack chain - bars and the edges between them -
  *     and nothing else;
@@ -33,7 +41,7 @@
  *     graph used to draw near-black edges on a white page in light mode.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
@@ -48,7 +56,7 @@ import {
   useViewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { cn } from "cn";
+import { cn } from "@/lib/utils";
 import { Analysis } from "@/lib/api";
 import {
   Tooltip,
@@ -58,8 +66,14 @@ import {
 
 /* --------------------------------------------------------------- geometry */
 
-/** One day of the schedule, in canvas pixels. */
-const DAY_W = 28;
+/** Pixels per day before the container has been measured. */
+const DAY_W_DEFAULT = 28;
+/** Never squeeze a day below this, even on a very long project. */
+const DAY_W_MIN = 3;
+/** Never stretch one past this, or a four-task project looks like a poster. */
+const DAY_W_MAX = 44;
+/** Room kept at the right edge for the last arrowhead and its key label. */
+const RIGHT_PAD = 46;
 /** One resource lane. */
 const LANE_H = 32;
 /** The bar inside a lane. */
@@ -68,8 +82,50 @@ const BAR_H = 20;
 const AXIS_H = 28;
 /** The lane-label gutter, which stays put while the timeline pans. */
 const GUTTER = 168;
-/** A tick every five days: enough to read, sparse enough not to stripe. */
-const TICK_DAYS = 5;
+
+/**
+ * Tick intervals worth printing on a date axis, in days.
+ *
+ * The interval is the first of these that gives a label enough room, so the
+ * ruler thins out as the project lengthens instead of overprinting itself.
+ */
+const NICE_TICKS = [1, 2, 5, 7, 10, 14, 20, 30, 60, 90, 180, 365];
+
+/** Width a "16 Sep d15" label needs before the next tick starts. */
+const TICK_LABEL_W = 78;
+
+function tickEvery(dayWidth: number): number {
+  return NICE_TICKS.find((n) => n * dayWidth >= TICK_LABEL_W) ?? 365;
+}
+
+/**
+ * The element own width, tracked.
+ *
+ * `ResizeObserver` rather than a window listener: the panel width changes
+ * when the inspector rail beside it appears or the column reflows, which no
+ * window resize event announces.
+ */
+function useMeasuredWidth<T extends HTMLElement>(): [
+  React.RefObject<T | null>,
+  number,
+] {
+  const ref = useRef<T | null>(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setWidth(el.clientWidth);
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[0]?.contentRect.width ?? 0;
+      setWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, width];
+}
 
 const STATUS_LABEL: Record<string, string> = {
   done: "Done",
@@ -120,6 +176,18 @@ type Lane = {
   bookedDays: number;
   criticalCount: number;
   firstDay: number;
+  /**
+   * How many sub-rows this lane needs.
+   *
+   * More than one means the schedule has this resource doing two things in
+   * the same window. Bars stacked in a lane are how that is shown: drawing
+   * them at the same height made them overlap into illegible mush on the
+   * pilot-line fixture, which is exactly the workflow where contention is
+   * the point.
+   */
+  rows: number;
+  /** This lane's first sub-row, counted in rows from the top of the canvas. */
+  rowOffset: number;
 };
 
 /** Leading space keeps it out of the way of any real resource label. */
@@ -145,58 +213,80 @@ type BarData = {
   slackWidth: number;
 };
 
+/** The bar's border and text: state, in three colours and no more. */
 function barTone(d: BarData): string {
-  if (d.status === "blocked")
-    return "border-severity-high bg-severity-high/15 text-foreground";
-  if (d.critical) return "border-accent bg-accent/15 text-foreground";
-  if (d.status === "done") return "border-line bg-muted text-dim";
-  return "border-line bg-panel2 text-foreground";
+  if (d.status === "blocked") return "border-severity-high text-foreground";
+  if (d.critical) return "border-accent text-foreground";
+  if (d.status === "done") return "border-line text-dim";
+  return "border-line text-foreground";
+}
+
+/** The tint inside the bar, painted over the opaque shell. */
+function barFill(d: BarData): string {
+  if (d.status === "blocked") return "bg-severity-high/15";
+  if (d.critical) return "bg-accent/15";
+  if (d.status === "done") return "bg-muted";
+  return "bg-panel2";
 }
 
 function TaskBar({ data }: NodeProps) {
   const d = data as BarData;
-  const wide = d.durationWidth >= 92;
-  const narrow = d.durationWidth < 44;
+  const wide = d.durationWidth >= 74;
+  const narrow = d.durationWidth < 36;
 
   return (
     <div
       className="relative"
       style={{ width: d.durationWidth + d.slackWidth, height: BAR_H }}
     >
+      {/* Pulled a few pixels clear of the bar so the arrowhead lands beside
+          the bar rather than on top of its first character. */}
       <Handle
         type="target"
         position={Position.Left}
         isConnectable={false}
         className="!size-1 !min-h-0 !min-w-0 !border-0 !bg-transparent"
+        style={{ left: -3 }}
       />
-      {/* The float, drawn as the room the bar could still slide into. A block
-          rather than a rule, so it cannot be mistaken for a dependency edge
-          crossing the lane. */}
+      {/* The float: the room this bar could still slide into, drawn on the
+          bar's baseline. Opaque and attached to the bar, so it reads as this
+          task's slack rather than as a dependency edge crossing the lane. */}
       {d.slackWidth > 0 && (
         <div
-          className="absolute inset-y-[3px] rounded-r-[3px] bg-line/60"
+          className="absolute bottom-0 h-[5px] rounded-r-[2px] bg-line"
           style={{ left: d.durationWidth, width: d.slackWidth }}
         />
       )}
       <Tooltip>
         <TooltipTrigger asChild>
+          {/* Two layers on purpose: an opaque `bg-panel` shell so dependency
+              edges pass *behind* a bar instead of showing through a tinted
+              one and appearing to strike out its label, and a tinted inner
+              fill for the state. */}
           <div
             className={cn(
-              "absolute inset-y-0 left-0 flex items-center gap-1 overflow-hidden rounded-[3px] border px-1",
+              "absolute inset-y-0 left-0 overflow-hidden rounded-[3px] border bg-panel",
               barTone(d),
             )}
             style={{ width: d.durationWidth }}
           >
-            {!narrow && (
-              <span className="shrink-0 font-mono text-[10px] leading-none opacity-80">
-                {d.taskKey}
-              </span>
-            )}
-            {wide && (
-              <span className="truncate text-[10px] leading-none">
-                {d.name}
-              </span>
-            )}
+            <div
+              className={cn(
+                "flex h-full items-center gap-1 px-1",
+                barFill(d),
+              )}
+            >
+              {!narrow && (
+                <span className="shrink-0 font-mono text-[10px] leading-none opacity-80">
+                  {d.taskKey}
+                </span>
+              )}
+              {wide && (
+                <span className="truncate text-[10px] leading-none">
+                  {d.name}
+                </span>
+              )}
+            </div>
           </div>
         </TooltipTrigger>
         <TooltipContent side="top" className="max-w-xs">
@@ -256,17 +346,21 @@ function Chrome({
   horizon,
   todayDay,
   projectStart,
+  dayWidth,
+  tickDays,
 }: {
   lanes: Lane[];
   horizon: number;
   todayDay: number;
   projectStart: string;
+  dayWidth: number;
+  tickDays: number;
 }) {
   const { x, y, zoom } = useViewport();
   const ticks: number[] = [];
-  for (let d = 0; d <= horizon; d += TICK_DAYS) ticks.push(d);
+  for (let d = 0; d <= horizon; d += tickDays) ticks.push(d);
 
-  const dayToScreen = (day: number) => x + (GUTTER + day * DAY_W) * zoom;
+  const dayToScreen = (day: number) => x + (GUTTER + day * dayWidth) * zoom;
 
   return (
     <div className="pointer-events-none absolute inset-0" style={{ zIndex: 5 }}>
@@ -302,11 +396,14 @@ function Chrome({
         className="absolute bottom-0 left-0 overflow-hidden border-r border-line bg-panel"
         style={{ width: GUTTER, top: AXIS_H }}
       >
-        {lanes.map((lane, i) => (
+        {lanes.map((lane) => (
           <div
             key={lane.key}
             className="absolute left-0 flex w-full flex-col justify-center border-b border-line/50 pr-2 pl-3"
-            style={{ top: y + i * LANE_H * zoom, height: LANE_H * zoom }}
+            style={{
+              top: y + lane.rowOffset * LANE_H * zoom,
+              height: lane.rows * LANE_H * zoom,
+            }}
           >
             <span className="truncate text-[11px] leading-tight">
               {lane.label}
@@ -330,7 +427,34 @@ function Chrome({
 /* ------------------------------------------------------------------- main */
 
 export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
-  const { nodes, edges, lanes, horizon } = useMemo(() => {
+  const [boxRef, boxWidth] = useMeasuredWidth<HTMLDivElement>();
+
+  /* The horizon is whatever has to fit: the latest late finish, the projected
+     end, and today, whichever runs furthest. It does not depend on the scale,
+     because the scale is derived from it. */
+  const horizon = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...analysis.tasks.map((t) => Math.ceil(t.lf)),
+        Math.ceil(analysis.projected_end),
+        Math.ceil(analysis.today_day),
+      ),
+    [analysis],
+  );
+
+  /* Pixels per day: the whole project, in the width there is. Clamped at both
+     ends - a very long project stays pannable rather than becoming a hairline,
+     and a very short one does not blow up into a poster. */
+  const dayWidth = useMemo(() => {
+    if (!boxWidth) return DAY_W_DEFAULT;
+    const usable = Math.max(120, boxWidth - GUTTER - RIGHT_PAD);
+    return Math.min(DAY_W_MAX, Math.max(DAY_W_MIN, usable / horizon));
+  }, [boxWidth, horizon]);
+
+  const tickDays = useMemo(() => tickEvery(dayWidth), [dayWidth]);
+
+  const { nodes, edges, lanes, rows } = useMemo(() => {
     const riskByTask = new Map(
       analysis.risk.tasks.map((t) => [t.task_key, t.score]),
     );
@@ -353,6 +477,27 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
       }
     }
 
+    /* Sub-rows, by greedy interval packing on the work window (`es` to `ef`).
+       A task goes in the first sub-row whose last task has already finished,
+       so a lane is one row deep until the schedule genuinely asks a resource
+       for two things at once, and then it is two. */
+    const subRow = new Map<string, number>();
+    const rowsOf = new Map<string, number>();
+    for (const [key, bucket] of byLane) {
+      const ends: number[] = [];
+      for (const task of [...bucket.tasks].sort((x, y) => x.es - y.es)) {
+        let row = ends.findIndex((end) => end <= task.es);
+        if (row === -1) {
+          row = ends.length;
+          ends.push(task.ef);
+        } else {
+          ends[row] = task.ef;
+        }
+        subRow.set(`${key}|${task.key}`, row);
+      }
+      rowsOf.set(key, Math.max(1, ends.length));
+    }
+
     const laneList: Lane[] = [...byLane.entries()]
       .map(([key, bucket]) => ({
         key,
@@ -364,6 +509,8 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
           10,
         criticalCount: bucket.tasks.filter((t) => t.critical).length,
         firstDay: Math.min(...bucket.tasks.map((t) => t.es)),
+        rows: rowsOf.get(key) ?? 1,
+        rowOffset: 0,
       }))
       .sort((a, b) => {
         if (a.key === UNASSIGNED) return 1;
@@ -371,16 +518,13 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
         return a.firstDay - b.firstDay || a.label.localeCompare(b.label);
       });
 
-    const laneIndex = new Map(laneList.map((l, i) => [l.key, i]));
-
-    /* The horizon is whatever has to fit: the latest late finish, the
-       projected end, and today, whichever runs furthest. */
-    const horizonDays = Math.max(
-      1,
-      ...analysis.tasks.map((t) => Math.ceil(t.lf)),
-      Math.ceil(analysis.projected_end),
-      Math.ceil(analysis.today_day),
-    );
+    let cursor = 0;
+    for (const lane of laneList) {
+      lane.rowOffset = cursor;
+      cursor += lane.rows;
+    }
+    const totalRows = cursor;
+    const laneOffset = new Map(laneList.map((l) => [l.key, l.rowOffset]));
 
     /* One node per (task, lane). A task assigned to two people occupies both
        lanes, because both people are busy - that is the point of a lane view.
@@ -390,20 +534,21 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
     const rawNodes: Node[] = [];
     for (const task of analysis.tasks) {
       const labels = task.assignees.length ? task.assignees : [UNASSIGNED];
-      const durationWidth = Math.max(6, task.duration * DAY_W);
-      const slackWidth = Math.max(0, task.lf - task.ef) * DAY_W;
+      const durationWidth = Math.max(6, task.duration * dayWidth);
+      const slackWidth = Math.max(0, task.lf - task.ef) * dayWidth;
       labels.forEach((label, i) => {
         const id = i === 0 ? task.key : `${task.key}@${label}`;
         if (i === 0) anchorOf.set(task.key, id);
-        const lane = laneIndex.get(label) ?? 0;
+        const row =
+          (laneOffset.get(label) ?? 0) + (subRow.get(`${label}|${task.key}`) ?? 0);
         rawNodes.push({
           id,
           type: "bar",
           draggable: false,
           selectable: false,
           position: {
-            x: GUTTER + task.es * DAY_W,
-            y: AXIS_H + lane * LANE_H + (LANE_H - BAR_H) / 2,
+            x: GUTTER + task.es * dayWidth,
+            y: AXIS_H + row * LANE_H + (LANE_H - BAR_H) / 2,
           },
           width: durationWidth + slackWidth,
           height: BAR_H,
@@ -449,8 +594,8 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
         },
         markerEnd: {
           type: MarkerType.ArrowClosed,
-          width: 12,
-          height: 12,
+          width: 10,
+          height: 10,
           color: stroke,
         },
       };
@@ -460,9 +605,9 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
       nodes: rawNodes,
       edges: rawEdges,
       lanes: laneList,
-      horizon: horizonDays,
+      rows: totalRows,
     };
-  }, [analysis]);
+  }, [analysis, dayWidth]);
 
   if (analysis.tasks.length === 0) {
     return (
@@ -477,10 +622,7 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
 
   /* Tall enough for every lane up to a point, then it pans. The trailing
      room is where the today label and the zoom controls sit. */
-  const height = Math.min(
-    560,
-    Math.max(200, AXIS_H + lanes.length * LANE_H + 36),
-  );
+  const height = Math.min(560, Math.max(200, AXIS_H + rows * LANE_H + 36));
 
   return (
     <section>
@@ -501,6 +643,7 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
       </div>
 
       <div
+        ref={boxRef}
         className="overflow-hidden rounded-lg border border-line bg-panel"
         style={{ height }}
       >
@@ -516,11 +659,11 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
           minZoom={0.25}
           maxZoom={1.5}
         >
-          {/* A gridline every five days and one per lane. Both read the
-              tokens, so both follow light and dark. */}
+          {/* A gridline per tick and one per lane row. Both read the tokens,
+              so both follow light and dark. */}
           <Background
             variant={BackgroundVariant.Lines}
-            gap={[DAY_W * TICK_DAYS, LANE_H]}
+            gap={[dayWidth * tickDays, LANE_H]}
             offset={[GUTTER, AXIS_H]}
             lineWidth={1}
             color="var(--line)"
@@ -530,6 +673,8 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
             horizon={horizon}
             todayDay={analysis.today_day}
             projectStart={analysis.project_start}
+            dayWidth={dayWidth}
+            tickDays={tickDays}
           />
           <Controls
             showInteractive={false}

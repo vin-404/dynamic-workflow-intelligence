@@ -326,14 +326,6 @@
   background: var(--background) !important;
 }
 
-.react-flow__minimap {
-  background: var(--panel) !important;
-}
-
-.react-flow__minimap-mask {
-  fill: color-mix(in oklab, var(--background) 72%, transparent) !important;
-}
-
 .react-flow__controls button {
   background: var(--panel) !important;
   border-color: var(--line) !important;

@@ -46,7 +46,6 @@ import {
   ErrorNote,
   Section,
   Spinner,
-  Stat,
   days,
 } from "@/components/ui";
 
@@ -441,23 +440,44 @@ export default function Home() {
               </EmptyState>
             )}
             {analysis && (
-              <div className="space-y-4">
-                <ErrorBoundary what="The summary" resetKey={stage}>
-                  <Headline analysis={analysis} />
-                </ErrorBoundary>
-                <ErrorBoundary what="The findings panel" resetKey={stage}>
-                  <FindingsPanel analysis={analysis} />
-                </ErrorBoundary>
-                <ErrorBoundary what="The plain-language summary" resetKey={stage}>
-                  <Explainer projectId={project.id} />
-                </ErrorBoundary>
-                {/* The graph is the most likely thing here to throw: it is the
-                    only panel with a third-party layout engine under it. Its
-                    own boundary means a layout bug costs the graph and not the
-                    findings above it. */}
-                <ErrorBoundary what="The dependency graph" resetKey={stage}>
-                  <DependencyGraph analysis={analysis} />
-                </ErrorBoundary>
+              /*
+               * One primary surface, not a stack of equals.
+               *
+               * The dependency map goes first and full width because it is the
+               * only thing on screen that answers "when" and "who" at once,
+               * and the findings list reads as the evidence underneath it. The
+               * numbers and the narration move into a narrow rail beside them:
+               * they are what you glance at, not what you work in. Both of the
+               * things in the main column - a dense finding list and a
+               * time-axis chart - genuinely need the width, which is why the
+               * rail is the thing that gets narrow and why this is two columns
+               * rather than three equal ones.
+               *
+               * It collapses to one column under `lg`, main column first, so a
+               * narrow window degrades to reading order rather than to a
+               * squeezed chart.
+               */
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+                <div className="flex min-w-0 flex-1 flex-col gap-5">
+                  {/* The graph is the most likely thing here to throw: it is
+                      the only panel with a third-party layout engine under it.
+                      Its own boundary means a layout bug costs the graph and
+                      not the findings below it. */}
+                  <ErrorBoundary what="The dependency graph" resetKey={stage}>
+                    <DependencyGraph analysis={analysis} />
+                  </ErrorBoundary>
+                  <ErrorBoundary what="The findings panel" resetKey={stage}>
+                    <FindingsPanel analysis={analysis} />
+                  </ErrorBoundary>
+                </div>
+                <aside className="flex w-full shrink-0 flex-col gap-5 lg:w-72 lg:border-l lg:border-line lg:pl-5">
+                  <ErrorBoundary what="The summary" resetKey={stage}>
+                    <Headline analysis={analysis} />
+                  </ErrorBoundary>
+                  <ErrorBoundary what="The plain-language summary" resetKey={stage}>
+                    <Explainer projectId={project.id} />
+                  </ErrorBoundary>
+                </aside>
               </div>
             )}
           </Section>
@@ -564,47 +584,90 @@ export default function Home() {
   );
 }
 
+/**
+ * The four numbers that answer "where does this land", as one dense line.
+ *
+ * This was four equal-weight tiles in a `grid-cols-4`, which is the layout the
+ * visual pass exists to remove: a box around each number says all four matter
+ * the same amount, and they do not. The projected finish is the answer and the
+ * slip is why anyone cares, so those two carry the size and the colour; the
+ * planned finish and the deadline verdict are context and read as context.
+ * Hierarchy by typography, separators by hairline, no boxes.
+ *
+ * "Projected finish" stays as literal visible text - `e2e/journey.mjs` matches
+ * it, and it is the label a reader scans for.
+ */
 function Headline({ analysis }: { analysis: Analysis }) {
   const f = analysis.feasibility;
+  const slipped = analysis.slip_days > 0;
+  const verdict =
+    f.verdict === "no_deadline_set"
+      ? "none set"
+      : f.verdict === "feasible"
+        ? "feasible"
+        : f.verdict.replace(/_/g, " ");
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-      <Stat
-        label="Planned finish"
-        value={`day ${Math.round(analysis.planned_end)}`}
-        sub={analysis.planned_end_date}
-      />
-      <Stat
-        label="Projected finish"
-        value={`day ${Math.round(analysis.projected_end)}`}
-        sub={analysis.projected_end_date}
-        tone={analysis.slip_days > 0 ? "red" : undefined}
-      />
-      <Stat
-        label="Slip"
-        value={days(analysis.slip_days, true)}
-        sub={analysis.slip_days > 0 ? "later than planned" : "on plan"}
-        tone={analysis.slip_days > 0 ? "red" : "green"}
-      />
-      <Stat
-        label="Deadline"
-        value={
-          f.verdict === "no_deadline_set"
-            ? "none set"
-            : f.verdict === "feasible"
-              ? "feasible"
-              : f.verdict.replace(/_/g, " ")
-        }
-        sub={
-          f.margin_days !== null ? `${days(f.margin_days, true)} margin` : undefined
-        }
-        tone={
-          f.verdict === "feasible"
-            ? "green"
-            : f.verdict === "no_deadline_set"
-              ? undefined
-              : "red"
-        }
-      />
+    <div>
+      <div className="text-[11px] tracking-wide text-muted-foreground uppercase">
+        Projected finish
+      </div>
+      <div className="flex items-baseline gap-2">
+        <span
+          className={`text-2xl font-semibold ${
+            slipped ? "text-severity-high" : "text-foreground"
+          }`}
+        >
+          day {Math.round(analysis.projected_end)}
+        </span>
+        <span
+          className={`text-sm font-medium ${
+            slipped ? "text-severity-high" : "text-severity-low"
+          }`}
+        >
+          {days(analysis.slip_days, true)}
+        </span>
+      </div>
+      <div className="text-[11px] text-muted-foreground">
+        {analysis.projected_end_date}
+        {slipped ? " · later than planned" : " · on plan"}
+      </div>
+
+      <dl className="mt-3 flex flex-col gap-1 border-t border-line pt-2 text-[13px]">
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-muted-foreground">planned</dt>
+          <dd className="text-right">
+            <span className="font-medium">
+              day {Math.round(analysis.planned_end)}
+            </span>{" "}
+            <span className="text-[11px] text-muted-foreground">
+              {analysis.planned_end_date}
+            </span>
+          </dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-muted-foreground">deadline</dt>
+          <dd className="text-right">
+            <span
+              className={`font-medium ${
+                f.verdict === "feasible"
+                  ? "text-severity-low"
+                  : f.verdict === "no_deadline_set"
+                    ? "text-foreground"
+                    : "text-severity-high"
+              }`}
+            >
+              {verdict}
+            </span>
+            {f.margin_days !== null && (
+              <span className="text-[11px] text-muted-foreground">
+                {" "}
+                {days(f.margin_days, true)} margin
+              </span>
+            )}
+          </dd>
+        </div>
+      </dl>
     </div>
   );
 }

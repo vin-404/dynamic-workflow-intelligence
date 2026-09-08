@@ -91,10 +91,17 @@ export function Button({
   className?: string;
   title?: string;
 }) {
+  // `primary` is a strong **neutral**, not the accent (D-94). The accent is
+  // reserved for the zero-slack chain and high-severity emphasis, and a
+  // product where every primary button is accent-coloured has reserved it for
+  // nothing - which is what this variant used to do with `bg-accent`.
   const styles = {
     default: "bg-panel2 border border-line hover:border-dim",
-    primary: "bg-accent text-background font-medium hover:opacity-90",
-    danger: "bg-transparent border border-red/40 text-red hover:bg-red/10",
+    primary:
+      "bg-primary text-primary-foreground font-medium hover:opacity-90",
+    danger:
+      "bg-transparent border border-severity-high/40 text-severity-high " +
+      "hover:bg-severity-high/10",
     ghost: "bg-transparent text-dim hover:text-foreground",
   }[variant];
   return (
@@ -250,7 +257,7 @@ export function EmptyState({
 export function Spinner({ label }: { label?: string }) {
   return (
     <div className="flex items-center gap-2 text-dim text-sm py-4">
-      <span className="w-3.5 h-3.5 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      <span className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-dim border-t-transparent" />
       {label ?? "Working…"}
     </div>
   );
@@ -270,17 +277,24 @@ export function ErrorNote({
   requestId?: string;
 }) {
   return (
-    <div className="border border-red/40 bg-red/5 rounded-lg p-3 text-sm">
-      <div className="text-red font-medium mb-1">That did not work</div>
+    <div className="border-l-2 border-severity-high bg-severity-high/5 py-2 pl-3 text-sm">
+      <div className="mb-0.5 font-semibold text-severity-high">
+        That did not work
+      </div>
       <div className="text-foreground/90">{children}</div>
-      {hint && <div className="mt-2 text-dim">{hint}</div>}
+      {hint && <div className="mt-1 text-muted-foreground">{hint}</div>}
       {onRetry && (
         <div className="mt-2">
-          <Button onClick={onRetry}>Try again</Button>
+          <button
+            onClick={onRetry}
+            className="rounded border border-line px-2 py-1 text-xs hover:border-dim"
+          >
+            Try again
+          </button>
         </div>
       )}
       {requestId && (
-        <div className="mt-2 text-[11px] text-dim">
+        <div className="mt-1.5 text-[11px] text-muted-foreground">
           Request <span className="font-mono">{requestId}</span> — quote this
           if you report it.
         </div>
@@ -332,42 +346,48 @@ export function TierBanner({
     unlocked_by: string;
   }[];
 }) {
+  const couldNot = unavailable.reduce((n, g) => n + g.checks.length, 0);
   return (
-    <div className="border border-line bg-panel rounded-lg p-3 mb-4">
-      <div className="flex flex-wrap items-center gap-2 text-sm">
-        <Badge tone="accent">
-          Evidence tier {tier} · {TIER_NAMES[tier] ?? "?"}
-        </Badge>
-        <span className="text-dim">
+    <div className="mb-4 border-b border-line pb-2">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
+        <span className="font-medium">
+          Evidence tier {tier}
+          <span className="text-muted-foreground">
+            {" · "}
+            {TIER_NAMES[tier] ?? "?"}
+          </span>
+        </span>
+        <span className="text-muted-foreground">
           {checksRun.length} check{checksRun.length === 1 ? "" : "s"} ran.
         </span>
-        {unavailable.length > 0 && (
-          <span className="text-dim">
-            {unavailable.reduce((n, g) => n + g.checks.length, 0)} could not.
-          </span>
+        {couldNot > 0 && (
+          <span className="text-muted-foreground">{couldNot} could not.</span>
         )}
       </div>
       {unavailable.length > 0 && (
-        <div className="mt-2">
-          <Disclose summary="What this analysis cannot assess yet, and why">
-            <div className="space-y-3">
-              {unavailable.map((gap) => (
-                <div key={gap.tier} className="text-xs">
-                  <div className="text-foreground/90 font-medium">
-                    Tier {gap.tier} — needs {gap.requires}
-                  </div>
-                  <ul className="text-dim mt-1 space-y-0.5">
-                    {gap.checks.map((c) => (
-                      <li key={c}>· {c}</li>
-                    ))}
-                  </ul>
-                  <p className="text-dim mt-1">{gap.why}</p>
-                  <p className="text-accent mt-0.5">{gap.unlocked_by}</p>
+        <details className="group mt-1 [&_summary::-webkit-details-marker]:hidden">
+          <summary className="cursor-pointer list-none text-xs text-muted-foreground marker:content-none hover:text-foreground hover:underline">
+            <span className="inline-block w-3 group-open:hidden">▸</span>
+            <span className="hidden w-3 group-open:inline-block">▾</span>
+            What this analysis cannot assess yet, and why
+          </summary>
+          <div className="mt-2 space-y-3 pl-3">
+            {unavailable.map((gap) => (
+              <div key={gap.tier} className="text-xs">
+                <div className="font-medium text-foreground/90">
+                  Tier {gap.tier} — needs {gap.requires}
                 </div>
-              ))}
-            </div>
-          </Disclose>
-        </div>
+                <ul className="mt-1 space-y-0.5 text-muted-foreground">
+                  {gap.checks.map((c) => (
+                    <li key={c}>· {c}</li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-muted-foreground">{gap.why}</p>
+                <p className="mt-0.5 text-accent">{gap.unlocked_by}</p>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
     </div>
   );
@@ -383,13 +403,15 @@ export function Assumptions({
   title?: string;
 }) {
   return (
-    <div className="border border-line bg-panel2/40 rounded-md p-3 mt-3 text-xs">
-      <div className="text-dim uppercase tracking-wider mb-2">{title}</div>
-      {disclaimer && <p className="text-foreground/80 mb-2">{disclaimer}</p>}
-      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1">
+    <div className="mt-3 border-t border-line pt-2 text-xs">
+      <div className="mb-1 font-medium tracking-wide text-muted-foreground uppercase">
+        {title}
+      </div>
+      {disclaimer && <p className="mb-1.5 text-foreground/80">{disclaimer}</p>}
+      <dl className="grid grid-cols-1 gap-x-6 gap-y-0.5 sm:grid-cols-2">
         {entries.map(([k, v]) => (
           <div key={k} className="flex gap-2">
-            <dt className="text-dim shrink-0">{k}:</dt>
+            <dt className="shrink-0 text-muted-foreground">{k}:</dt>
             <dd className="text-foreground/90">{v}</dd>
           </div>
         ))}
@@ -401,7 +423,7 @@ export function Assumptions({
 /** A number and the arithmetic behind it, never a bare score. */
 export function Worked({ children }: { children: ReactNode }) {
   return (
-    <code className="text-[11px] text-dim font-mono bg-panel2 px-1.5 py-0.5 rounded">
+    <code className="rounded bg-panel2 px-1 py-px font-mono text-[11px] text-muted-foreground">
       {children}
     </code>
   );
