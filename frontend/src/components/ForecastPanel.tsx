@@ -72,7 +72,7 @@ import { Assumptions, ErrorNote } from "./ui";
 /* -------------------------------------------------------------- formatting */
 
 const HEAD =
-  "text-[13px] font-semibold uppercase tracking-wider text-muted-foreground";
+  "text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground";
 
 /** A cell head: the same small caps the other analysis panels use. */
 const TH = "h-7 px-1.5 text-[10px] uppercase tracking-wider text-muted-foreground";
@@ -187,6 +187,28 @@ type Loaded = {
   error: ApiError | null;
 };
 
+function StatLine({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: ReactNode;
+  detail?: ReactNode;
+}) {
+  return (
+    <div className="bg-panel px-4 py-3">
+      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        {label}
+      </div>
+      <div className="mt-1 flex items-baseline gap-2">
+        <span className="text-lg font-semibold tracking-tight">{value}</span>
+        {detail && <span className="text-[11px] text-muted-foreground">{detail}</span>}
+      </div>
+    </div>
+  );
+}
+
 export default function ForecastPanel({ projectId }: { projectId: string }) {
   const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -256,12 +278,33 @@ export default function ForecastPanel({ projectId }: { projectId: string }) {
   const f = data.forecast;
   const a = f.assumptions;
   const isProbability = data.answer_kind === "monte_carlo_probability";
+  const deadlineProbability = f.deadline?.probability_of_meeting_deadline ?? null;
 
   return (
     <section className="mt-7 flex flex-col gap-7 border-t border-border pt-4">
+      {isProbability && f.available && (
+        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
+          <StatLine
+            label="Deadline probability"
+            value={deadlineProbability === null ? "—" : pct(deadlineProbability)}
+            detail="simulated runs"
+          />
+          <StatLine
+            label="P50 completion"
+            value={f.completion?.p50_date ?? "—"}
+            detail={f.completion ? `day ${day(f.completion.p50_day)}` : undefined}
+          />
+          <StatLine
+            label="P90 completion"
+            value={f.completion?.p90_date ?? "—"}
+            detail={f.completion ? `day ${day(f.completion.p90_day)}` : undefined}
+          />
+        </div>
+      )}
+
       {/* ------------------------------------------------------------ head */}
       <div className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
           <h3 className={HEAD}>Forecast</h3>
           <span className="text-xs text-muted-foreground">
             {runs(f.iterations)} runs · seed{" "}

@@ -2,52 +2,15 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/*
- * ---------------------------------------------------------------------------
- * Design tokens.
- * ---------------------------------------------------------------------------
- *
- * Two vocabularies live here and they are deliberately one palette:
- *
- *   1. The *legacy* names the twelve existing panels are written against —
- *      panel, panel2, line, dim, accent, red, amber, green, violet. Every one
- *      still resolves; `bg-panel`, `border-line`, `text-dim`, `text-accent`
- *      keep working unchanged.
- *   2. The *shadcn* semantic names the primitives in `src/components/ui/` are
- *      written against — background, card, popover, primary, secondary, muted,
- *      accent, destructive, border, input, ring.
- *
- * They are wired to the same raw values, so a shadcn Card and a legacy
- * `bg-panel` div are the same surface. Wave 2 migrates panel by panel without
- * a visual seam.
- *
- * Rules encoded here:
- *   - ONE accent colour (the blue), reserved for critical path and
- *     high-severity findings. It is NOT the primary button colour — `primary`
- *     is a strong neutral, so muted neutrals carry everything else.
- *   - Severity is exactly THREE states: severity-high, severity-medium,
- *     severity-low. There is no fourth. `violet` survives because
- *     OptimizePanel still uses it; it is not a severity and must not become
- *     one.
- *   - No gradients.
- *   - Tabular numerals are on by default (see the base layer).
- *
- * Raw values are Primer's dark and light semantic sets, so the two modes are
- * siblings rather than one being an inversion guess. Every foreground token
- * clears 4.5:1 against both `background` and `panel` in both modes.
- */
+/* ============================================================
+   FLOWTRACE DESIGN SYSTEM
+   ============================================================ */
 
-/*
- * Dark mode follows the system preference, and an explicit `.dark` / `.light`
- * class on <html> overrides it. shadcn ships `@custom-variant dark (&:is(.dark *))`,
- * which is class-only; this app has no theme provider and this agent does not
- * own layout.tsx, so the system-preference branch is added here. Both branches
- * are needed: the class branch keeps a future next-themes provider working.
- */
 @custom-variant dark {
   &:is(.dark, .dark *) {
     @slot;
   }
+
   @media (prefers-color-scheme: dark) {
     &:is(:root:not(.light), :root:not(.light) *) {
       @slot;
@@ -55,84 +18,65 @@
   }
 }
 
-/*
- * `color-scheme` is what makes the *browser's own* widgets follow the theme -
- * the date picker's calendar indicator, scrollbars, the focus ring on native
- * controls. Nothing set it before, so Chromium painted every one of them for a
- * light page: on the dark canvas the date inputs' calendar glyph came out
- * black on near-black and was effectively invisible. Found by looking at a
- * screenshot, not by reading a class list.
- *
- * It belongs here rather than as a utility class on each `type="date"`,
- * because it is a property of the theme and not of an input - the same two
- * inputs in two different panels had already grown two different answers.
- */
+/* ============================================================
+   BASE LIGHT THEME
+
+   FlowTrace intentionally uses a light workspace.
+   The React Flow graph has its own explicit light theme below,
+   so system dark mode cannot accidentally turn the graph black.
+   ============================================================ */
+
 :root {
   color-scheme: light;
+
+  --background: #f7f7fc;
+  --panel: #ffffff;
+  --panel2: #f1f0fa;
+  --line: #e2e1ec;
+
+  --elevated: #ffffff;
+
+  --foreground: #17172a;
+  --dim: #68677a;
+
+  --accent: #4164fa;
+  --accent-foreground: #ffffff;
+
+  --severity-high: #cf222e;
+  --severity-medium: #8a6300;
+  --severity-low: #1a7f37;
+
+  --violet: #795cf7;
+
+  --primary: #17172a;
+  --primary-foreground: #ffffff;
+
+  --on-severity: #ffffff;
+
+  --chart-2: #68677a;
+  --chart-3: #8d8ca0;
+  --chart-4: #b5b4c4;
+  --chart-5: #dedde8;
+
+  --radius: 0.5rem;
 }
+
+/* ============================================================
+   DARK MODE TOKENS
+
+   Other parts of the application may still use dark mode.
+   The workflow graph itself is overridden separately.
+   ============================================================ */
 
 @media (prefers-color-scheme: dark) {
   :root:not(.light) {
     color-scheme: dark;
-  }
-}
 
-:root.dark {
-  color-scheme: dark;
-}
-
-/* --------------------------------------------------------------- light mode */
-
-:root {
-  /* Surfaces. In light the page is the tinted one and panels are white — the
-     inverse of dark — so a card still lifts off the canvas. */
-  --background: #f6f8fa;
-  --panel: #ffffff;
-  --panel2: #eef1f4;
-  --line: #d1d9e0;
-  /* The surface a dialog, popover or dropdown floats on. In light it is the
-     brightest surface; in dark it is the lightest one. */
-  --elevated: #ffffff;
-
-  /* Text. */
-  --foreground: #1f2328;
-  --dim: #59636e;
-
-  /* The one accent. Critical path, high-severity emphasis, focus rings. */
-  --accent: #0969da;
-  --accent-foreground: #ffffff;
-
-  /* Severity — exactly three. */
-  --severity-high: #cf222e;
-  --severity-medium: #8a6300;
-  --severity-low: #1a7f37;
-  --violet: #8250df;
-
-  /* The one neutral that is not derived: a "primary" action is a strong
-     neutral, never the accent, so the accent stays reserved. */
-  --primary: #1f2328;
-  --primary-foreground: #ffffff;
-  --on-severity: #ffffff;
-
-  /* Charts: the accent, then a neutral ramp. Not a rainbow. */
-  --chart-2: #6e7781;
-  --chart-3: #8c959f;
-  --chart-4: #afb8c1;
-  --chart-5: #d0d7de;
-
-  /* Density: tighter than shadcn's 0.625rem default, and back to Tailwind's
-     stock `rounded-lg` (8px) so the existing panels look untouched. */
-  --radius: 0.5rem;
-}
-
-/* ---------------------------------------------------------------- dark mode */
-
-@media (prefers-color-scheme: dark) {
-  :root:not(.light) {
     --background: #0e1116;
     --panel: #161b22;
     --panel2: #1c232c;
     --line: #2a323d;
+
     --elevated: #1c232c;
 
     --foreground: #e6edf3;
@@ -144,10 +88,12 @@
     --severity-high: #f85149;
     --severity-medium: #e3b341;
     --severity-low: #3fb950;
+
     --violet: #a371f7;
 
     --primary: #e6edf3;
     --primary-foreground: #0e1116;
+
     --on-severity: #0e1116;
 
     --chart-2: #8b98a5;
@@ -157,11 +103,14 @@
   }
 }
 
-.dark {
+:root.dark {
+  color-scheme: dark;
+
   --background: #0e1116;
   --panel: #161b22;
   --panel2: #1c232c;
   --line: #2a323d;
+
   --elevated: #1c232c;
 
   --foreground: #e6edf3;
@@ -173,10 +122,12 @@
   --severity-high: #f85149;
   --severity-medium: #e3b341;
   --severity-low: #3fb950;
+
   --violet: #a371f7;
 
   --primary: #e6edf3;
   --primary-foreground: #0e1116;
+
   --on-severity: #0e1116;
 
   --chart-2: #8b98a5;
@@ -185,41 +136,38 @@
   --chart-5: #2a323d;
 }
 
-/* ------------------------------------------------------- derived aliases */
+/* ============================================================
+   TOKEN ALIASES
+   ============================================================ */
 
-/*
- * Everything below is an alias for something above. It is declared on every
- * element that can carry a mode so the `var()` chain re-resolves against that
- * element's raw values — otherwise a `.dark` class on anything other than
- * <html> would inherit already-substituted light values.
- */
 :root,
 .light,
 .dark {
-  /* Legacy hue names. Same values as the severity triple; `violet` is the odd
-     one out and stays only because a component still names it. */
   --red: var(--severity-high);
   --amber: var(--severity-medium);
   --green: var(--severity-low);
 
-  /* shadcn semantics, wired to the palette above. */
   --card: var(--panel);
   --card-foreground: var(--foreground);
+
   --popover: var(--elevated);
   --popover-foreground: var(--foreground);
+
   --secondary: var(--panel2);
   --secondary-foreground: var(--foreground);
+
   --muted: var(--panel2);
   --muted-foreground: var(--dim);
+
   --destructive: var(--severity-high);
   --destructive-foreground: var(--on-severity);
+
   --border: var(--line);
   --input: var(--line);
   --ring: var(--accent);
+
   --chart-1: var(--accent);
 
-  /* Sidebar isn't installed; these exist so `add sidebar` inherits the palette
-     instead of shadcn's stray purple. */
   --sidebar: var(--panel);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
@@ -230,62 +178,93 @@
   --sidebar-ring: var(--accent);
 }
 
-/* --------------------------------------------------- token -> utility names */
+/* ============================================================
+   TAILWIND THEME
+   ============================================================ */
 
 @theme inline {
-  /* Legacy vocabulary. Do not remove: the twelve existing panels depend on
-     every one of these resolving. */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+
   --color-panel: var(--panel);
   --color-panel2: var(--panel2);
   --color-line: var(--line);
   --color-dim: var(--dim);
   --color-accent: var(--accent);
+
   --color-red: var(--red);
   --color-amber: var(--amber);
   --color-green: var(--green);
   --color-violet: var(--violet);
 
-  /* Severity — the three names wave 2 should use. */
   --color-severity-high: var(--severity-high);
   --color-severity-medium: var(--severity-medium);
   --color-severity-low: var(--severity-low);
 
-  /* Fonts. layout.tsx supplies --font-geist-sans / --font-geist-mono via
-     next/font; the fallbacks keep type sane if that ever changes. */
-  --font-sans: var(--font-geist-sans, ui-sans-serif, system-ui, sans-serif);
-  --font-mono: var(--font-geist-mono, ui-monospace, SFMono-Regular, monospace);
-  --font-heading: var(--font-geist-sans, ui-sans-serif, system-ui, sans-serif);
+  --font-sans:
+    var(
+      --font-geist-sans,
+      ui-sans-serif,
+      system-ui,
+      sans-serif
+    );
 
-  /* shadcn vocabulary. */
+  --font-mono:
+    var(
+      --font-geist-mono,
+      ui-monospace,
+      SFMono-Regular,
+      monospace
+    );
+
+  --font-heading:
+    var(
+      --font-geist-sans,
+      ui-sans-serif,
+      system-ui,
+      sans-serif
+    );
+
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
+
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
+
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+
   --color-accent-foreground: var(--accent-foreground);
+
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary-foreground: var(
+    --sidebar-primary-foreground
+  );
   --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent-foreground: var(
+    --sidebar-accent-foreground
+  );
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
@@ -298,7 +277,9 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* ----------------------------------------------------------------- base */
+/* ============================================================
+   BASE
+   ============================================================ */
 
 @layer base {
   * {
@@ -311,20 +292,10 @@
 
   body {
     @apply bg-background text-foreground;
-    /*
-     * Tabular numerals everywhere a number appears — which, in this app, is
-     * everywhere. Setting it once on the body means wave 2 never has to
-     * remember it and columns of days, costs and counts line up by default.
-     * Escape hatch for running prose: Tailwind's built-in `proportional-nums`.
-     */
+
     font-variant-numeric: tabular-nums;
   }
 
-  /*
-   * Typography does the hierarchy, not boxes: headings are tight and set
-   * slightly negative, so a heading reads as a heading without a rule or a
-   * card around it.
-   */
   h1,
   h2,
   h3,
@@ -338,16 +309,18 @@
   }
 
   ::selection {
-    background: color-mix(in oklab, var(--accent) 28%, transparent);
+    background: color-mix(
+      in oklab,
+      var(--accent) 28%,
+      transparent
+    );
   }
 }
 
-/* -------------------------------------------------------- React Flow theme */
+/* ============================================================
+   REACT FLOW — GLOBAL BASE
+   ============================================================ */
 
-/*
- * The dependency graph depends on these. They read the raw tokens rather than
- * the Tailwind `--color-*` aliases, so they follow light and dark on their own.
- */
 .react-flow__background {
   background: var(--background) !important;
 }
@@ -365,4 +338,360 @@
 .react-flow__attribution {
   background: transparent !important;
   color: var(--dim) !important;
+}
+
+/* ============================================================
+   FLOWTRACE GRAPH — FORCED LIGHT THEME
+
+   This is the important part.
+
+   The rest of the application can respect system dark mode,
+   but the workflow timeline stays visually consistent with
+   the FlowTrace light workspace.
+   ============================================================ */
+
+.react-flow.flowtrace-light {
+  --background: #f7f7fc;
+  --panel: #ffffff;
+  --panel2: #f1f0fa;
+  --line: #e2e1ec;
+
+  --foreground: #17172a;
+  --dim: #68677a;
+
+  --accent: #4164fa;
+  --accent-foreground: #ffffff;
+
+  --severity-high: #cf222e;
+  --severity-medium: #8a6300;
+  --severity-low: #1a7f37;
+
+  --violet: #795cf7;
+
+  color: #17172a !important;
+  background: #f7f7fc !important;
+}
+
+.react-flow.flowtrace-light .react-flow__renderer {
+  background: #f7f7fc !important;
+}
+
+.react-flow.flowtrace-light .react-flow__background {
+  background: #f7f7fc !important;
+}
+
+.react-flow.flowtrace-light
+  .react-flow__background-pattern {
+  background: #f7f7fc !important;
+}
+
+.react-flow.flowtrace-light .react-flow__controls {
+  box-shadow: none !important;
+}
+
+.react-flow.flowtrace-light
+  .react-flow__controls-button {
+  background: #ffffff !important;
+  border-color: #e2e1ec !important;
+  color: #68677a !important;
+  fill: #68677a !important;
+}
+
+.react-flow.flowtrace-light
+  .react-flow__controls-button:hover {
+  background: #f1f0fa !important;
+}
+
+.react-flow.flowtrace-light
+  .react-flow__minimap {
+  background: #ffffff !important;
+  border: 1px solid #e2e1ec !important;
+}
+
+.react-flow.flowtrace-light
+  .react-flow__attribution {
+  background: transparent !important;
+  color: #68677a !important;
+}
+
+/* ============================================================
+   FLOWTRACE GRAPH CONTAINER
+   ============================================================ */
+
+.flowtrace-graph {
+  background: #f7f7fc !important;
+  color: #17172a !important;
+}
+
+/* Prevent the browser/system dark scheme from affecting native
+   elements inside the workflow chart. */
+
+.flowtrace-graph,
+.flowtrace-graph * {
+  color-scheme: light;
+}
+
+/* ============================================================
+   SCROLLBARS
+   ============================================================ */
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--dim);
+}
+
+/* ============================================================
+   FLOWTRACE PREMIUM POLISH
+   Stronger hierarchy, readable copy, tactile controls and
+   quieter surfaces. This layer intentionally stays frontend-only.
+   ============================================================ */
+
+:root {
+  --ft-bg: #f6f7fb;
+  --ft-surface: #ffffff;
+  --ft-surface-soft: #f8f9fd;
+  --ft-border: #d9dce7;
+  --ft-border-strong: #c8ccd9;
+  --ft-ink: #171a2b;
+  --ft-ink-soft: #4f5b6d;
+  --ft-muted: #687589;
+  --ft-blue: #4164fa;
+  --ft-violet: #795cf7;
+  --ft-shadow: 0 16px 45px rgba(28, 32, 60, 0.07);
+}
+
+html,
+body {
+  font-family: "Avenir Next", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  letter-spacing: -0.008em;
+}
+
+h1,
+h2,
+h3,
+h4,
+.font-heading {
+  font-family: "Avenir Next", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  letter-spacing: -0.035em;
+}
+
+.flowtrace-site {
+  color: var(--ft-ink);
+}
+
+:root:not(.dark) .flowtrace-site main > section {
+  background: var(--ft-surface);
+  border: 1px solid var(--ft-border);
+  border-radius: 24px;
+  padding: 30px;
+  margin-bottom: 22px;
+  box-shadow: var(--ft-shadow);
+}
+
+:root:not(.dark) .flowtrace-site main > section > div:first-child h1 {
+  font-size: 26px;
+  line-height: 1.15;
+  font-weight: 700;
+  color: var(--ft-ink);
+}
+
+:root:not(.dark) .flowtrace-site main > section > div:first-child p {
+  color: var(--ft-ink-soft) !important;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+/* Readable light-theme secondary copy. */
+:root:not(.dark) .flowtrace-site [class*="text-[#68677A]"],
+:root:not(.dark) .flowtrace-site [class*="text-[#8FA8FF]"],
+:root:not(.dark) .flowtrace-site [class*="text-[#8A98A8"],
+:root:not(.dark) .flowtrace-site [class*="text-muted-foreground"],
+:root:not(.dark) .flowtrace-site [class*="text-dim"] {
+  color: #536174 !important;
+}
+
+:root:not(.dark) .flowtrace-site [class*="text-[#17172A]"],
+:root:not(.dark) .flowtrace-site [class*="text-foreground"] {
+  color: #171a2b !important;
+}
+
+/* Make every editable control look editable, not disabled. */
+:root:not(.dark) .flowtrace-site input,
+:root:not(.dark) .flowtrace-site select,
+:root:not(.dark) .flowtrace-site textarea {
+  background: #ffffff !important;
+  color: #171a2b !important;
+  border-color: #cbd0dc !important;
+  box-shadow: 0 1px 2px rgba(20, 24, 40, 0.03);
+}
+
+:root:not(.dark) .flowtrace-site input::placeholder,
+:root:not(.dark) .flowtrace-site textarea::placeholder {
+  color: #7b8798 !important;
+  opacity: 1;
+}
+
+:root:not(.dark) .flowtrace-site input:focus,
+:root:not(.dark) .flowtrace-site select:focus,
+:root:not(.dark) .flowtrace-site textarea:focus {
+  border-color: #4164fa !important;
+  box-shadow: 0 0 0 3px rgba(65, 100, 250, 0.10) !important;
+}
+
+:root:not(.dark) .flowtrace-site button {
+  font-weight: 600;
+}
+
+:root:not(.dark) .flowtrace-site button:disabled {
+  opacity: 0.58;
+}
+
+/* Shared primitive upgrade. */
+:root:not(.dark) .flowtrace-site .bg-panel,
+:root:not(.dark) .flowtrace-site .bg-white {
+  background-color: #ffffff;
+}
+
+:root:not(.dark) .flowtrace-site [class*="border-[#E2E1EC]"],
+:root:not(.dark) .flowtrace-site [class*="border-[#DAD9E7]"],
+:root:not(.dark) .flowtrace-site [class*="border-line"] {
+  border-color: #d9dce7 !important;
+}
+
+:root:not(.dark) .flowtrace-site [class*="bg-[#F7F7FC]"],
+:root:not(.dark) .flowtrace-site [class*="bg-[#F9F9FD]"],
+:root:not(.dark) .flowtrace-site [class*="bg-[#F5F5FB]"],
+:root:not(.dark) .flowtrace-site [class*="bg-[#F1F0FA]"] {
+  background-color: #f7f8fc !important;
+}
+
+/* Sidebar: stronger active state and cleaner rhythm. */
+:root:not(.dark) .flowtrace-site aside {
+  background: #fbfbfd !important;
+}
+
+:root:not(.dark) .flowtrace-site aside nav button:not(:disabled):hover {
+  transform: translateX(2px);
+}
+
+:root:not(.dark) .flowtrace-site aside nav button[aria-current="page"],
+:root:not(.dark) .flowtrace-site aside nav button:first-child {
+  transition: all 160ms ease;
+}
+
+/* Header becomes a proper product chrome. */
+:root:not(.dark) .flowtrace-site > section#workspace header {
+  border-color: #dfe2ea !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+}
+
+/* Cards/tables inside stages get depth without becoming glossy. */
+:root:not(.dark) .flowtrace-site .rounded-lg.border,
+:root:not(.dark) .flowtrace-site .rounded-xl.border,
+:root:not(.dark) .flowtrace-site .rounded-2xl.border,
+:root:not(.dark) .flowtrace-site .rounded-3xl.border {
+  border-color: #d9dce7;
+}
+
+:root:not(.dark) .flowtrace-site table {
+  color: #202438;
+}
+
+:root:not(.dark) .flowtrace-site th {
+  color: #667387 !important;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+:root:not(.dark) .flowtrace-site td {
+  color: #202438;
+}
+
+:root:not(.dark) .flowtrace-site tr {
+  border-color: #e0e3ea !important;
+}
+
+/* Technical metadata stays technical, but readable. */
+:root:not(.dark) .flowtrace-site code,
+:root:not(.dark) .flowtrace-site .font-mono {
+  color: #526074;
+}
+
+/* Premium primary buttons. */
+:root:not(.dark) .flowtrace-site button.bg-primary,
+:root:not(.dark) .flowtrace-site button[class*="bg-gradient-to-r"] {
+  box-shadow: 0 8px 22px rgba(65, 100, 250, 0.18);
+}
+
+/* Give empty areas a deliberate canvas instead of dead grey space. */
+:root:not(.dark) .flowtrace-site main {
+  background:
+    radial-gradient(circle at 90% 0%, rgba(121, 92, 247, 0.045), transparent 28%),
+    radial-gradient(circle at 0% 10%, rgba(65, 100, 250, 0.035), transparent 24%);
+}
+
+/* Dark mode keeps the same hierarchy, with stronger readable text. */
+:root.dark .flowtrace-site main > section {
+  background: #111525;
+  border: 1px solid #2b3045;
+  border-radius: 24px;
+  padding: 30px;
+  margin-bottom: 22px;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.20);
+}
+
+:root.dark .flowtrace-site main > section > div:first-child h1 {
+  font-size: 26px;
+  line-height: 1.15;
+  font-weight: 700;
+}
+
+:root.dark .flowtrace-site main > section > div:first-child p {
+  color: #b9c0d0 !important;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+:root.dark .flowtrace-site input,
+:root.dark .flowtrace-site select,
+:root.dark .flowtrace-site textarea {
+  background: #151a2c !important;
+  color: #f5f5ff !important;
+  border-color: #343a52 !important;
+}
+
+:root.dark .flowtrace-site input::placeholder,
+:root.dark .flowtrace-site textarea::placeholder {
+  color: #858da3 !important;
+}
+
+:root.dark .flowtrace-site input:focus,
+:root.dark .flowtrace-site select:focus,
+:root.dark .flowtrace-site textarea:focus {
+  border-color: #6b82ff !important;
+  box-shadow: 0 0 0 3px rgba(65, 100, 250, 0.16) !important;
+}
+
+@media (max-width: 768px) {
+  :root:not(.dark) .flowtrace-site main > section,
+  :root.dark .flowtrace-site main > section {
+    padding: 20px;
+    border-radius: 18px;
+  }
 }

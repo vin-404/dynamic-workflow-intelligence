@@ -22,7 +22,7 @@ export function Card({
   className?: string;
 }) {
   return (
-    <div className={`bg-panel border border-line rounded-lg p-4 ${className}`}>
+    <div className={`bg-panel border border-line rounded-2xl p-5 shadow-[0_8px_28px_rgba(28,32,60,0.05)] ${className}`}>
       {children}
     </div>
   );
@@ -37,7 +37,7 @@ export function CardTitle({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3 mb-3">
-      <h2 className="text-[13px] uppercase tracking-wider text-dim font-medium">
+      <h2 className="text-[11px] uppercase tracking-[0.14em] text-dim font-semibold">
         {children}
       </h2>
       {right}
@@ -58,11 +58,11 @@ export function Section({
 }) {
   return (
     <section className="mb-6">
-      <div className="flex items-start justify-between gap-4 mb-3">
+      <div className="flex items-start justify-between gap-5 mb-6">
         <div>
-          <h1 className="text-xl font-semibold">{title}</h1>
+          <h1 className="text-[26px] font-bold tracking-[-0.035em]">{title}</h1>
           {subtitle && (
-            <p className="text-dim text-sm mt-1 max-w-3xl">{subtitle}</p>
+            <p className="text-dim text-sm mt-2 max-w-3xl leading-6">{subtitle}</p>
           )}
         </div>
         {right}
@@ -96,13 +96,12 @@ export function Button({
   // product where every primary button is accent-coloured has reserved it for
   // nothing - which is what this variant used to do with `bg-accent`.
   const styles = {
-    default: "bg-panel2 border border-line hover:border-dim",
+    default: "bg-panel border border-line hover:border-accent/35 hover:bg-panel2 shadow-sm",
     primary:
-      "bg-primary text-primary-foreground font-medium hover:opacity-90",
+      "bg-gradient-to-r from-[#4164FA] to-[#795CF7] text-white font-semibold shadow-[0_8px_22px_rgba(65,100,250,0.18)] hover:-translate-y-0.5 hover:shadow-[0_12px_28px_rgba(65,100,250,0.22)]",
     danger:
-      "bg-transparent border border-severity-high/40 text-severity-high " +
-      "hover:bg-severity-high/10",
-    ghost: "bg-transparent text-dim hover:text-foreground",
+      "bg-transparent border border-severity-high/35 text-severity-high hover:bg-severity-high/8",
+    ghost: "bg-transparent text-dim hover:text-foreground hover:bg-panel2",
   }[variant];
   return (
     <button
@@ -110,7 +109,7 @@ export function Button({
       title={title}
       disabled={disabled}
       onClick={onClick}
-      className={`px-3 py-1.5 rounded-md text-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${styles} ${className}`}
+      className={`px-4 py-2 rounded-xl text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed ${styles} ${className}`}
     >
       {children}
     </button>
@@ -138,8 +137,8 @@ export function Field({
 }
 
 const inputBase =
-  "w-full bg-panel2 border border-line rounded-md px-2.5 py-1.5 text-sm " +
-  "focus:outline-none focus:border-accent placeholder:text-dim/60";
+  "w-full bg-panel border border-line rounded-xl px-3 py-2.5 text-sm " +
+  "text-foreground focus:outline-none focus:border-accent focus:ring-2 focus:ring-accent/10 placeholder:text-dim/70 transition-all";
 
 export function Input(
   props: React.InputHTMLAttributes<HTMLInputElement> & { className?: string },
@@ -193,7 +192,7 @@ export function Badge({
   return (
     <span
       title={title}
-      className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] border ${TONES[tone]}`}
+      className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] border font-medium ${TONES[tone]}`}
     >
       {children}
     </span>

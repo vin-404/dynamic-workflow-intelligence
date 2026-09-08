@@ -107,7 +107,7 @@ function RequirementRail({
 }) {
   return (
     <nav className="flex flex-col">
-      <h3 className="mb-2 border-b border-border pb-1 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+      <h3 className="mb-2 border-b border-line pb-1 text-[11px] font-medium tracking-wider text-dim uppercase">
         Requirements — {requirements.length}
       </h3>
       <ul>
@@ -119,8 +119,8 @@ function RequirementRail({
                 onClick={() => onSelect(r.key)}
                 aria-current={active ? "true" : undefined}
                 className={cn(
-                  "w-full border-b border-border py-2 text-left transition-colors last:border-0",
-                  active ? "bg-muted/60" : "hover:bg-muted/30",
+                  "w-full border-b border-line py-2 text-left transition-colors last:border-0",
+                  active ? "bg-panel2" : "hover:bg-panel2",
                 )}
               >
                 <div className="flex items-baseline gap-2 px-1.5">
@@ -130,12 +130,12 @@ function RequirementRail({
                   <span className={cn("font-mono text-xs", active && "font-semibold")}>
                     {r.key}
                   </span>
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-[11px] text-dim">
                     v{r.version_no}
                   </span>
                 </div>
                 <p className="px-1.5 text-sm leading-snug">{r.text}</p>
-                <p className="px-1.5 text-xs text-muted-foreground">
+                <p className="px-1.5 text-xs text-dim">
                   {r.consumed_by_count} consuming ·{" "}
                   <span
                     className={cn(
@@ -152,7 +152,7 @@ function RequirementRail({
           );
         })}
       </ul>
-      <p className="mt-2 text-xs text-muted-foreground">
+      <p className="mt-2 text-xs text-dim">
         &ldquo;Finished&rdquo; is effort already completed that a change to that
         requirement would invalidate, assuming the change is material. Nothing
         here reads the requirement text.
@@ -177,7 +177,7 @@ function ScopeChips({
   const unscoped = scope.length === consumers.length;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-xs text-muted-foreground">invalidates</span>
+      <span className="text-xs text-dim">invalidates</span>
       {consumers.map((key) => {
         const on = scope.includes(key);
         return (
@@ -194,7 +194,7 @@ function ScopeChips({
               "rounded border px-1.5 py-px font-mono text-[11px] transition-colors",
               on
                 ? "border-severity-high/40 bg-severity-high/10 text-severity-high"
-                : "border-border text-muted-foreground line-through hover:border-foreground/40",
+                : "border-line text-dim line-through hover:border-foreground/40",
             )}
           >
             {key}
@@ -206,7 +206,7 @@ function ScopeChips({
           reset to all
         </Button>
       )}
-      <span className="text-xs text-muted-foreground">
+      <span className="text-xs text-dim">
         {unscoped
           ? "— all consumers, unscoped"
           : `— ${consumers.length - scope.length} spared by your judgement`}
@@ -245,8 +245,8 @@ function ComparisonView({
   return (
     <div className="flex flex-col gap-4">
       <div>
-        <div className="mb-2 border-b border-border pb-1">
-          <h3 className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+        <div className="mb-2 border-b border-line pb-1">
+          <h3 className="text-[11px] font-medium tracking-wider text-dim uppercase">
             {tie
               ? `${options.length} wordings, the same cost`
               : `Cheapest: ${
@@ -264,14 +264,14 @@ function ComparisonView({
               "border-l-2 py-2 pr-2 pl-3 text-xs",
               tie
                 ? "border-severity-medium bg-severity-medium/5"
-                : "border-border",
+                : "border-line",
             )}
           >
             {/* The API's sentence already opens with "these cost exactly the
                 same, and that is the correct answer" — a bold restatement
                 above it just says the same thing twice. The heading carries
                 the label; this carries the reasoning. */}
-            <span className={tie ? "text-foreground/90" : "text-muted-foreground"}>
+            <span className={tie ? "text-foreground/90" : "text-dim"}>
               {comparison.differences.statement}
             </span>
             {tie && (
@@ -288,13 +288,13 @@ function ComparisonView({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="text-[11px] tracking-wider text-muted-foreground uppercase">
+            <TableHead className="text-[11px] tracking-wider text-dim uppercase">
               Measure
             </TableHead>
             {options.map((o) => (
               <TableHead
                 key={o.index}
-                className="text-right text-[11px] tracking-wider text-muted-foreground uppercase"
+                className="text-right text-[11px] tracking-wider text-dim uppercase"
               >
                 {o.label}
               </TableHead>
@@ -315,7 +315,7 @@ function ComparisonView({
                   key={i}
                   className={cn(
                     "text-right",
-                    row.differs ? "font-semibold" : "text-muted-foreground",
+                    row.differs ? "font-semibold" : "text-dim",
                   )}
                 >
                   {row.field.endsWith("_count") ? v : days(v)}
@@ -324,13 +324,13 @@ function ComparisonView({
             </TableRow>
           ))}
           <TableRow>
-            <TableCell className="whitespace-normal text-sm text-muted-foreground">
+            <TableCell className="whitespace-normal text-sm text-dim">
               which consumers this wording is judged to invalidate
             </TableCell>
             {options.map((o) => (
               <TableCell
                 key={o.index}
-                className="text-right text-xs text-muted-foreground"
+                className="text-right text-xs text-dim"
               >
                 {o.scoped
                   ? o.invalidates.length
@@ -358,7 +358,7 @@ function ComparisonView({
       </div>
 
       {comparison.base && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-xs text-dim">
           Both were costed against version {base.version_no} of this workflow.{" "}
           {base.same_base_for_every_option
             ? "Every option used the same base, and the base's content hash is unchanged by asking."
@@ -558,7 +558,7 @@ export default function RequirementChange({
         <p className="text-sm font-medium">
           This workflow has no requirements to change
         </p>
-        <p className="mt-1 text-sm text-muted-foreground">
+        <p className="mt-1 text-sm text-dim">
           A requirement is a statement the work depends on, and a dependency
           marked <span className="font-mono">consumes</span> is what makes a
           task&rsquo;s output depend on it. Without either, there is nothing to
@@ -577,7 +577,7 @@ export default function RequirementChange({
 
   return (
     <div className="grid gap-6 lg:grid-cols-[15rem_minmax(0,1fr)]">
-      <div className="lg:sticky lg:top-4 lg:self-start">
+      <div className="lg:sticky lg:top-4 lg:self-start rounded-xl border border-line bg-panel p-4">
         <RequirementRail
           requirements={requirements}
           selected={selected}
@@ -591,7 +591,7 @@ export default function RequirementChange({
             <p className="text-sm font-medium">
               Pick a requirement to see what changing it would cost
             </p>
-            <p className="mt-1 text-sm text-muted-foreground">
+            <p className="mt-1 text-sm text-dim">
               Every figure on this stage comes from the dependency graph — which
               tasks consumed the requirement, what they cost, and what follows
               them. Nothing reads the requirement text, and no language model is
@@ -601,18 +601,18 @@ export default function RequirementChange({
         ) : (
           <>
             {/* ---------------------------------------------- composer */}
-            <section>
-              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1">
-                <h3 className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+            <section className="rounded-xl border border-line bg-panel p-5">
+              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-1">
+                <h3 className="text-[11px] font-medium tracking-wider text-dim uppercase">
                   Propose a new wording for {current.key}
                 </h3>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-dim">
                   currently v{current.version_no} · consumed by{" "}
                   {consumers.length > 0 ? consumers.join(", ") : "nothing"}
                 </span>
               </div>
 
-              <p className="mb-2 text-sm text-muted-foreground">
+              <p className="mb-2 text-sm text-dim">
                 Now: <span className="text-foreground">{current.text}</span>
               </p>
 
@@ -662,7 +662,7 @@ export default function RequirementChange({
                 ))}
               </div>
 
-              <p className="mt-2 max-w-3xl text-xs text-muted-foreground">
+              <p className="mt-2 max-w-3xl text-xs text-dim">
                 The chips are the one judgement this system cannot make for you.
                 Every consuming task is assumed invalidated unless you strike it
                 out. Striking one out says &ldquo;this wording does not change
@@ -701,7 +701,7 @@ export default function RequirementChange({
                   <Plus data-icon="inline-start" />
                   Add another wording to compare
                 </Button>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-dim">
                   Asking writes nothing. The base version&rsquo;s content hash
                   is returned before and after so you can check that rather than
                   trust it.
@@ -748,8 +748,8 @@ export default function RequirementChange({
                   onOpen={(i) => setOpened((o) => (o === i ? null : i))}
                 />
                 {openedOption && (
-                  <div className="border-t border-border pt-4">
-                    <p className="mb-3 text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+                  <div className="border-t border-line pt-4">
+                    <p className="mb-3 text-[11px] font-medium tracking-wider text-dim uppercase">
                       {openedOption.label} in full
                     </p>
                     <ImpactReport
@@ -782,8 +782,8 @@ export default function RequirementChange({
                     when no individual report is open. */}
                 {!openedOption &&
                   assumptionSentences(comparison.assumptions).length > 0 && (
-                    <section className="border-t border-border pt-2 text-xs">
-                      <div className="mb-1.5 font-medium tracking-wider text-muted-foreground uppercase">
+                    <section className="border-t border-line pt-2 text-xs">
+                      <div className="mb-1.5 font-medium tracking-wider text-dim uppercase">
                         What this comparison rests on
                       </div>
                       <dl className="flex flex-col gap-1.5">
@@ -793,7 +793,7 @@ export default function RequirementChange({
                               <dt className="font-medium text-foreground/90">
                                 {humanizeKey(key)}
                               </dt>
-                              <dd className="text-muted-foreground">{text}</dd>
+                              <dd className="text-dim">{text}</dd>
                             </div>
                           ),
                         )}
@@ -804,7 +804,7 @@ export default function RequirementChange({
             )}
 
             {applied && (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-dim">
                 Workflow version {applied.new_version?.version_no ?? "?"} is now
                 current. The other stages still hold version{" "}
                 {workflow.version.version_no} until you reload the project.
@@ -812,7 +812,7 @@ export default function RequirementChange({
             )}
 
             {/* --------------------------------------------- provenance */}
-            <section className="border-t border-border pt-4">
+            <section className="border-t border-line pt-4">
               <RequirementHistory
                 key={current.key}
                 projectId={projectId}

@@ -155,12 +155,12 @@ export default function RequirementHistory({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1">
-        <h3 className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+    <div className="flex flex-col gap-4 rounded-xl border border-line bg-panel p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-1">
+        <h3 className="text-[11px] font-medium tracking-wider text-dim uppercase">
           Recorded wordings of {requirementKey}
         </h3>
-        <span className="text-xs text-muted-foreground">
+        <span className="text-xs text-dim">
           {history.revision_count ?? revisions.length} recorded ·{" "}
           {history.changes_recorded ?? 0} applied through this system
         </span>
@@ -168,20 +168,20 @@ export default function RequirementHistory({
 
       {/* The wording in force now, whether or not history knows about it. */}
       {current && (
-        <div className="flex flex-col gap-0.5">
+        <div className="flex flex-col gap-1 rounded-lg bg-panel2/60 p-3">
           <div className="flex flex-wrap items-baseline gap-x-2">
             <span className="font-mono text-xs">v{current.version_no}</span>
             <Badge variant="outline" className="h-4 px-1.5">
               current
             </Badge>
             {!current.recorded_in_history && (
-              <span className="text-xs text-muted-foreground">
+              <span className="text-xs text-dim">
                 not in the revision table
               </span>
             )}
           </div>
           <p className="text-sm">{current.text}</p>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-dim">
             consumed by{" "}
             {current.consumed_by?.length
               ? current.consumed_by.join(", ")
@@ -200,14 +200,14 @@ export default function RequirementHistory({
               return (
                 <li
                   key={rev.version_no}
-                  className="border-b border-border py-2 last:border-0"
+                  className="border-b border-line py-3 last:border-0"
                 >
                   <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
                     <div className="flex flex-wrap items-baseline gap-x-2">
                       <span className="font-mono text-xs">
                         v{rev.version_no}
                       </span>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-xs text-dim">
                         {rev.attributed && rev.changed_by
                           ? rev.changed_by
                           : "author unknown"}
@@ -218,7 +218,7 @@ export default function RequirementHistory({
                         </Badge>
                       )}
                     </div>
-                    <span className="font-mono text-xs text-muted-foreground">
+                    <span className="font-mono text-xs text-dim">
                       {rev.backfilled
                         ? "instant unknown"
                         : `${instantUTC(rev.recorded_at) ?? "—"} UTC`}
@@ -226,7 +226,7 @@ export default function RequirementHistory({
                   </div>
                   <p className="mt-0.5 text-sm">{rev.text}</p>
                   {rev.consumed_by && (
-                    <p className="mt-0.5 text-xs text-muted-foreground">
+                    <p className="mt-0.5 text-xs text-dim">
                       consumed then by{" "}
                       {rev.consumed_by.length > 0
                         ? rev.consumed_by.join(", ")
@@ -234,7 +234,7 @@ export default function RequirementHistory({
                     </p>
                   )}
                   {rev.provenance_note && (
-                    <p className="mt-0.5 text-xs text-muted-foreground">
+                    <p className="mt-0.5 text-xs text-dim">
                       {rev.provenance_note}
                     </p>
                   )}
@@ -270,8 +270,8 @@ export default function RequirementHistory({
       )}
 
       {diff && (
-        <div className="border-l-2 border-border pl-3">
-          <p className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+        <div className="border-l-2 border-line pl-3">
+          <p className="text-[11px] font-medium tracking-wider text-dim uppercase">
             v{diff.from_version} → v{diff.to_version}
           </p>
           <p className="mt-1 text-sm leading-relaxed">
@@ -303,11 +303,11 @@ export default function RequirementHistory({
               );
             })}
           </p>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-xs text-dim">
             {diff.text_diff.note}
           </p>
           <p className="mt-1 text-xs">
-            <span className="text-muted-foreground">
+            <span className="text-dim">
               Consumed then: {diff.consumed_by_then.join(", ") || "nothing"} ·
               consumed now: {diff.consumed_by_now.join(", ") || "nothing"}.{" "}
             </span>
@@ -319,14 +319,14 @@ export default function RequirementHistory({
             )}
           </p>
           {diff.note && (
-            <p className="mt-1 text-xs text-muted-foreground">{diff.note}</p>
+            <p className="mt-1 text-xs text-dim">{diff.note}</p>
           )}
         </div>
       )}
 
       {/* Rendered full or empty. An empty list is silence, not evidence. */}
       {history.note && (
-        <p className="border-t border-border pt-2 text-xs text-muted-foreground">
+        <p className="border-t border-line pt-2 text-xs text-dim">
           {history.note}
         </p>
       )}

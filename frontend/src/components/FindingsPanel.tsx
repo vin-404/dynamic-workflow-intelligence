@@ -3,18 +3,9 @@
 /**
  * Capability 1 - current bottlenecks, explainably.
  *
- * A finding is never shown as a bare score. Each one shows its root cause
- * (not the symptom), the evidence it reasoned from, the impact with both
- * operands and the worked arithmetic, and the action it suggests.
- *
- * Findings are grouped by root cause, because three true findings about the
- * same stalled approval is one problem, not three.
- *
- * The row *is* the finding. There is no card around it: a group is a
- * hairline-ruled heading and its findings are rows under it, so eleven
- * findings read as eleven facts rather than eleven boxes. The only thing
- * behind a click is the evidence dump - the keys, the arithmetic, the tier
- * and the action all sit on the row.
+ * Findings are grouped by root cause so related signals read as one problem.
+ * Each row keeps the cause, evidence, impact, and suggested action visible,
+ * with the evidence details available on demand.
  */
 
 import { useMemo, useState } from "react";
@@ -26,10 +17,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { TierBanner, Worked } from "./ui";
 
-/** Chrome hides the default marker only if all three of these are set. */
 const SUMMARY =
-  "flex cursor-pointer list-none items-center gap-1 marker:content-none " +
-  "[&::-webkit-details-marker]:hidden";
+  "flex cursor-pointer list-none items-center gap-1 marker:content-none [&::-webkit-details-marker]:hidden";
 
 function prettyKind(kind: string): string {
   return kind.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
@@ -38,7 +27,6 @@ function prettyKind(kind: string): string {
 export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
   const [tierFilter, setTierFilter] = useState<number | null>(null);
 
-  /** The one legitimate accent in this panel: a finding on the critical path. */
   const criticalPath = useMemo(
     () => new Set(analysis.critical_path),
     [analysis.critical_path],
@@ -46,11 +34,14 @@ export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
 
   const groups = useMemo(() => {
     const byCause = new Map<string, Finding[]>();
+
     for (const finding of analysis.findings) {
       if (tierFilter !== null && finding.tier !== tierFilter) continue;
+
       const key = finding.root_cause ?? finding.kind;
       byCause.set(key, [...(byCause.get(key) ?? []), finding]);
     }
+
     return [...byCause.entries()].sort(
       (a, b) =>
         Math.max(...b[1].map((f) => f.impact_score)) -
@@ -64,6 +55,14 @@ export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
     .map(Number)
     .sort();
 
+  const criticalFindings = analysis.findings.filter((finding) =>
+    finding.task_ids.some((taskId) => criticalPath.has(taskId)),
+  ).length;
+
+  const rootCauseCount = new Set(
+    analysis.findings.map((finding) => finding.root_cause ?? finding.kind),
+  ).size;
+
   return (
     <div className="flex flex-col gap-4">
       <TierBanner
@@ -72,18 +71,54 @@ export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
         unavailable={analysis.unavailable_checks}
       />
 
+      {analysis.findings.length > 0 && (
+        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
+          <Metric
+            label="Open findings"
+            value={analysis.findings.length}
+            detail={
+              analysis.findings.length === 1
+                ? "issue detected"
+                : "issues detected"
+            }
+          />
+          <Metric
+            label="Root causes"
+            value={rootCauseCount}
+            detail={
+              rootCauseCount === 1 ? "underlying cause" : "underlying causes"
+            }
+          />
+          <Metric
+            label="Critical path"
+            value={criticalFindings}
+            detail={
+              criticalFindings === 1
+                ? "finding touches the path"
+                : "findings touch the path"
+            }
+          />
+        </div>
+      )}
+
       {!analysis.schedulable && (
-        <div className="border-l-2 border-severity-high bg-severity-high/5 py-2 pl-3">
-          <p className="text-sm font-semibold text-severity-high">
-            This workflow cannot be scheduled
-          </p>
-          <p className="text-sm">
+        <div className="border-l-2 border-severity-high bg-severity-high/5 py-3 pl-3 pr-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-sm font-semibold text-severity-high">
+              This workflow cannot be scheduled
+            </p>
+            <Badge variant="outline" className={severityClasses("high")}>
+              circular dependency
+            </Badge>
+          </div>
+          <p className="mt-1 text-sm text-foreground/80">
             It contains a circular dependency, so it has no finish date at all.
           </p>
+
           {analysis.cycles.map((cycle, i) => (
             <p
               key={i}
-              className="mt-1 font-mono text-xs text-severity-medium"
+              className="mt-2 font-mono text-xs text-severity-medium"
             >
               {cycle.join(" → ")} → {cycle[0]}
             </p>
@@ -92,8 +127,8 @@ export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
       )}
 
       {analysis.findings.length === 0 ? (
-        <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center">
-          <p className="text-sm font-medium">
+        <div className="rounded-lg border border-dashed border-border bg-panel px-4 py-10 text-center">
+          <p className="text-sm font-semibold">
             Nothing found at this evidence tier
           </p>
           <p className="mx-auto mt-1 max-w-lg text-sm text-muted-foreground">
@@ -104,28 +139,26 @@ export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            {/*
-              * Both halves of this sentence count the same set. It used to
-              * read the unfiltered total against the filtered cause count, so
-              * picking a tier said "11 findings across 2 causes" while two
-              * findings were on screen. The total is still reachable - it is
-              * on the "all tiers" control - so nothing was lost by making the
-              * headline agree with the rows beneath it.
-              */}
-            <h3 className="text-sm">
-              <span className="font-semibold">
-                {shown} finding{shown === 1 ? "" : "s"}
-              </span>
-              <span className="text-muted-foreground">
-                {" "}
-                across {groups.length} cause
-                {groups.length === 1 ? "" : "s"}
-                {tierFilter !== null
-                  ? ` · tier ${tierFilter} of ${analysis.findings.length}`
-                  : ""}
-              </span>
-            </h3>
+          <div className="flex flex-wrap items-end gap-3 border-b border-border pb-3">
+            <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                Bottleneck register
+              </p>
+              <h3 className="mt-1 text-sm">
+                <span className="font-semibold">
+                  {shown} finding{shown === 1 ? "" : "s"}
+                </span>
+                <span className="text-muted-foreground">
+                  {" "}
+                  across {groups.length} cause
+                  {groups.length === 1 ? "" : "s"}
+                  {tierFilter !== null
+                    ? ` · tier ${tierFilter} of ${analysis.findings.length}`
+                    : ""}
+                </span>
+              </h3>
+            </div>
+
             <div className="ml-auto flex flex-wrap items-center gap-1">
               <Button
                 size="xs"
@@ -135,13 +168,16 @@ export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
               >
                 all tiers
               </Button>
+
               {tiers.map((tier) => (
                 <Button
                   key={tier}
                   size="xs"
                   variant={tierFilter === tier ? "secondary" : "ghost"}
                   aria-pressed={tierFilter === tier}
-                  onClick={() => setTierFilter(tier === tierFilter ? null : tier)}
+                  onClick={() =>
+                    setTierFilter(tier === tierFilter ? null : tier)
+                  }
                 >
                   tier {tier} ({analysis.finding_counts_by_tier[String(tier)]})
                 </Button>
@@ -149,23 +185,37 @@ export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
             </div>
           </div>
 
-          <div className="flex flex-col gap-5">
-            {groups.map(([cause, findings]) => (
-              <CauseGroup
-                key={cause}
-                cause={cause}
-                findings={findings}
-                criticalPath={criticalPath}
-              />
-            ))}
-          </div>
+          {shown === 0 ? (
+            <div className="rounded-lg border border-dashed border-border px-4 py-8 text-center">
+              <p className="text-sm font-medium">
+                No findings match this tier
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Switch back to all tiers to see the complete register.
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-6">
+              {groups.map(([cause, findings]) => (
+                <CauseGroup
+                  key={cause}
+                  cause={cause}
+                  findings={findings}
+                  criticalPath={criticalPath}
+                />
+              ))}
+            </div>
+          )}
         </>
       )}
 
       {analysis.suppressed_findings.length > 0 && (
-        <details className="group">
+        <details className="group border-t border-border pt-3">
           <summary
-            className={cn(SUMMARY, "text-xs text-muted-foreground hover:text-foreground")}
+            className={cn(
+              SUMMARY,
+              "text-xs text-muted-foreground hover:text-foreground",
+            )}
           >
             <ChevronRightIcon
               aria-hidden
@@ -174,22 +224,26 @@ export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
             {analysis.suppressed_findings.length} finding(s) suppressed by
             another — kept, with the reason
           </summary>
-          <div className="mt-2 flex flex-col gap-2 border-l border-border pl-3">
-            {analysis.suppressed_findings.map((f, i) => (
+
+          <div className="mt-3 flex flex-col gap-3 border-l border-border pl-3">
+            {analysis.suppressed_findings.map((finding, i) => (
               <div key={i} className="text-xs">
                 <div className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="font-mono">{f.root_cause}</span>
+                  <span className="font-mono">{finding.root_cause}</span>
                   <span className="text-muted-foreground">
-                    {prettyKind(f.kind)}
+                    {prettyKind(finding.kind)}
                   </span>
                   <span className="text-muted-foreground">
-                    suppressed by {f.suppressed?.by}
+                    suppressed by {finding.suppressed?.by}
                   </span>
                 </div>
-                <p className="text-foreground/90">{f.suppressed?.reason}</p>
+                <p className="mt-0.5 text-foreground/90">
+                  {finding.suppressed?.reason}
+                </p>
               </div>
             ))}
-            <p className="text-[11px] text-muted-foreground">
+
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
               One detector may silence another only with a stated reason, and
               the silenced finding is kept rather than dropped — so you can
               audit the judgement instead of trusting it.
@@ -197,6 +251,28 @@ export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
           </div>
         </details>
       )}
+    </div>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  detail,
+}: {
+  label: string;
+  value: number;
+  detail: string;
+}) {
+  return (
+    <div className="bg-panel px-4 py-3">
+      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+        {label}
+      </p>
+      <div className="mt-1 flex items-baseline gap-2">
+        <span className="text-xl font-semibold tracking-tight">{value}</span>
+        <span className="text-[11px] text-muted-foreground">{detail}</span>
+      </div>
     </div>
   );
 }
@@ -213,29 +289,42 @@ function CauseGroup({
   const worst = findings.reduce((a, b) =>
     a.impact_score >= b.impact_score ? a : b,
   );
+
   return (
     <div>
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-b border-border pb-1">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-border pb-2">
         <span className="font-mono text-[13px] font-semibold">{cause}</span>
-        <Badge variant="outline" className={severityClasses(worst.severity)}>
+
+        <Badge
+          variant="outline"
+          className={severityClasses(worst.severity)}
+        >
           {worst.severity}
         </Badge>
+
         {findings.length > 1 && (
           <span className="text-[11px] text-muted-foreground">
             {findings.length} findings, same cause
           </span>
         )}
-        <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground">
-          impact
-        </span>
-        <span className="text-base font-semibold leading-none">
-          {Math.round(worst.impact_score)}
-        </span>
+
+        <div className="ml-auto flex items-baseline gap-2">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">
+            max impact
+          </span>
+          <span className="text-base font-semibold leading-none">
+            {Math.round(worst.impact_score)}
+          </span>
+        </div>
       </div>
 
       <div className="divide-y divide-border/60">
         {findings.map((finding, i) => (
-          <FindingRow key={i} finding={finding} criticalPath={criticalPath} />
+          <FindingRow
+            key={i}
+            finding={finding}
+            criticalPath={criticalPath}
+          />
         ))}
       </div>
     </div>
@@ -249,10 +338,12 @@ function FindingRow({
   finding: Finding;
   criticalPath: Set<string>;
 }) {
-  const onCriticalPath = finding.task_ids.some((k) => criticalPath.has(k));
+  const onCriticalPath = finding.task_ids.some((taskId) =>
+    criticalPath.has(taskId),
+  );
+
   return (
-    <div className="flex gap-2.5 py-2">
-      {/* Severity as a rule rather than a border-and-box: three states, no card. */}
+    <div className="flex gap-3 py-3">
       <span
         aria-hidden
         className={cn(
@@ -260,28 +351,39 @@ function FindingRow({
           severityFill(finding.severity),
         )}
       />
+
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="font-mono text-xs">
+        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+          <span className="font-mono text-xs text-foreground/80">
             {finding.task_ids.join(" ")}
           </span>
+
           <span className="text-[13px] font-medium">
             {prettyKind(finding.kind)}
           </span>
-          <span className={cn("text-[11px]", severityText(finding.severity))}>
+
+          <span
+            className={cn(
+              "text-[11px] font-medium",
+              severityText(finding.severity),
+            )}
+          >
             {finding.severity}
           </span>
+
           {onCriticalPath && (
             <span
-              className="text-[11px] text-accent"
+              className="text-[11px] font-medium text-accent"
               title="Zero slack in today's deterministic schedule. The forecast stage reports the probabilistic form of this - the fraction of simulated runs in which the task lay on the critical path."
             >
               critical path
             </span>
           )}
+
           <span className="text-[11px] text-muted-foreground">
             tier {finding.tier} · {finding.tier_name}
           </span>
+
           <span className="ml-auto flex items-baseline gap-2">
             <Worked>{finding.impact.worked}</Worked>
             <span className="text-[13px] font-semibold">
@@ -290,15 +392,16 @@ function FindingRow({
           </span>
         </div>
 
-        <p className="mt-1 text-[13px] leading-snug text-foreground/90">
+        <p className="mt-1.5 text-[13px] leading-relaxed text-foreground/90">
           {finding.explanation}
         </p>
-        <p className="mt-0.5 text-[13px] leading-snug">
+
+        <p className="mt-1 text-[13px] leading-relaxed">
           <span className="text-muted-foreground">Do this: </span>
           {finding.suggested_action}
         </p>
 
-        <details className="group mt-1">
+        <details className="group mt-2">
           <summary
             className={cn(
               SUMMARY,
@@ -312,20 +415,22 @@ function FindingRow({
             The evidence this reasoned from
             <span className="ml-1 font-mono">{finding.impact.formula}</span>
           </summary>
-          <dl className="mt-1.5 grid grid-cols-1 gap-x-6 gap-y-0.5 border-l border-border pl-2.5 text-[11px] sm:grid-cols-2">
-            {Object.entries(finding.evidence).map(([k, v]) => (
-              <div key={k} className="flex gap-1.5">
+
+          <dl className="mt-2 grid grid-cols-1 gap-x-6 gap-y-1 border-l border-border pl-2.5 text-[11px] sm:grid-cols-2">
+            {Object.entries(finding.evidence).map(([key, value]) => (
+              <div key={key} className="flex gap-1.5">
                 <dt className="shrink-0 text-muted-foreground">
-                  {k.replace(/_/g, " ")}:
+                  {key.replace(/_/g, " ")}:
                 </dt>
                 <dd className="min-w-0 break-words font-mono">
-                  {Array.isArray(v) ? v.join(", ") : String(v)}
+                  {Array.isArray(value) ? value.join(", ") : String(value)}
                 </dd>
               </div>
             ))}
           </dl>
+
           {finding.downstream_affected.length > 0 && (
-            <p className="mt-1.5 border-l border-border pl-2.5 text-[11px] text-muted-foreground">
+            <p className="mt-2 border-l border-border pl-2.5 text-[11px] text-muted-foreground">
               Blocks {finding.downstream_affected.length} task(s):{" "}
               <span className="font-mono">
                 {finding.downstream_affected.join(", ")}

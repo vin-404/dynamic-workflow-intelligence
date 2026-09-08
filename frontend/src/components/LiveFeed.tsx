@@ -618,7 +618,7 @@ export default function LiveFeed({
       {/* Hero and rail, the arrangement D-115 settled: the map takes the
           width because it is the only thing here that needs it, and the
           numbers go in the rail because they are what you glance at. */}
-      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+      <div className="flex flex-col gap-7 lg:flex-row lg:items-start">
         <div className="flex min-w-0 flex-1 flex-col gap-5">
           <DependencyGraph analysis={base} live={live} />
 
@@ -640,98 +640,160 @@ export default function LiveFeed({
           />
         </div>
 
-        <aside className="flex w-full shrink-0 flex-col gap-5 lg:w-80 lg:border-l lg:border-line lg:pl-5">
-          {/* Updates in place. No key, no conditional wrapper, no remount -
-              the text inside these nodes changes and nothing else does, so
-              the projected finish never blinks or jumps as the replay runs. */}
-          <div>
-            <div className="text-[11px] tracking-wide text-muted-foreground uppercase">
-              Projected finish
-            </div>
-            <div className="flex items-baseline gap-2">
-              <span
-                className={cn(
-                  "text-2xl leading-tight font-semibold",
-                  slipped ? "text-severity-high" : "text-foreground",
-                )}
-              >
-                {p.projected_end_date}
-              </span>
-              <span
-                className={cn(
-                  "text-sm font-medium",
-                  slipped ? "text-severity-high" : "text-severity-low",
-                )}
-              >
-                {days(p.slip_days, true)}
-              </span>
-            </div>
-            <div className="font-mono text-[11px] text-muted-foreground">
-              day {Math.round(p.projected_end_day)}
-              {slipped ? " · later than planned" : " · on plan"}
-            </div>
+        <aside className="flex w-full shrink-0 flex-col gap-4 lg:w-[336px]">
+          {/* ------------------------------------------------------------
+              LIVE INSPECTOR
+              The rail is intentionally compact: status first, evidence
+              second. It is a glance surface, not another dashboard.
+             ------------------------------------------------------------ */}
 
-            <dl className="mt-3 flex flex-col gap-1 border-t border-line pt-2 text-[13px]">
-              <Row label="planned">
-                day {Math.round(p.planned_end_day)}
-                {p.planned_end_date && (
-                  <span className="ml-1.5 text-[11px] text-muted-foreground">
-                    {p.planned_end_date}
-                  </span>
-                )}
-              </Row>
-              <Row label="deadline">
+          <section className="overflow-hidden rounded-xl border border-line bg-panel">
+            <div className="border-b border-line bg-panel2/45 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-dim">
+                    Projected finish
+                  </div>
+                  <div className="mt-0.5 text-[11px] text-muted-foreground">
+                    Live replay estimate
+                  </div>
+                </div>
+
                 <span
                   className={cn(
-                    "font-medium",
-                    p.verdict === "feasible"
-                      ? "text-severity-low"
-                      : p.verdict === "no_deadline_set"
-                        ? "text-foreground"
-                        : "text-severity-high",
+                    "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-medium",
+                    slipped
+                      ? "border-severity-high/25 bg-severity-high/5 text-severity-high"
+                      : "border-severity-low/25 bg-severity-low/5 text-severity-low",
                   )}
                 >
-                  {p.verdict.replace(/_/g, " ")}
+                  <span
+                    className={cn(
+                      "size-1.5 rounded-full",
+                      slipped
+                        ? "bg-severity-high"
+                        : "bg-severity-low",
+                    )}
+                  />
+                  {slipped ? "At risk" : "On plan"}
                 </span>
-                {p.margin_days !== null && (
-                  <span className="ml-1.5 text-[11px] text-muted-foreground">
-                    {days(p.margin_days, true)} margin
-                  </span>
-                )}
-              </Row>
-              <Row label="findings">
-                <span className={severityText("high")}>
-                  {frame.finding_counts_by_severity.high}
-                </span>
-                {" / "}
-                <span className={severityText("medium")}>
-                  {frame.finding_counts_by_severity.medium}
-                </span>
-                {" / "}
-                <span className="text-dim">
-                  {frame.finding_counts_by_severity.low}
-                </span>
-                <span className="ml-1.5 text-[11px] text-muted-foreground">
-                  high / med / low
-                </span>
-              </Row>
-            </dl>
+              </div>
+            </div>
 
-            <p className="mt-2 text-[12px] leading-snug text-foreground/85">
-              {p.statement}
-            </p>
-            {/* Read off the payload, not asserted from memory: if the API
-                ever did start claiming a probability here, this sentence
-                would stop being printed rather than become a lie. */}
-            {p.is_probability === false && (
-              <p className="mt-1.5 text-[11px] leading-snug text-muted-foreground">
-                This is the critical path&rsquo;s arithmetic on one set of
-                durations — a date, not a likelihood. No probability is claimed
-                on this screen. The forecast stage is where a real one lives,
-                with its own assumptions.
+            <div className="px-4 py-4">
+              <div className="flex items-end justify-between gap-3">
+                <div className="min-w-0">
+                  <div
+                    className={cn(
+                      "truncate text-[27px] font-semibold leading-none tracking-[-0.025em]",
+                      slipped
+                        ? "text-severity-high"
+                        : "text-foreground",
+                    )}
+                  >
+                    {p.projected_end_date}
+                  </div>
+
+                  <div className="mt-2 font-mono text-[10px] text-muted-foreground">
+                    simulated day {Math.round(p.projected_end_day)}
+                  </div>
+                </div>
+
+                <div
+                  className={cn(
+                    "shrink-0 text-right text-sm font-semibold",
+                    slipped
+                      ? "text-severity-high"
+                      : "text-severity-low",
+                  )}
+                >
+                  {days(p.slip_days, true)}
+                  <div className="mt-0.5 text-[9px] font-normal uppercase tracking-wide text-muted-foreground">
+                    vs plan
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-4 grid grid-cols-2 divide-x divide-line rounded-lg border border-line bg-panel2/35">
+                <div className="px-3 py-2.5">
+                  <div className="text-[9px] uppercase tracking-wide text-muted-foreground">
+                    Planned
+                  </div>
+                  <div className="mt-1 font-mono text-[12px]">
+                    d{Math.round(p.planned_end_day)}
+                  </div>
+                  {p.planned_end_date && (
+                    <div className="mt-0.5 text-[10px] text-muted-foreground">
+                      {p.planned_end_date}
+                    </div>
+                  )}
+                </div>
+
+                <div className="px-3 py-2.5">
+                  <div className="text-[9px] uppercase tracking-wide text-muted-foreground">
+                    Deadline
+                  </div>
+                  <div
+                    className={cn(
+                      "mt-1 text-[12px] font-semibold capitalize",
+                      p.verdict === "feasible"
+                        ? "text-severity-low"
+                        : p.verdict === "no_deadline_set"
+                          ? "text-foreground"
+                          : "text-severity-high",
+                    )}
+                  >
+                    {p.verdict.replace(/_/g, " ")}
+                  </div>
+                  {p.margin_days !== null && (
+                    <div className="mt-0.5 text-[10px] text-muted-foreground">
+                      {days(p.margin_days, true)} margin
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-4 border-t border-line pt-3">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    Open findings
+                  </span>
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {frame.findings.length}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <span className="h-1.5 flex-1 rounded-full bg-severity-high/75" />
+                  <span className="h-1.5 flex-1 rounded-full bg-severity-medium/65" />
+                  <span className="h-1.5 flex-1 rounded-full bg-line" />
+                </div>
+
+                <div className="mt-1.5 flex justify-between font-mono text-[9px] text-muted-foreground">
+                  <span>
+                    {frame.finding_counts_by_severity.high} high
+                  </span>
+                  <span>
+                    {frame.finding_counts_by_severity.medium} medium
+                  </span>
+                  <span>
+                    {frame.finding_counts_by_severity.low} low
+                  </span>
+                </div>
+              </div>
+
+              <p className="mt-4 border-l-2 border-accent/35 pl-2.5 text-[11px] leading-relaxed text-foreground/80">
+                {p.statement}
               </p>
-            )}
-          </div>
+
+              {p.is_probability === false && (
+                <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                  Arithmetic from the critical path, not a probability. The
+                  forecast stage contains the probabilistic view.
+                </p>
+              )}
+            </div>
+          </section>
 
           <EventFeed
             events={observedEvents}
@@ -1043,28 +1105,33 @@ function EventFeed({
   connected: boolean;
 }) {
   return (
-    <section>
-      <div className="flex items-baseline justify-between gap-2">
-        <div className="flex items-center gap-1.5 text-[11px] tracking-wide text-muted-foreground uppercase">
-          <Radio
-            className={cn("size-3", connected ? "text-foreground" : "opacity-40")}
-            aria-hidden
-          />
-          Events observed
+    <section className="overflow-hidden rounded-xl border border-line bg-panel">
+      <div className="border-b border-line bg-panel2/45 px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.12em] text-dim uppercase">
+            <Radio
+              className={cn(
+                "size-3",
+                connected ? "text-accent" : "opacity-40",
+              )}
+              aria-hidden
+            />
+            Events observed
+          </div>
+          <span className="font-mono text-[10px] text-muted-foreground">
+            {known} / {total}
+          </span>
         </div>
-        <span className="font-mono text-[11px] text-muted-foreground">
-          {known} of {total}
-        </span>
       </div>
 
       {events.length === 0 ? (
-        <p className="mt-2 border-t border-line pt-2 text-[12px] text-muted-foreground">
+        <p className="px-4 py-4 text-[11px] leading-relaxed text-muted-foreground">
           {total === 0
             ? "This project has no event log at all, so there is nothing to replay and no observed evidence to reason from. That is why the tier above is 0 and why so many checks could not run."
             : `No transition has been observed at this simulated day yet. All ${total} in this project's log happen later and are not reflected in any number on this screen.`}
         </p>
       ) : (
-        <ul className="mt-1.5 flex flex-col divide-y divide-line border-t border-line">
+        <ul className="flex max-h-[420px] flex-col divide-y divide-line overflow-y-auto">
           {events.map((e) => {
             const flash = flashes[`e:${e.day}|${e.task_key}|${e.to_status}`];
             return (
