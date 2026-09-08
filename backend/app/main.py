@@ -37,10 +37,14 @@ from backend.app.api.routers import (
     analysis,
     analysis_runs,
     domains,
+    forecast,
+    ingest,
     optimize,
     projects,
+    requirements,
     scenarios,
     seed,
+    stream,
     users,
     workflow,
 )
@@ -265,6 +269,13 @@ app.include_router(analysis_runs.router)
 app.include_router(scenarios.project_router)
 app.include_router(scenarios.router)
 app.include_router(optimize.router)
+# Phase 11. The route templates these declare are the contract `deps.py` and
+# the frontend are written against; the bodies land in wave 2.
+app.include_router(stream.router)
+app.include_router(forecast.router)
+app.include_router(requirements.router)
+app.include_router(ingest.router)
+app.include_router(ingest.webhook_router)
 app.include_router(ai.router)
 app.include_router(ai.status_router)
 app.include_router(seed.router)

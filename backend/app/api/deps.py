@@ -91,6 +91,23 @@ READS_THAT_POST: frozenset[tuple[str, str]] = frozenset(
         # The AI layer has no write path at all (D-51 enforces it).
         ("POST", "/api/projects/{project_id}/interpret"),
         ("POST", "/api/projects/{project_id}/explain"),
+        # Phase 11. A replay runs over an immutable snapshot exactly like a
+        # scenario does - it never writes a workflow version, and the stored
+        # base hash is asserted unchanged by `test_stream.py`. Its lifecycle
+        # verbs are how you *watch*, so they sit with the reads: a seat that
+        # cannot pause the thing it is watching is not a read-only seat.
+        ("POST", "/api/projects/{project_id}/replay"),
+        ("POST", "/api/projects/{project_id}/replay/control"),
+        ("DELETE", "/api/projects/{project_id}/replay"),
+        # Capability 2 with a distribution behind it. Same shape as `risk`:
+        # sampling reads the snapshot and returns numbers.
+        ("POST", "/api/projects/{project_id}/forecast"),
+        # Asking what a re-worded requirement would cost. The impact report
+        # mutates nothing and the replan comes back unapplied, so this is the
+        # `what-if` argument in a different vocabulary. `.../apply` is
+        # deliberately absent: that one writes a version and stays guarded.
+        ("POST", "/api/projects/{project_id}/requirements/{requirement_key}/change"),
+        ("POST", "/api/projects/{project_id}/requirements/{requirement_key}/compare"),
     }
 )
 

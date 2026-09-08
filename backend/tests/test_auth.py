@@ -718,6 +718,10 @@ UNGUARDED_BY_DESIGN = {
     ("POST", "/api/users"),
     # Its own operator token, disabled by default (D-67).
     ("POST", "/admin/reset-seed"),
+    # A webhook has no session to hold a role on. It is authenticated by an
+    # HMAC signature over the raw body instead, and refuses outright when no
+    # secret is configured - so the bar is higher here, not lower.
+    ("POST", "/api/ingest/github"),
 }
 
 
