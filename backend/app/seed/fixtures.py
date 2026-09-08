@@ -669,3 +669,83 @@ def fixture(key: str) -> ProjectFixture:
     if key not in FIXTURE_BUILDERS:
         raise KeyError(f"unknown fixture {key!r}; have {sorted(FIXTURE_BUILDERS)}")
     return FIXTURE_BUILDERS[key]()
+
+
+# ---------------------------------------------------------------------------
+# Import samples - Phase 11.
+#
+# Not a domain and not a workflow fixture: a real-shaped file that ships with
+# the product so a demo can import something without a network call. It is
+# listed here because this module is the inventory of what ships, but nothing
+# else about it is like the fixtures above - it is never seeded, no project is
+# built from it at startup, and neither demo domain reads it. The file itself
+# lives beside the importer that parses it, in
+# `backend/app/ingest/samples/`.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ImportSampleFixture:
+    """One bundled file, and what a reader should look for in its preview."""
+
+    name: str
+    title: str
+    description: str
+    #: Which front door of the importer this file is for: "jira" or "csv".
+    source: str
+    #: File name inside `backend/app/ingest/samples/`.
+    filename: str
+    #: Claims about the file. Every one of these is asserted by
+    #: `backend/tests/test_ingest.py`, so the list cannot quietly become
+    #: marketing copy.
+    demonstrates: tuple[str, ...] = ()
+
+
+IMPORT_SAMPLES: tuple[ImportSampleFixture, ...] = (
+    ImportSampleFixture(
+        name="jira-delivery-platform",
+        title="Shipment tracking rebuild (Jira export)",
+        description=(
+            "An anonymised Jira issue export for a fifteen-issue delivery "
+            "programme: fourteen issues that import, three rows that cannot, "
+            "and a blocking-link structure with a real critical path."
+        ),
+        source="jira",
+        filename="jira-delivery-platform.csv",
+        demonstrates=(
+            "Four identically-named 'Outward issue link (Blocks)' columns, up "
+            "to four of them used on a single row - the case csv.DictReader "
+            "silently collapses to one.",
+            "Both link directions in one file: outward 'blocks' on DLV-6, "
+            "inward 'is blocked by' on DLV-12 and DLV-14.",
+            "Three rows that cannot be mapped, for three different reasons: "
+            "no issue key, a duplicate issue key, and story points typed as "
+            "'TBD'.",
+            "A link to DLV-99, which is not in the export, reported as a "
+            "dropped dependency rather than an invented task.",
+            "A customised status ('Awaiting Copy') with no equivalent of ours, "
+            "resolved through its Jira status category and labelled as such.",
+            "An issue estimated in seconds rather than story points (DLV-10), "
+            "and one estimated not at all (DLV-12), whose effort is defaulted "
+            "and said to be defaulted.",
+            "A quoted description containing a newline, so the reported record "
+            "number and physical line number genuinely differ.",
+            "A critical path of DLV-1, DLV-2, DLV-3, DLV-5, DLV-11, DLV-12, "
+            "DLV-13, DLV-14 that finishes after the deadline the due dates "
+            "imply.",
+            "DLV-11 as a convergence bottleneck with six predecessors, and "
+            "one assignee holding more than half the programme's effort at "
+            "capacity 1.",
+        ),
+    ),
+)
+
+
+def import_sample(name: str) -> ImportSampleFixture:
+    for sample in IMPORT_SAMPLES:
+        if sample.name == name:
+            return sample
+    raise KeyError(
+        f"unknown import sample {name!r}; have "
+        f"{sorted(s.name for s in IMPORT_SAMPLES)}"
+    )

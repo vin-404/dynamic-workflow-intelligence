@@ -235,6 +235,37 @@ the bundle, so this is a restart rather than a rebuild:
 
 ---
 
+## One process, while replay exists
+
+**Run the backend as a single process.** Do not raise the worker count.
+
+`GET /api/projects/{id}/stream` replays a project's event log over Server-Sent
+Events, and the replay it streams lives in that process's memory (D-143). A
+replay is a viewing position over already-durable data - scratch paper, exactly
+as a `Scenario` is - so persisting it would put a write path next to the one
+feature whose whole promise is that it writes nothing. The cost of that choice
+is this constraint: with more than one worker, `POST /replay` and the
+`GET /stream` that follows it can land on different workers, and the second one
+reports that no replay is running. Nothing is corrupted and nothing is lost -
+the live screen simply never starts.
+
+Render's default is one instance, so the default is already correct. If you add
+workers or scale to more than one instance, replay is the feature that breaks
+first, and it breaks silently from the user's side. Making it survive needs a
+shared broker - Redis pub/sub or Postgres `LISTEN`/`NOTIFY` - which is a real
+piece of work and deliberately out of scope.
+
+Every other capability is stateless across requests and scales horizontally
+without changes.
+
+A second, smaller consequence of the same design: the role guard resolves a
+database session for every request including the SSE one, so an open stream
+holds a pooled connection for its lifetime. On SQLite that costs nothing. On
+Postgres, size the pool against the number of concurrent viewers you expect,
+not the number of requests per second.
+
+---
+
 ## Environment variables, complete
 
 ### Backend
@@ -249,6 +280,7 @@ the bundle, so this is a restart rather than a rebuild:
 | `ADMIN_TOKEN` | no | a long random string | Guards `POST /admin/reset-seed`. **Empty disables the endpoint.** |
 | `PROXY_SHARED_SECRET` | recommended | 32+ random bytes | Backend half of the identity handshake. `X-User-Id` is honoured only when `X-Proxy-Secret` matches, and `ProjectMember.role` becomes enforced. **Empty keeps the pre-auth open behaviour**, which is what a fresh clone and the test suite run. Must equal the frontend's. Setting it without `ADMIN_TOKEN` also disables `POST /api/seed/reset`. |
 | `SEED_ON_STARTUP` | no | `true` | Load both demo domains at boot. Idempotent. |
+| `GITHUB_WEBHOOK_SECRET` | no | 32+ random bytes | Secret GitHub signs each delivery with. `POST /api/ingest/github` recomputes HMAC-SHA256 over the raw body and compares it in constant time. **Empty disables the endpoint** (403) - a webhook has no session, so the signature is the whole of its authentication and there is no unsigned development mode. The webhook URL also carries `?project_id=<uuid>`, which is visible to anyone who can read the repository's webhook settings; the signature, not the id, is what gates the write. |
 | `ANALYZE_TIMEOUT_SECONDS` | no | `20` | Ceiling, not a target — analyze takes about 20ms. |
 | `SIMULATE_TIMEOUT_SECONDS` | no | `20` | As above. |
 | `OPTIMIZE_TIMEOUT_SECONDS` | no | `30` | Backstop; the search has its own budget. |

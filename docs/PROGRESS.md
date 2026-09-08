@@ -2385,3 +2385,277 @@ settled and did not touch it; the purity tests still pass.
 10. **The truly-empty findings state is unreachable from either seed.** It was
     seen only by intercepting the API response, so no walkthrough would catch a
     regression in it.
+
+---
+
+# PHASE 11, WAVE 2 — CAPABILITY
+
+Tag `wave-2-capability`. Four backend agents in parallel, partitioned strictly
+by file ownership. Frontend untouched by this wave: it was being rewritten
+concurrently by the Phase 10 wave-2 session, and the two sessions agreed a
+split rather than racing on the same tree.
+
+## 1 · WHAT CHANGED
+
+The problem statement asks for a platform that tracks cross-department
+workflows *"and detects bottlenecks, delays and changing requirements in real
+time"*. Three clauses were outstanding. This wave closes them in the backend.
+
+**It is now real time.** A replay engine walks a project's append-only event
+log forward in accelerated simulated time and streams it over Server-Sent
+Events. Findings appear and clear on their own, at the correct *simulated* day
+— not because anything simulates them, but because `Clock` was already an
+argument to the pure engine, so a clock-threshold detector fires on the day it
+would have fired. Every frame is one honest `evaluate()` call over the same
+immutable snapshot. Pausable, resumable, seekable, restartable, many viewers on
+one replay, and it writes nothing at all — no `Event`, no `WorkflowVersion`,
+not even an `AnalysisRun`.
+
+**It now tracks rather than only plans.** A real Jira issue export imports,
+dependencies intact, through a preview-then-commit flow that never touches a
+live workflow. A generic column-mapped CSV path serves everything else. A
+signature-verified GitHub webhook appends to the event log, so the thing the
+replay replays can arrive on its own.
+
+**Requirement change is a first-class capability** instead of one of seventeen
+mutation kinds. `POST .../requirements/{key}/change` returns a full impact
+report and applies nothing: what must be redone versus rechecked and *why* each
+task is in the list it is in, the days of completed work invalidated with the
+arithmetic on the row, who needs to know grouped by owner, the findings created
+and cleared, and a ready-to-apply replan that is a real `Scenario` the existing
+evaluate / diff / apply endpoints accept unchanged.
+
+**And there is a probability now, honestly stated.** A seeded Monte Carlo over
+the three-point estimates tasks already carried returns P50/P80/P90, the
+probability of meeting the deadline, a completion histogram, and every task's
+**criticality index** — the fraction of iterations in which it lies on the
+critical path, which is the rigorous definition of "at risk of becoming a
+bottleneck" and the reason the feature exists.
+
+**Nothing was traded away for that last one.** The platform previously refused
+to state a probability and said so four times in the risk payload. Those four
+statements are byte-identical today. `monte_carlo_run: False`,
+`score_kind: "structural_estimate"`, `is_probability: False` and
+`what_would_make_this_a_probability` all still say exactly what they said, and
+all 50 `test_risk.py` tests plus `test_api.py::test_p0_never_emits_a_probability`
+pass unmodified. The new number arrives in a separate payload that labels
+itself uncalibrated, states that durations are sampled independently and that
+this is optimistic because real delays correlate, and names what would make it
+calibrated. Adding a real probability meant stating new assumptions as plainly
+as the old refusal was stated, not deleting a caveat.
+
+## 2 · WHAT EACH AGENT PRODUCED
+
+**Orchestration (not delegated).** All four agents needed `main.py`,
+`api/deps.py` and `test_auth.py`. Four concurrent edits to a role-guard
+exemption list is how a write route silently becomes viewer-readable, and the
+test that would catch it is the file being raced on. So the route contract was
+declared first, in `088c21e`: four routers stubbed with their real templates
+returning 501, the three shared files wired against them, suite green at 819.
+Agents owned bodies and tests only, and none of the three shared files was
+touched again (D-129).
+
+**LIVE** — `services/replay.py` (new), `routers/stream.py`,
+`tests/test_stream.py` (32 tests). No `incremental.py`: the brief allowed it
+only with a proof of equivalence at every step, full evaluation is ~24 ms
+against a 50 ms step budget, and equivalence across suppression, tiering and
+unavailable-checks could not be proven — so the file does not exist and `core/`
+is untouched by the feature (D-142).
+
+**FORECAST** — `core/engine/montecarlo.py` (new, pure), `routers/forecast.py`,
+additive-only edits to `core/engine/risk.py` (+21, zero deletions) and
+`feasibility.py` (+27, zero deletions), `tests/test_montecarlo.py` (55 tests).
+numpy was **not** added (D-131).
+
+**INGEST** — `app/ingest/` (nine modules plus the sample CSV),
+`routers/ingest.py`, `tests/test_ingest.py` (91 tests), 80 additive lines in
+`seed/fixtures.py`, and one variable in `settings.py`.
+
+**REQUIRE** — `services/requirements.py` (new), `routers/requirements.py`,
+additive-only `core/engine/staleness.py` (+124, zero deletions),
+`models/requirement_history.py` (new) plus two lines in `models/__init__.py`,
+`tests/test_requirements.py` (55 tests).
+
+## 3 · TESTS
+
+| Check | Before | After |
+|---|---|---|
+| `pytest backend/tests -q` | 819 passed | **1054 passed**, 0 failed |
+| `test_stream.py` | — | 32 new |
+| `test_montecarlo.py` | — | 55 new |
+| `test_ingest.py` | — | 91 new |
+| `test_requirements.py` | — | 55 new |
+| `test_risk.py` (unmodified) | 50 passed | 50 passed |
+| `test_core_purity.py` (unmodified) | 44 passed | 44 passed |
+| `test_auth.py` (route walk) | passed | passed |
+
+No existing test was edited by any agent.
+
+`test_stream.py` speaks ASGI directly rather than through `httpx`:
+`ASGITransport` awaits the whole application before returning a response, so it
+cannot stream, and a test that only saw the response after it completed would
+prove nothing about an SSE endpoint. The file carries a ~90-line ASGI client
+that can send a real `http.disconnect`; routing, the role guard, the request-id
+middleware and the error envelope are all the real app, and the lifecycle
+endpoints still go through the ordinary client. It was additionally verified
+against a live uvicorn server.
+
+## 4 · HOW TO TEST IT
+
+```bash
+.venv/Scripts/python.exe -m pytest backend/tests -q          # 1054 passed
+.venv/Scripts/python.exe -m uvicorn backend.app.main:app --port 8001
+```
+
+Import the bundled sample and watch it replay, with no network call:
+
+```bash
+curl -s localhost:8001/api/import/samples
+curl -s localhost:8001/api/import/samples/jira-delivery-platform \
+  | python -c "import json,sys; print(json.dumps(json.load(sys.stdin)['suggested']))" \
+  > /tmp/body.json
+curl -s -X POST localhost:8001/api/import/preview -H 'Content-Type: application/json' \
+  -d @/tmp/body.json
+# then add {"name": "..."} to the body and POST it to /api/import/commit
+
+curl -s -X POST localhost:8001/api/projects/<id>/replay -d '{"speed":60}' \
+  -H 'Content-Type: application/json'
+curl -N localhost:8001/api/projects/<id>/stream         # frames arrive on their own
+curl -s -X POST localhost:8001/api/projects/<id>/forecast -d '{}' \
+  -H 'Content-Type: application/json'
+```
+
+## 5 · WHAT WAS VERIFIED BY THE ORCHESTRATOR, NOT TAKEN ON REPORT
+
+Each agent's headline claim was re-checked independently, because a claim in a
+report is not evidence.
+
+* **The Monte Carlo budget.** Re-timed on a fresh 40-task, 75-dependency
+  workflow: **0.267 s median** over five runs for 5,000 iterations, against a
+  ~2 s budget. Same seed byte-identical, different seed different,
+  P50 ≤ P80 ≤ P90 holding.
+* **"Additive only" on three engine files.** Read as diffs, not asserted:
+  `risk.py` +21/−0, `feasibility.py` +27/−0, `staleness.py` +124/−0. Every
+  existing key, number and disclaimer intact.
+* **"Replay writes nothing" is structural, not merely tested.** Grepped
+  `replay.py` for `.add(`, `.commit()`, `.flush()`, `.delete(` and
+  `write_version`: the only two hits are `days.add(...)` and
+  `self._subs.add(...)`, both Python sets. There is no database write path in
+  the module.
+* **The importer, end to end.** The bundled sample: 17 rows read → 14 tasks,
+  22 dependencies, 5 resources; 3 rejections for three genuinely different
+  reasons (no key, duplicate key, `TBD` story points); one dependency dropped
+  because `DLV-99` lies outside the export; no cycles; 10 findings; and
+  **infeasible by 3 days** on structure alone (end day 23 against deadline 20).
+  The four repeated `Outward issue link (Blocks)` columns are really in the
+  file's header — the case `csv.DictReader` silently collapses.
+* **An apparent contradiction between two agents, chased down.** INGEST
+  reported that imported projects carry no three-point estimates, so every task
+  should be `assumed`; FORECAST's output said otherwise. Both were right: the
+  only two non-assumed tasks are the two that are `done`, because FORECAST
+  holds a completed task's duration constant rather than sampling it — sampling
+  a finished task would invent uncertainty about something that already
+  happened (D-133). Reconciled, not papered over.
+* **File ownership held.** `main.py`, `deps.py` and `test_auth.py` show a
+  zero-line diff. No agent wrote outside its allocation, and nothing under
+  `frontend/` was touched by this wave.
+
+## 6 · DECISIONS
+
+D-129 … D-159 in `docs/DECISIONS.md`. The three that change what someone
+downstream must do:
+
+* **D-131 — numpy was not added.** The brief said to vectorise with numpy;
+  `test_core_purity.py` pins `ALLOWED_THIRD_PARTY = {"networkx"}` and the same
+  brief makes the purity test an absolute constraint. The constraint outranks
+  the implementation instruction, and the stdlib kernel beats the budget by
+  7.5×, so relaxing the allowlist would have weakened a real guarantee to buy
+  nothing measurable.
+* **D-143 — replay state lives in process memory, so the backend must run as a
+  single process.** Recorded in `docs/DEPLOY.md` under its own heading, because
+  it fails silently from the user's side: the live screen simply never starts.
+* **D-157 — the schedule delta on a requirement change is usually 0, and that
+  is not the change being free.** See §7.
+
+## 7 · WHAT WORRIES ME
+
+1. **The requirement screen cannot lead with the date, and the phase brief
+   assumed it could.** `cpm.py` contains no reference to task status — the
+   scheduler is status-blind, so completed work already occupies its full
+   duration and re-opening it cannot lengthen the critical path. The brief's
+   demo line, *"Finish date moves from 23 Sep to 27 Sep"*, will not be true for
+   most changes. The honest number is the effort: on the arithmetic fixture 7
+   days of completed work are genuinely lost and re-spent while the projected
+   finish does not move. **Wave 3's requirement screen must lead with wasted
+   effort, and `docs/HOW_TO_DEMO.md` must be corrected to match.** Making the
+   date move would need a scheduler that compresses completed work out of the
+   remaining plan, which would change what `analyze` means for all four
+   capabilities — so it was not done quietly inside a requirement report.
+2. **Independent sampling makes the forecast too confident, and no amount of
+   better code fixes it.** A 40-task DAG's completion distribution is genuinely
+   tighter than reality because real delays correlate. The payload says so in
+   plain language, but a reader who takes only the number will be
+   over-confident. The honest fix needs data the platform does not have.
+3. **Uncalibrated is uncalibrated.** Nothing here has been checked against an
+   outcome. Until the platform records actuals, the probability is the model's
+   opinion under a stated model.
+4. **The impact report could be read as a judgement about meaning, and it is
+   not one.** It computes a blast radius from the dependency graph; it does not
+   read the two wordings. That caveat leads the assumptions block, the router
+   docstrings and the headline sentence, and the UI must render it beside the
+   numbers rather than behind a disclosure.
+5. **Two wordings of the same requirement cost the same.** `compare` returns an
+   explicit tie rather than an invented difference (D-158). Useful, but it
+   means the "pick the cheaper one" story only works when the options declare
+   which consumers they spare.
+6. **`must_redo` versus `must_recheck` is only as good as the `consumes`
+   flags**, and imported edges all carry `consumes=false` (D-149). So an
+   imported project reports a smaller blast radius than the real one until
+   somebody marks the consuming edges by hand. Both halves are stated in the
+   payloads; neither is enforced by the data model.
+7. **An imported project's forecast is almost entirely assumed.** No Jira export
+   carries three-point estimates, so the distribution comes from the domain
+   prior. It is labelled per task, so it is honest — but it is a wide,
+   wholly-assumed distribution, which is worth knowing before it goes on stage.
+8. **The bundled sample raises four `redundant_dependency` findings.** They are
+   real — Jira exports genuinely carry redundant links — but they are four
+   low-severity rows competing with the bottleneck for attention. Realism was
+   kept over a cleaner demo.
+9. **The role guard holds a database session for the life of an SSE
+   connection.** Harmless on SQLite; on Postgres, size the pool against
+   concurrent viewers rather than requests per second. Noted in `DEPLOY.md`.
+10. **`ENGINE_VERSION` is still `2.3.0-phase4`.** No numeric output of
+    `evaluate()` changed, so a bump was not required — but a reader may expect
+    one after a phase this size.
+
+## 8 · WHAT WAVE 3 INHERITS
+
+Wave 3 was **deferred**, not skipped. The Phase 10 wave-2 session was rewriting
+`FindingsPanel`, `RiskPanel`, `Explainer`, `WhatIfPanel`, `OptimizePanel`,
+`DiffView`, `DependencyGraph`, `SetupPanel`, `VersionHistory`, `page.tsx` and
+`ui.tsx` in this same working tree — the exact files Phase 11's UI-ANALYSIS and
+UI-CHANGE agents own. Starting wave 3 against the mid-wave snapshots in
+`7f4d342` would have meant designing those panels twice and silently
+overwriting someone's work. That session has since committed `c0807d2`
+(tag `wave-2-design`), and wave 3 builds on that, under its D-101…D-128 —
+three severity states from `src/lib/severity.ts`, the accent reserved for the
+zero-slack chain, no `violet`, and the two deliberately different answers on
+native versus Radix selects.
+
+Backend surfaces available to it, all additive, no existing endpoint's shape
+changed:
+
+```
+POST|GET|DELETE /api/projects/{id}/replay
+POST            /api/projects/{id}/replay/control
+GET             /api/projects/{id}/replay/timeline
+GET             /api/projects/{id}/stream            (SSE)
+POST            /api/projects/{id}/forecast
+GET             /api/projects/{id}/forecast/assumptions
+GET             /api/projects/{id}/requirements
+POST            /api/projects/{id}/requirements/{key}/change | compare | apply
+GET             /api/projects/{id}/requirements/{key}/history | diff
+POST            /api/import/preview | /api/import/commit
+GET             /api/import/samples | /api/import/samples/{name} | .../raw
+POST            /api/ingest/github
+```

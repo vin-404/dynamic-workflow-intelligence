@@ -1,0 +1,19 @@
+Issue key,Issue Type,Summary,Status,Status Category,Assignee,Reporter,Story Points,Original Estimate,Created,Due date,Description,Outward issue link (Blocks),Outward issue link (Blocks),Outward issue link (Blocks),Outward issue link (Blocks),Inward issue link (Blocks)
+DLV-1,Story,Agree the carrier integration contract,Done,Done,Priya Nandan,Ravi Menon,2,,01/Sep/26,03/Sep/26,Field-level contract signed off with the carrier API team.,DLV-2,DLV-3,DLV-6,,
+DLV-2,Story,Model shipment events in the warehouse schema,Done,Done,Priya Nandan,Ravi Menon,3,,01/Sep/26,07/Sep/26,"Event table, the migration, and a backfill for the last 90 days.",DLV-3,DLV-5,,,
+DLV-3,Story,Build the carrier adapter,In Review,In Progress,Arun Sethi,Ravi Menon,5,,02/Sep/26,14/Sep/26,Adapter for the carrier v3 tracking API.,DLV-4,DLV-5,DLV-9,,
+DLV-4,Task,Contract tests for the carrier adapter,To Do,To Do,Arun Sethi,Priya Nandan,3,,02/Sep/26,17/Sep/26,Golden-file tests against recorded carrier responses.,DLV-11,,,,
+DLV-5,Story,Warehouse sync service,To Do,To Do,Arun Sethi,Priya Nandan,5,,02/Sep/26,18/Sep/26,Pull warehouse state on a schedule and reconcile it against the event log.,DLV-11,,,,
+DLV-6,Story,Tracking API,In Progress,In Progress,Sofia Lindqvist,Ravi Menon,3,,02/Sep/26,12/Sep/26,Public read API for shipment status.,DLV-7,DLV-8,DLV-9,DLV-11,
+DLV-7,Story,Customer tracking page,To Do,To Do,Sofia Lindqvist,Ravi Menon,3,,03/Sep/26,16/Sep/26,The page a customer actually sees.,DLV-11,,,,
+DLV-8,Task,Notification templates,Awaiting Copy,In Progress,Mei Chen,Ravi Menon,2,,03/Sep/26,16/Sep/26,"Email and SMS copy for each shipment event, in four locales.",DLV-11,,,,
+DLV-9,Task,Load test the tracking API,To Do,To Do,Arun Sethi,Sofia Lindqvist,2,,03/Sep/26,17/Sep/26,Sustained 500 requests per second for one hour.,DLV-10,,,,
+DLV-10,Task,Security review,To Do,To Do,Tomas Nowak,Ravi Menon,,28800,03/Sep/26,18/Sep/26,Threat model plus a dependency audit.,DLV-11,,,,
+DLV-11,Story,Staging rollout,Blocked,In Progress,Arun Sethi,Priya Nandan,2,,03/Sep/26,19/Sep/26,"Everything meets here before anything ships.
+Held until the security review clears.",DLV-13,,,,
+DLV-12,Task,Runbook and on-call handover,To Do,To Do,Mei Chen,Priya Nandan,,,04/Sep/26,20/Sep/26,On-call rota plus the failure playbook.,DLV-13,,,,DLV-11
+DLV-13,Story,Production cutover,To Do,To Do,Arun Sethi,Priya Nandan,3,,04/Sep/26,20/Sep/26,Flip live traffic to the new pipeline.,DLV-14,,,,
+DLV-14,Task,Post-cutover verification,To Do,To Do,Sofia Lindqvist,Priya Nandan,2,,04/Sep/26,21/Sep/26,Reconcile 24 hours of shipments against the carrier of record.,,,,,DLV-99
+,Task,Investigate the flaky carrier sandbox,To Do,To Do,Arun Sethi,Arun Sethi,1,,04/Sep/26,,"Raised in standup, never triaged, never given a key.",,,,,
+DLV-3,Story,Build the carrier adapter,In Review,In Progress,Arun Sethi,Ravi Menon,5,,02/Sep/26,14/Sep/26,Second copy of DLV-3 from an overlapping board filter.,,,,,
+DLV-15,Task,Archive the legacy tracker,To Do,To Do,Mei Chen,Ravi Menon,TBD,,04/Sep/26,,Nobody has sized this yet.,,,,,

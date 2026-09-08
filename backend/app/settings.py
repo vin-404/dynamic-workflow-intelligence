@@ -65,6 +65,21 @@ class Settings(BaseSettings):
     #: is a stranger's undo button for your demo.
     ADMIN_TOKEN: str = ""
 
+    # -- Inbound webhooks --------------------------------------------------
+    #: The secret GitHub signs every webhook delivery with (repository ->
+    #: Settings -> Webhooks -> Secret). `POST /api/ingest/github` recomputes
+    #: HMAC-SHA256 over the raw request body and compares it with the
+    #: `X-Hub-Signature-256` header in constant time.
+    #:
+    #: **Unset means that endpoint is disabled**, on the same terms as
+    #: `ADMIN_TOKEN` above and for a stronger reason. A webhook has no session
+    #: to hold a role on, so the signature is the whole of its authentication;
+    #: accepting unsigned deliveries would be an unauthenticated write into
+    #: the event log of any project whose id a stranger can guess. There is
+    #: deliberately no "accept unsigned in development" mode - the tests sign
+    #: their own requests, which takes four lines.
+    GITHUB_WEBHOOK_SECRET: str = ""
+
     # -- Trust in the authenticating proxy ---------------------------------
     #: Authentication happens in the Next.js server, not here. That server
     #: verifies a Google session, strips whatever identity headers the browser

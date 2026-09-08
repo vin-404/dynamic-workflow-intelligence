@@ -600,6 +600,27 @@ def score_tasks(
         "resource_contention_modelled": True,
         "rework_modelled": False,
         "monte_carlo_run": False,
+        # Phase 11, additive. `monte_carlo_run` above stays false and
+        # `what_would_make_this_a_probability` below is unchanged: this score
+        # is still a structural estimate and this code path still samples
+        # nothing. What changed is that a *separate* payload now exists, and
+        # a reader of this one deserves to be told which is which.
+        "forecast_offered_separately": (
+            "POST /api/projects/{project_id}/forecast samples the tasks' "
+            "three-point estimates and returns a probability of meeting the "
+            "deadline plus a criticality index per task. That is a different "
+            "number from this one, on a different scale, and it is not "
+            "calibrated either - it is a probability under a stated model "
+            "rather than a validated forecast. This score remains the answer "
+            "when there is nothing to sample, and the forecast response says "
+            "explicitly which of the two it is reporting."
+        ),
+        "score_kind_is_not_the_forecast_kind": (
+            "structural_estimate ranks exposure given the shape of the "
+            "workflow; monte_carlo_probability counts how often something "
+            "happened in simulation. Reading a band from one against a number "
+            "from the other is a category error."
+        ),
         "what_would_make_this_a_probability": (
             "Sampling task durations from calibrated distributions over many "
             "runs, and reporting the fraction in which a task lands on the "
