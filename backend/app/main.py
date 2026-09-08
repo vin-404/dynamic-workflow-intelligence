@@ -37,10 +37,14 @@ from backend.app.api.routers import (
     analysis,
     analysis_runs,
     domains,
+    forecast,
+    ingest,
     optimize,
     projects,
+    requirements,
     scenarios,
     seed,
+    stream,
     users,
     workflow,
 )
@@ -156,7 +160,9 @@ HINTS = {
     400: "Check the values you sent; the detail says which one is wrong.",
     401: "This endpoint needs an admin token. Set ADMIN_TOKEN and send it as "
          "X-Admin-Token.",
-    403: "This endpoint is disabled in this deployment.",
+    403: "Either you are not allowed to do this, or the endpoint is "
+         "disabled in this deployment. The detail says which one, and "
+         "what to do about it.",
     404: "That id does not exist here. It may have been reset - reload the "
          "project list.",
     409: "Something changed underneath this request. Reload and try again.",
@@ -263,6 +269,13 @@ app.include_router(analysis_runs.router)
 app.include_router(scenarios.project_router)
 app.include_router(scenarios.router)
 app.include_router(optimize.router)
+# Phase 11. The route templates these declare are the contract `deps.py` and
+# the frontend are written against; the bodies land in wave 2.
+app.include_router(stream.router)
+app.include_router(forecast.router)
+app.include_router(requirements.router)
+app.include_router(ingest.router)
+app.include_router(ingest.webhook_router)
 app.include_router(ai.router)
 app.include_router(ai.status_router)
 app.include_router(seed.router)

@@ -8,12 +8,16 @@
  * weights is the thing this design is written against - so the weights are on
  * screen and adjustable.
  *
- * Refused candidates are shown, not hidden. A system that declines to delete
- * the safety certification and cites the reason on record is worth more than
- * one that reports a miraculous improvement.
+ * Refused candidates are shown, not hidden, and they are shown *first*. A
+ * system that declines to delete the safety certification and cites the
+ * reason on record is worth more than one that reports a miraculous
+ * improvement. The constraint id and the human-written reason are quoted in a
+ * ruled block, verbatim, in neutral ink: a constraint on record is a fact,
+ * not a severity, so it does not get a colour of its own.
  */
 
 import { useEffect, useState } from "react";
+import { Ban, LoaderCircle } from "lucide-react";
 import {
   ApiError,
   OptimizeCandidate,
@@ -21,21 +25,49 @@ import {
   applyScenario,
   optimize,
 } from "@/lib/api";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
-  Badge,
-  Button,
-  Card,
-  CardTitle,
-  Disclose,
-  EmptyState,
-  ErrorNote,
-  Field,
-  Input,
-  Spinner,
-  Stat,
-  Worked,
-  days,
-} from "./ui";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { bandClasses, bandText } from "@/lib/severity";
+import { cn } from "@/lib/utils";
+import { ErrorNote, Worked, days } from "./ui";
+
+/** One inline icon size across every panel. */
+const ICON = "size-3.5 shrink-0";
+const LABEL = "text-[11px] font-medium uppercase tracking-wider text-dim";
+/** A constraint id, a generator name: an identifier on record, not a status. */
+const TOKEN =
+  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
+/**
+ * The whole-field comparison scrolls in its own box.
+ *
+ * It is one row per candidate, and the budget above it goes to 500 — so the
+ * one control on this screen that can make the table enormous is sitting
+ * directly above the table. The per-candidate criterion table is not capped:
+ * it is six rows, one per criterion, and it is the thing the panel exists to
+ * show.
+ */
+const SCROLL =
+  "max-h-[26rem] overflow-y-auto overscroll-contain rounded-md border border-border/60";
+
+/** The server's own bounds on the budget, enforced before the request. */
+const BUDGET = {
+  candidates: { min: 1, max: 500 },
+  seconds: { min: 1, max: 60 },
+};
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
 
 /**
  * What the search is doing, in the order it does it.
@@ -52,6 +84,59 @@ const SEARCH_PHASES = [
   "Scoring the survivors on six criteria",
   "Ranking them",
 ];
+
+/** Better, worse, or level, in the three states `severity.ts` owns. */
+function deltaTone(improvement: number): string {
+  if (improvement === 0) return "text-dim";
+  return bandText(improvement > 0 ? "low" : "high");
+}
+
+function Head({
+  children,
+  right,
+}: {
+  children: React.ReactNode;
+  right?: React.ReactNode;
+}) {
+  return (
+    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1.5">
+      <h2 className="text-[13px] font-semibold tracking-tight">{children}</h2>
+      {right && <span className="text-[11px] text-dim">{right}</span>}
+    </div>
+  );
+}
+
+/** A figure, its label and the arithmetic under it. Not a tile. */
+function Metric({
+  label,
+  value,
+  sub,
+  tone,
+  lead,
+}: {
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  tone?: string;
+  /** The one figure that carries the answer reads larger than its siblings. */
+  lead?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className={LABEL}>{label}</div>
+      <div
+        className={cn(
+          "mt-0.5 leading-tight font-medium",
+          lead ? "text-lg" : "text-sm",
+          tone,
+        )}
+      >
+        {value}
+      </div>
+      {sub && <div className="mt-0.5 text-[11px] text-dim">{sub}</div>}
+    </div>
+  );
+}
 
 export default function OptimizePanel({
   projectId,
@@ -70,13 +155,14 @@ export default function OptimizePanel({
   const [weights, setWeights] = useState<Record<string, number> | null>(null);
   const [applying, setApplying] = useState<string | null>(null);
 
-  // Advance the label while a search is in flight, and reset it when one
-  // finishes so the next run starts from the beginning.
+  // Advance the label while a search is in flight. The reset lives in `run`
+  // rather than in this effect's `!busy` branch: setting state synchronously
+  // inside an effect body triggers a cascading render (and is what
+  // react-hooks/set-state-in-effect flags), while resetting it in the event
+  // handler that starts the run puts it in the same batch as `setBusy(true)`
+  // and every run still starts from the first label.
   useEffect(() => {
-    if (!busy) {
-      setPhase(0);
-      return;
-    }
+    if (!busy) return;
     const timer = setInterval(
       () => setPhase((p) => Math.min(p + 1, SEARCH_PHASES.length - 1)),
       700,
@@ -85,12 +171,25 @@ export default function OptimizePanel({
   }, [busy]);
 
   async function run(withAggressive = aggressive) {
+    setPhase(0);
     setBusy(true);
     setError(null);
     try {
+      // Clamped here rather than on every keystroke: `min`/`max` on a number
+      // input are advisory, and clearing the field makes `Number("")` zero -
+      // which is a budget of nothing, refused by the server with a message
+      // about a field the user was only in the middle of retyping. Clamping
+      // at the request keeps the field editable and the request valid.
       const response = await optimize(projectId, {
         aggressive: withAggressive,
-        budget: { max_candidates: maxCandidates, max_seconds: maxSeconds },
+        budget: {
+          max_candidates: clamp(
+            maxCandidates,
+            BUDGET.candidates.min,
+            BUDGET.candidates.max,
+          ),
+          max_seconds: clamp(maxSeconds, BUDGET.seconds.min, BUDGET.seconds.max),
+        },
         objectives: weights ?? undefined,
       });
       setResult(response);
@@ -123,38 +222,55 @@ export default function OptimizePanel({
   }
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardTitle>Search for a better workflow</CardTitle>
-        <p className="text-sm text-dim mb-3">
+    <div className="flex flex-col gap-6">
+      {/* ------------------------------------------------------- the search */}
+      <section>
+        <Head
+          right={
+            result
+              ? `${result.generated} generated · ${result.evaluated} evaluated · ${result.rejected.length} refused · ${result.elapsed_seconds}s`
+              : undefined
+          }
+        >
+          Search for a better workflow
+        </Head>
+        <p className="mb-3 max-w-3xl text-sm text-dim">
           Every candidate is a real list of typed changes, scored by the same
           engine that produced the numbers you have already seen. Nothing here
           involves a language model.
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
-          <Field label="Max candidates" hint="the search is never unbounded">
+
+        <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
+          {/* The budget fields share one row so their inputs sit on one
+              baseline; the hint below belongs to both of them. */}
+          <label className="flex w-32 flex-col gap-1">
+            <span className={LABEL}>Max candidates</span>
             <Input
               type="number"
-              min={1}
-              max={500}
+              min={BUDGET.candidates.min}
+              max={BUDGET.candidates.max}
               value={maxCandidates}
               onChange={(e) => setMaxCandidates(Number(e.target.value))}
             />
-          </Field>
-          <Field label="Max seconds">
+          </label>
+          <label className="flex w-28 flex-col gap-1">
+            <span className={LABEL}>Max seconds</span>
             <Input
               type="number"
-              min={1}
-              max={60}
+              min={BUDGET.seconds.min}
+              max={BUDGET.seconds.max}
               value={maxSeconds}
               onChange={(e) => setMaxSeconds(Number(e.target.value))}
             />
-          </Field>
-          <label className="flex items-center gap-2 text-sm pb-1.5">
+          </label>
+          {/* Native checkbox: the walkthrough drives the first
+              role=checkbox on this surface. */}
+          <label className="flex items-start gap-2 pb-0.5 text-sm">
             <input
               type="checkbox"
               checked={aggressive}
               onChange={(e) => setAggressive(e.target.checked)}
+              className="mt-0.5 accent-primary"
             />
             <span>
               No limits
@@ -163,13 +279,34 @@ export default function OptimizePanel({
               </span>
             </span>
           </label>
-          <Button variant="primary" onClick={() => run()} disabled={busy}>
+          <Button onClick={() => run()} disabled={busy}>
             {result ? "Search again" : "Find better workflows"}
           </Button>
+          {busy && (
+            <span className="inline-flex items-center gap-1.5 pb-1.5 text-xs text-dim">
+              <LoaderCircle className={cn(ICON, "animate-spin")} aria-hidden />
+              {SEARCH_PHASES[phase]}…
+            </span>
+          )}
+          {result && (
+            <span className="pb-1">
+              <Badge
+                variant="outline"
+                className={cn(
+                  "font-normal",
+                  bandClasses(result.stopped_early ? "moderate" : "low"),
+                )}
+              >
+                {result.stopped_early ? result.stop_reason : "search completed"}
+              </Badge>
+            </span>
+          )}
         </div>
-      </Card>
+        <p className="mt-1.5 text-[11px] text-dim">
+          the search is never unbounded
+        </p>
+      </section>
 
-      {busy && <Spinner label={`${SEARCH_PHASES[phase]}…`} />}
       {error && (
         <ErrorNote hint={error.hint} requestId={error.requestId}>
           {error.userMessage}
@@ -178,66 +315,61 @@ export default function OptimizePanel({
 
       {result && (
         <>
-          <Card>
-            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-dim">
-              <span>
-                {result.generated} generated · {result.evaluated} evaluated ·{" "}
-                {result.rejected.length} refused
-              </span>
-              <span>{result.elapsed_seconds}s</span>
-              <span>
-                {result.stopped_early ? (
-                  <Badge tone="amber">{result.stop_reason}</Badge>
-                ) : (
-                  <Badge tone="green">search completed</Badge>
-                )}
-              </span>
-            </div>
-          </Card>
-
+          {/* --------------------------------------------------- refusals */}
           {result.rejected.length > 0 && (
-            <Card className="border-violet/40">
-              <CardTitle>Refused — and this is the point</CardTitle>
-              <p className="text-xs text-dim mb-3">
+            <section>
+              <Head right={`${result.rejected.length} on record`}>
+                Refused — and this is the point
+              </Head>
+              <p className="mb-3 max-w-3xl text-xs text-dim">
                 These candidates were generated and then declined before they
                 were scored, because they break something you declared
                 inviolable.
               </p>
-              <div className="space-y-2">
+              <div className="flex flex-col divide-y divide-border/60">
                 {result.rejected.map((candidate, i) => (
-                  <div
-                    key={i}
-                    className="border border-line rounded-md p-2.5 bg-panel2/40"
-                  >
-                    <div className="text-sm font-medium mb-1">
+                  <div key={i} className="flex flex-col gap-1 py-2 first:pt-0">
+                    <h3 className="flex items-center gap-1.5 text-sm font-semibold tracking-tight">
+                      <Ban className={cn(ICON, "text-dim")} aria-hidden />
                       {candidate.name}
-                    </div>
+                    </h3>
                     {candidate.constraint_violations.map((v, j) => (
                       <div key={j} className="text-xs">
-                        <p className="text-foreground/90">{v.reason}</p>
+                        <p className="max-w-3xl">{v.reason}</p>
                         {v.constraint && (
-                          <p className="mt-1">
-                            <Badge tone="violet">{v.constraint}</Badge>{" "}
-                            <span className="text-dim">
-                              {v.constraint_reason}
+                          <div className="mt-1 flex flex-col gap-1 border-l-2 border-border pl-2.5">
+                            <span className={cn(TOKEN, "w-fit")}>
+                              {v.constraint}
                             </span>
-                          </p>
+                            <p className="max-w-2xl text-dim">
+                              {v.constraint_reason}
+                            </p>
+                          </div>
                         )}
                       </div>
                     ))}
                   </div>
                 ))}
               </div>
-            </Card>
+            </section>
           )}
 
+          {/* ------------------------------------------------ the winner */}
           {result.recommended ? (
             <>
-              <Card className="border-accent/40">
-                <CardTitle right={<Badge tone="accent">recommended</Badge>}>
-                  {result.recommended.name}
-                </CardTitle>
-                <p className="text-sm mb-3">
+              <section>
+                <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1.5">
+                  <h2 className="text-base font-semibold tracking-tight">
+                    {result.recommended.name}
+                  </h2>
+                  <Badge
+                    variant="outline"
+                    className={cn("font-normal", bandClasses("low"))}
+                  >
+                    recommended
+                  </Badge>
+                </div>
+                <p className="mb-3 max-w-3xl text-sm">
                   {result.recommendation_reason}
                 </p>
                 <CandidateBody
@@ -245,16 +377,21 @@ export default function OptimizePanel({
                   onApply={() => apply(result.recommended!)}
                   applying={applying === result.recommended.scenario_id}
                 />
-              </Card>
+              </section>
 
               {result.recommended_same_scope &&
                 result.recommended_same_scope.name !==
                   result.recommended.name && (
-                  <Card className="border-green/30">
-                    <CardTitle right={<Badge tone="green">same scope</Badge>}>
-                      {result.recommended_same_scope.name}
-                    </CardTitle>
-                    <p className="text-xs text-dim mb-3">
+                  <section>
+                    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1.5">
+                      <h2 className="text-base font-semibold tracking-tight">
+                        {result.recommended_same_scope.name}
+                      </h2>
+                      <Badge variant="outline" className="font-normal">
+                        same scope
+                      </Badge>
+                    </div>
+                    <p className="mb-3 max-w-3xl text-xs text-dim">
                       {result.recommended_same_scope_note}
                     </p>
                     <CandidateBody
@@ -264,69 +401,74 @@ export default function OptimizePanel({
                         applying === result.recommended_same_scope.scenario_id
                       }
                     />
-                  </Card>
+                  </section>
                 )}
             </>
           ) : (
-            <EmptyState title="No candidate improved on what you have">
-              {result.recommendation_reason}
-            </EmptyState>
+            <section>
+              <Head>No candidate improved on what you have</Head>
+              <p className="max-w-3xl text-sm text-dim">
+                {result.recommendation_reason}
+              </p>
+            </section>
           )}
 
+          {/* --------------------------------------------- the whole field */}
           {result.candidates.length > 1 && (
-            <Card>
-              <CardTitle
-                right={
-                  <span className="text-xs text-dim">
-                    weights total {result.weights_total.toFixed(2)}
-                  </span>
-                }
-              >
+            <section>
+              <Head right={`weights total ${result.weights_total.toFixed(2)}`}>
                 Current vs every candidate
-              </CardTitle>
+              </Head>
               <ComparisonTable result={result} />
-            </Card>
+            </section>
           )}
 
-          <Card>
-            <CardTitle>The weights that produced this ranking</CardTitle>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {Object.entries(weights ?? result.weights).map(([name, value]) => (
-                <Field key={name} label={name.replace(/_/g, " ")}>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={value}
-                    onChange={(e) =>
-                      setWeights({
-                        ...(weights ?? result.weights),
-                        [name]: Number(e.target.value),
-                      })
-                    }
-                  />
-                </Field>
-              ))}
+          {/* ------------------------------------------------- the weights */}
+          <section>
+            <Head>The weights that produced this ranking</Head>
+            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
+              {Object.entries(weights ?? result.weights).map(
+                ([name, value]) => (
+                  <label key={name} className="flex w-40 flex-col gap-1">
+                    <span className={LABEL}>{name.replace(/_/g, " ")}</span>
+                    <Input
+                      type="number"
+                      min={0}
+                      max={1}
+                      step={0.01}
+                      value={value}
+                      onChange={(e) =>
+                        setWeights({
+                          ...(weights ?? result.weights),
+                          [name]: Number(e.target.value),
+                        })
+                      }
+                    />
+                  </label>
+                ),
+              )}
             </div>
-            <div className="flex gap-2 mt-3">
-              <Button onClick={() => run()} disabled={busy}>
+            <div className="mt-3 flex gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => run()}
+                disabled={busy}
+              >
                 Re-rank with these weights
               </Button>
-              <Button
-                variant="ghost"
-                onClick={() => setWeights(result.weights)}
-              >
+              <Button variant="ghost" onClick={() => setWeights(result.weights)}>
                 Reset
               </Button>
             </div>
-            <p className="text-[11px] text-dim mt-2">{result.note}</p>
-          </Card>
+            <p className="mt-2 max-w-3xl text-[11px] text-dim">{result.note}</p>
+          </section>
         </>
       )}
     </div>
   );
 }
+
+/* --------------------------------------------------------- one candidate */
 
 function CandidateBody({
   candidate,
@@ -342,31 +484,26 @@ function CandidateBody({
   );
   return (
     <div>
-      <p className="text-sm text-foreground/90 mb-3">{candidate.rationale}</p>
+      <p className="mb-3 max-w-3xl text-sm">{candidate.rationale}</p>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-3">
-        <Stat
-          label="Finish"
+      <div className="mb-3 flex flex-wrap items-start gap-x-8 gap-y-3 border-y border-border py-2.5">
+        <Metric
+          lead
+          label="expected completion"
           value={
             completion
-              ? `day ${Math.round(completion.before)} → ${Math.round(completion.after)}`
+              ? `day ${Math.round(completion.before)} → day ${Math.round(completion.after)}`
               : "—"
           }
           sub={completion ? days(completion.delta, true) : undefined}
-          tone={
-            completion && completion.delta < 0
-              ? "green"
-              : completion && completion.delta > 0
-                ? "red"
-                : undefined
-          }
+          tone={completion ? deltaTone(completion.improvement) : undefined}
         />
-        <Stat
+        <Metric
           label="Ranking total"
           value={candidate.scores?.total.toFixed(3) ?? "—"}
           sub="a ranking aid, not a measurement"
         />
-        <Stat
+        <Metric
           label="Scope"
           value={candidate.scope_change ? "changes" : "unchanged"}
           sub={
@@ -374,87 +511,116 @@ function CandidateBody({
               ? `${days(candidate.effort_delta_days, true)} of work`
               : "same work, arranged differently"
           }
-          tone={candidate.scope_change ? "amber" : "green"}
+          tone={bandText(candidate.scope_change ? "moderate" : "low")}
         />
-        <Stat
-          label="Changes"
+        <Metric
+          label="Typed changes"
           value={candidate.mutations.length}
           sub={candidate.generator.replace(/_/g, " ")}
         />
       </div>
 
       {candidate.scope_change_note && (
-        <p className="text-xs text-amber mb-3">{candidate.scope_change_note}</p>
+        <p className={cn("mb-3 max-w-3xl text-xs", bandText("moderate"))}>
+          {candidate.scope_change_note}
+        </p>
       )}
 
       <div className="mb-3">
-        <div className="text-xs text-dim mb-1">The exact changes:</div>
-        <ol className="text-xs space-y-0.5">
-          {candidate.mutation_summary.map((m, i) => (
-            <li key={i} className="font-mono text-foreground/80">
-              {i + 1}. {m}
-            </li>
-          ))}
-        </ol>
+        <div className="mb-1 text-[11px] text-dim">The exact changes:</div>
+        <div className={cn(SCROLL, "max-w-3xl px-2.5 py-1.5")}>
+          <ol className="flex flex-col gap-0.5 font-mono text-[11px]">
+            {candidate.mutation_summary.map((m, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="w-4 shrink-0 text-right text-dim">{i + 1}</span>
+                <span className="min-w-0">{m}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
       </div>
 
       {candidate.scores && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs min-w-[560px]">
-            <thead>
-              <tr className="text-left text-[10px] uppercase tracking-wider text-dim">
-                <th className="font-medium py-1">Criterion</th>
-                <th className="font-medium py-1 text-right w-16">Before</th>
-                <th className="font-medium py-1 text-right w-16">After</th>
-                <th className="font-medium py-1 text-right w-16">Delta</th>
-                <th className="font-medium py-1 text-right w-14">Weight</th>
-                <th className="font-medium py-1 text-right w-16">Contrib.</th>
-                <th className="font-medium py-1">Unit</th>
-              </tr>
-            </thead>
-            <tbody>
+        <>
+          <Table className="min-w-[600px] text-xs">
+            <TableHeader>
+              <TableRow className="border-border hover:bg-transparent">
+                <TableHead className={cn("h-7 px-2", LABEL)}>
+                  Criterion
+                </TableHead>
+                <TableHead className={cn("h-7 w-16 px-2 text-right", LABEL)}>
+                  Before
+                </TableHead>
+                <TableHead className={cn("h-7 w-16 px-2 text-right", LABEL)}>
+                  After
+                </TableHead>
+                <TableHead className={cn("h-7 w-16 px-2 text-right", LABEL)}>
+                  Delta
+                </TableHead>
+                <TableHead className={cn("h-7 w-14 px-2 text-right", LABEL)}>
+                  Weight
+                </TableHead>
+                <TableHead className={cn("h-7 w-20 px-2 text-right", LABEL)}>
+                  Contrib.
+                </TableHead>
+                <TableHead className={cn("h-7 px-2", LABEL)}>Unit</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
               {candidate.scores.criteria.map((c) => (
-                <tr key={c.name} className="border-t border-line/60">
-                  <td className="py-1">{c.name.replace(/_/g, " ")}</td>
-                  <td className="py-1 text-right font-mono">
+                <TableRow
+                  key={c.name}
+                  data-state={c.improvement !== 0 ? "selected" : undefined}
+                  className="border-border/50"
+                >
+                  <TableCell
+                    className={cn(
+                      "px-2 py-1",
+                      c.improvement === 0 && "text-dim",
+                    )}
+                  >
+                    {c.name.replace(/_/g, " ")}
+                  </TableCell>
+                  <TableCell className="px-2 py-1 text-right text-dim">
                     {c.before.toFixed(2)}
-                  </td>
-                  <td className="py-1 text-right font-mono">
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "px-2 py-1 text-right",
+                      c.improvement !== 0 ? "font-medium" : "text-dim",
+                    )}
+                  >
                     {c.after.toFixed(2)}
-                  </td>
-                  <td
-                    className={`py-1 text-right font-mono ${
-                      c.improvement > 0
-                        ? "text-green"
-                        : c.improvement < 0
-                          ? "text-red"
-                          : "text-dim"
-                    }`}
+                  </TableCell>
+                  <TableCell
+                    className={cn(
+                      "px-2 py-1 text-right",
+                      deltaTone(c.improvement),
+                    )}
                   >
                     {c.delta > 0 ? "+" : ""}
                     {c.delta.toFixed(2)}
-                  </td>
-                  <td className="py-1 text-right font-mono text-dim">
+                  </TableCell>
+                  <TableCell className="px-2 py-1 text-right text-dim">
                     {c.weight.toFixed(2)}
-                  </td>
-                  <td className="py-1 text-right font-mono">
+                  </TableCell>
+                  <TableCell className="px-2 py-1 text-right">
                     {c.contribution >= 0 ? "+" : ""}
                     {c.contribution.toFixed(3)}
-                  </td>
-                  <td className="py-1 text-dim">{c.unit}</td>
-                </tr>
+                  </TableCell>
+                  <TableCell className="px-2 py-1 text-dim">{c.unit}</TableCell>
+                </TableRow>
               ))}
-            </tbody>
-          </table>
-          <p className="text-[11px] text-dim mt-1.5">
-            <Worked>{candidate.scores.formula}</Worked>{" "}
-            {candidate.scores.note}
+            </TableBody>
+          </Table>
+          <p className="mt-1.5 max-w-3xl text-[11px] text-dim">
+            <Worked>{candidate.scores.formula}</Worked> {candidate.scores.note}
           </p>
-        </div>
+        </>
       )}
 
-      <div className="flex items-center gap-2 mt-3 pt-3 border-t border-line">
-        <Button variant="primary" onClick={onApply} disabled={applying}>
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+        <Button onClick={onApply} disabled={applying}>
           {applying ? "Applying…" : "Apply this"}
         </Button>
         <span className="text-xs text-dim">
@@ -465,74 +631,90 @@ function CandidateBody({
   );
 }
 
+/* ------------------------------------------------------ the whole field */
+
 function ComparisonTable({ result }: { result: OptimizeResponse }) {
-  const criteria = result.candidates[0]?.scores?.criteria ?? [];
+  // The header comes from whichever candidate actually carries scores, not
+  // from the first one: an unscored candidate at the head of the list left
+  // the table with no column headings while every row below it had cells.
+  const criteria =
+    result.candidates.find((c) => c.scores)?.scores?.criteria ?? [];
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-xs min-w-[720px]">
-        <thead>
-          <tr className="text-left text-[10px] uppercase tracking-wider text-dim">
-            <th className="font-medium py-1.5">Option</th>
+    <div>
+      <div className={SCROLL}>
+      <Table className="min-w-[760px] text-xs">
+        <TableHeader>
+          <TableRow className="border-border hover:bg-transparent">
+            <TableHead className={cn("h-9 px-2 align-bottom", LABEL)}>
+              Option
+            </TableHead>
             {criteria.map((c) => (
-              <th key={c.name} className="font-medium py-1.5 text-right">
+              <TableHead
+                key={c.name}
+                className={cn("h-9 px-2 text-right align-bottom", LABEL)}
+              >
                 {c.name.replace(/_/g, " ")}
-                <span className="block font-normal normal-case text-[9px]">
+                <span className="block text-[9px] font-normal normal-case">
                   {c.better} is better
                 </span>
-              </th>
+              </TableHead>
             ))}
-            <th className="font-medium py-1.5 text-right">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr className="border-t border-line bg-panel2/40">
-            <td className="py-1.5 font-medium">Current workflow</td>
+            <TableHead className={cn("h-9 px-2 text-right align-bottom", LABEL)}>
+              Total
+            </TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          <TableRow className="border-border bg-muted/60">
+            <TableCell className="px-2 py-1.5 font-medium">
+              Current workflow
+            </TableCell>
             {criteria.map((c) => (
-              <td key={c.name} className="py-1.5 text-right font-mono">
+              <TableCell key={c.name} className="px-2 py-1.5 text-right">
                 {c.before.toFixed(2)}
-              </td>
+              </TableCell>
             ))}
-            <td className="py-1.5 text-right font-mono text-dim">—</td>
-          </tr>
+            <TableCell className="px-2 py-1.5 text-right text-dim">—</TableCell>
+          </TableRow>
           {result.candidates.map((candidate) => (
-            <tr key={candidate.name} className="border-t border-line/60">
-              <td className="py-1.5">
-                {candidate.name}
+            <TableRow key={candidate.name} className="border-border/50">
+              <TableCell className="px-2 py-1.5 whitespace-normal">
+                <span className="mr-1.5">{candidate.name}</span>
                 {candidate.scope_change && (
-                  <Badge tone="amber" title="Changes how much work there is">
+                  <Badge
+                    variant="outline"
+                    className={cn("font-normal", bandClasses("moderate"))}
+                    title="Changes how much work there is"
+                  >
                     scope
                   </Badge>
                 )}
-              </td>
+              </TableCell>
               {candidate.scores?.criteria.map((c) => (
-                <td
+                <TableCell
                   key={c.name}
-                  className={`py-1.5 text-right font-mono ${
-                    c.improvement > 0
-                      ? "text-green"
-                      : c.improvement < 0
-                        ? "text-red"
-                        : ""
-                  }`}
+                  className={cn("px-2 py-1.5 text-right", deltaTone(c.improvement))}
                 >
                   {c.after.toFixed(2)}
-                </td>
+                </TableCell>
               ))}
-              <td className="py-1.5 text-right font-mono font-semibold">
+              <TableCell className="px-2 py-1.5 text-right font-semibold">
                 {candidate.scores?.total.toFixed(3)}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
-      <Disclose summary="Why the total is not the answer">
-        <p className="text-xs text-dim">
-          {result.candidates[0]?.scores?.note} Read across a row, not down the
-          Total column: a candidate can win on completion and lose on resource
-          overload, and which of those you care about is not something the
-          optimizer can know.
-        </p>
-      </Disclose>
+        </TableBody>
+      </Table>
+      </div>
+      <p className="mt-2 max-w-3xl text-[11px] text-dim">
+        <span className="font-medium text-foreground">
+          Why the total is not the answer.
+        </span>{" "}
+        {result.candidates[0]?.scores?.note} Read across a row, not down the
+        Total column: a candidate can win on completion and lose on resource
+        overload, and which of those you care about is not something the
+        optimizer can know.
+      </p>
     </div>
   );
 }

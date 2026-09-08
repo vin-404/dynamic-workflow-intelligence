@@ -130,6 +130,81 @@ what would unlock each check.
 > test that fails if anyone adds one. The analysis payload has no domain field
 > at all; the domain exists for you, not for the engine."
 
+### 3b · It arrives from Jira, not from your keyboard — 75s
+
+**Do:** From the project list, click **Import from Jira**, then **Load the
+bundled sample**. It ships with the app, so this works with the network
+unplugged. Click **Preview**.
+
+**Expect:** 17 rows read → 14 tasks, 22 dependencies, 5 resources. **Three
+rejected rows, each for a different reason** — no issue key, a duplicate key,
+and story points that read `TBD`. **One dropped dependency**, because `DLV-99`
+is not in the export. And on every row, the readings the importer *guessed*
+are open by default while the ones it read straight from the file are folded
+away.
+
+**Say:**
+
+> "This is a real Jira export, including the part every CSV parser gets wrong —
+> Jira writes the link columns as four columns with the same name, and the
+> standard library's own reader silently keeps one of them. Read them wrong
+> and you lose most of the graph while every count still looks right.
+>
+> Now look at what it says it *guessed*. Story points read as days. A status
+> mapped onto ours. An estimate that was missing and got defaulted. Three rows
+> it would not import at all, and it names them rather than quietly dropping
+> them into a total. Nothing here is silent."
+
+Click **Commit**, then **Bottlenecks**.
+
+**Expect:** ten findings, infeasible by three days on structure alone.
+
+> "And notice the evidence tier: it says it is low, because importing statuses
+> is not the same as having a history. It did not invent a backdated event log
+> to look more capable."
+
+**The beat:** it is a tracker, not a form.
+
+---
+
+### 3c · In real time — 90s. *This is the one they remember.*
+
+**Do:** Open **Campus Tech Symposium**, click **Live**, press play.
+
+Then stop talking and let it run for fifteen seconds.
+
+**Expect:** the clock advances a simulated day per second. Events arrive in the
+rail. **Findings appear and clear on their own** as the simulated day passes
+their thresholds, each one flashing once as it lands. The projected finish
+updates in place.
+
+**Say**, after the pause:
+
+> "Nothing was pressed. That is the event log replayed forward, and every frame
+> you just watched is a full re-evaluation of the whole workflow at that
+> simulated day — the same function that runs when you click Analyze, called
+> once per day.
+>
+> The findings appear and clear because the clock is an argument to the engine,
+> not a global it reads. So a check that fires after three idle days fires on
+> the day it would have fired, not when I happen to refresh."
+
+Then point at the reconstruction block under the chart:
+
+> "And it will not let me overclaim. It says this frame is a reconstruction
+> computed from the ten events known by that day — and that the later three
+> were deliberately not applied. This is what the engine *would have said then*,
+> not what it says now dressed up as history."
+
+Pause, scrub backwards, press play again.
+
+> "Pausable, seekable, and it writes nothing. The stored workflow's content
+> hash is the same before and after — `demo_check` asserts exactly that."
+
+**The beat:** "in real time" is a running clock, not a refresh button.
+
+---
+
 ### 4 · Capability 1 — the blocker, not the blocked task — 60s
 
 **Do:** Open **Campus Tech Symposium**. Analyze. Point at the top finding.
@@ -156,6 +231,43 @@ factor's explanation out loud.
 > and what would make it a real probability. A factor it cannot measure reports
 > itself unavailable and contributes zero rather than guessing."
 
+### 5b · A probability, and the estimate it is not — 75s
+
+**Do:** Click **Risk & forecast**. Scroll past the structural score to the
+forecast.
+
+**Expect:** P50 / P80 / P90 dates, a probability of meeting the deadline, a
+completion histogram, and every task's **criticality index**.
+
+**Say:**
+
+> "Ten minutes ago I showed you a number and told you it was *not* a
+> probability. Here is one that is — and the first thing on screen is a table
+> saying which of the two you are looking at, because they are different
+> numbers on different scales and reading a band from one against a number from
+> the other is a category error.
+>
+> Five thousand runs, seed on screen, so this number is reproducible. And the
+> most useful column is this one: **criticality index** — the fraction of runs
+> in which a task landed on the critical path. That is what 'at risk of
+> becoming a bottleneck' actually means. A task on the critical path today is a
+> fact; a task on the critical path in 96% of simulated futures is a warning."
+
+Then, deliberately:
+
+> "Now read what it admits. It says it is **uncalibrated** — nothing here has
+> ever been checked against what really happened. It says durations are sampled
+> **independently**, and that this is *optimistic*, because real delays
+> correlate — the week the supplier is late is the week the reviewer is on
+> leave. And it says resource contention was not simulated at all.
+>
+> We could have shipped the number without those three sentences. It would have
+> looked stronger and been worth less."
+
+**The beat:** adding a real probability did not cost a single caveat.
+
+---
+
 ### 6 · Capability 3 — a hypothetical, provably harmless — 75s
 
 **Do:** **What if**. In the sentence box, type:
@@ -177,6 +289,51 @@ pattern matcher read it. Click **Simulate this**. Day 26 becomes day 33.
 > only I can apply one."
 
 **The beat:** the original workflow is provably unchanged.
+
+### 6b · A requirement changes — 90s. *The differentiator.*
+
+**Do:** Click **Requirements**, pick **R1**, and type a genuinely different
+wording — "Two-day event, 700 attendees, hybrid attendance". Read the report.
+
+**Expect, leading the screen:** **3 days of completed work invalidated**, six
+tasks that must be redone versus two that merely need rechecking, five owners
+affected, and the arithmetic on every row.
+
+**Say:**
+
+> "Every tool on the market can tell you a requirement changed. The good ones
+> flag the link and ask a human to look at it.
+>
+> This says which completed work is now *invalid* — not downstream, not
+> 'affected', but consumed something that is now wrong and has to be done
+> again. Three days of finished work, gone, and here is who has to be told."
+
+Now the honest part, and do not skip it:
+
+> "Notice the finish date does not move. That is not the change being free —
+> and the report says so itself, right there. The scheduler is status-blind, so
+> completed work already occupies its span in the plan; re-opening it cannot
+> lengthen the critical path.
+>
+> We could have written a second scheduler to make that number move for this
+> demo. The cost is on the left, in days of real work. That is the honest
+> number, so that is the one the screen leads with."
+
+Then point at the caveat under the headline:
+
+> "And this: it computes the blast radius from the dependency graph — it does
+> **not** read your two sentences and decide whether the meaning changed. That
+> is your call, and it says so before it says anything else."
+
+Finally, scroll to the replan:
+
+> "And it hands you the fix as an ordinary scenario — the same seventeen
+> mutation kinds, unapplied, that you can diff and apply through endpoints that
+> already existed. No eighteenth kind was invented for this feature."
+
+**The beat:** it reasons about the cost of change, and refuses to overstate it.
+
+---
 
 ### 7 · Capability 4 — a better workflow, scored — 105s
 
@@ -223,8 +380,8 @@ found a miraculous improvement.
 
 **Say:**
 
-> "738 tests. A purity test that fails if the core imports a web framework or a
-> database. A domain-leak test that fails if anyone writes `if domain ==`. A
+> "1,054 tests. A purity test that fails if the core imports a web framework or
+> a database. A domain-leak test that fails if anyone writes `if domain ==`. A
 > test that parses every file in the AI package and fails on an import that
 > could write to the database. And a test that fails if a narrated sentence
 > contains a number the engine did not produce."
@@ -242,6 +399,12 @@ Then the limitations, out loud, before anyone asks — see the list in
 | A workflow looks edited from a previous rehearsal | `.venv/Scripts/python.exe -m backend.scripts.reset_db` |
 | `/api/ai/*` returns 404 | You are proxying to a backend started before Phase 7. Restart it. |
 | The optimizer returns nothing | You are on a workflow with nothing to improve. Use a seeded one. |
+| The live screen never starts, or the clock does not move | The backend must be **one process**. More than one worker and the replay you started is not the one the stream connects to (D-143). |
+| The live screen is empty on arrival | Someone else's replay finished. Press restart; a viewer arriving mid-replay is handed current state, but a *finished* replay has nothing left to send. |
+| The requirement report shows `+0d` on the finish date | Expected, and the screen says why. Lead with the wasted-effort figure on the left; the date not moving is the scheduler being status-blind, not the change being free. |
+| The forecast says "structural estimate" instead of a probability | The workflow has nothing to sample — no three-point estimates and a zero variance prior. That is the honest fallback, and it is worth showing rather than hiding. |
+| An imported project's forecast is entirely "assumed" | Correct: no Jira export carries three-point estimates, so the spread comes from the domain prior and every task says so. |
+| **The code on disk and the behaviour on screen disagree** | Suspect the *process*, not the code. A server started without `--reload` serves the code it was started with, for as long as it runs — so a fix you made hours ago may simply not be loaded. Probe the running server (`curl` the endpoint, or read the field in the response) rather than re-reading the source, then restart it. Both of the sessions that built Phase 10 and Phase 11 hit this independently, and both initially misdiagnosed it as a bug in their own new code. |
 | Anything at all, 30 seconds before you start | `reset_db`, restart both, `demo_check`. In that order. |
 
 ## Rehearsal rules

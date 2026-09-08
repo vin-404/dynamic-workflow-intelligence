@@ -99,9 +99,22 @@ class TestConfiguration:
             for m in re.finditer(r"^([A-Z][A-Z0-9_]+)=", text, re.MULTILINE)
         }
         known = set(Settings.model_fields) | {
-            # Read by the AI layer and the frontend, not by Settings.
+            # Read by the AI layer, not by Settings.
             "ANTHROPIC_API_KEY", "AI_PROVIDER", "PORT",
-            "NEXT_PUBLIC_API_URL", "API_REWRITE_URL",
+            # Read by the Next.js server, not by Settings. `API_REWRITE_URL`
+            # is where the backend URL lives now; there is deliberately no
+            # browser-side one (D-88). The `AUTH_*` set plus `NEXTAUTH_URL`
+            # are Auth.js's, which runs in Next rather than here (D-82), and
+            # `E2E_AUTH_ENABLED` gates the walkthrough sign-in (D-79).
+            "API_REWRITE_URL",
+            "AUTH_GOOGLE_ID", "AUTH_GOOGLE_SECRET", "AUTH_SECRET",
+            "NEXTAUTH_URL", "E2E_AUTH_ENABLED",
+            # The public-read-only switch is the *proxy's* decision, so it is
+            # read in Next and never here. Its counterpart
+            # `PUBLIC_VIEWER_EMAIL` *is* a Settings field - it has to be, it
+            # is what holds that identity to a read-only bar - so it is not
+            # listed here and this test checks it for real.
+            "PUBLIC_DEMO_VIEWER",
         }
         assert documented <= known, documented - known
 
@@ -310,6 +323,8 @@ class TestNamePicker:
         assert "no longer exists" in r.json()["detail"]
 
     async def test_a_users_projects_are_listed_with_advisory_roles(self, client):
+        """Advisory here means the open configuration; the note says so, and
+        says the opposite once `PROXY_SHARED_SECRET` is set."""
         members = (
             await client.get(f"/api/projects/{EVENT_PROJECT_ID}/members")
         ).json()
@@ -328,8 +343,15 @@ class TestNamePicker:
             assert forbidden not in paths
 
     async def test_no_endpoint_enforces_a_permission(self, client):
-        """Roles are advisory. A viewer can still edit, by design - the
-        alternative is a permission layer the brief rules out."""
+        """Roles are advisory **in the open configuration**, and a viewer can
+        still edit.
+
+        This is the canary for that configuration, not a statement about the
+        product any more: with no `PROXY_SHARED_SECRET` there is no
+        trustworthy identity to enforce against, so enforcing a role would be
+        theatre (D-74). `test_auth.py` covers the configuration where a viewer
+        genuinely cannot. If this test ever fails, the open default has moved
+        - which is a decision, not a broken test."""
         members = (
             await client.get(f"/api/projects/{EVENT_PROJECT_ID}/members")
         ).json()

@@ -65,6 +65,68 @@ class Settings(BaseSettings):
     #: is a stranger's undo button for your demo.
     ADMIN_TOKEN: str = ""
 
+    # -- Inbound webhooks --------------------------------------------------
+    #: The secret GitHub signs every webhook delivery with (repository ->
+    #: Settings -> Webhooks -> Secret). `POST /api/ingest/github` recomputes
+    #: HMAC-SHA256 over the raw request body and compares it with the
+    #: `X-Hub-Signature-256` header in constant time.
+    #:
+    #: **Unset means that endpoint is disabled**, on the same terms as
+    #: `ADMIN_TOKEN` above and for a stronger reason. A webhook has no session
+    #: to hold a role on, so the signature is the whole of its authentication;
+    #: accepting unsigned deliveries would be an unauthenticated write into
+    #: the event log of any project whose id a stranger can guess. There is
+    #: deliberately no "accept unsigned in development" mode - the tests sign
+    #: their own requests, which takes four lines.
+    GITHUB_WEBHOOK_SECRET: str = ""
+
+    # -- Trust in the authenticating proxy ---------------------------------
+    #: Authentication happens in the Next.js server, not here. That server
+    #: verifies a Google session, strips whatever identity headers the browser
+    #: sent, and proxies `/api/*` upstream with `X-User-Id` (the backend
+    #: `User.id`) plus `X-Proxy-Secret` set to this value. Set it to the same
+    #: random string in both places.
+    #:
+    #: **Unset means today's open behaviour, unchanged.** `X-User-Id` is
+    #: trusted exactly as it arrives, no `ProjectMember.role` is enforced, and
+    #: an anonymous request is served like any other. That is what lets a
+    #: fresh clone, local development and the whole test suite run with no
+    #: configuration at all, and it is a contract, not a convenience - it is
+    #: the default every existing test is written against.
+    #:
+    #: **Set means the header is a claim that has to be vouched for.**
+    #: `X-User-Id` is honoured only when `X-Proxy-Secret` matches (compared in
+    #: constant time), so calling this API's public URL directly with a
+    #: hand-written `X-User-Id` identifies nobody; and roles become enforced -
+    #: viewer may read and evaluate, editor may change the workflow, owner may
+    #: also change the member list.
+    PROXY_SHARED_SECRET: str = ""
+
+    #: The email of the **public read-only guest**, the identity the Next.js
+    #: proxy forwards for a visitor with no session when its own
+    #: `PUBLIC_DEMO_VIEWER=1` is set (a public demo, where the Google app is
+    #: in Testing mode and a judge with an unlisted address would otherwise be
+    #: locked out entirely).
+    #:
+    #: It is a **real user row**, created through the same `POST /api/users`
+    #: upsert a person goes through - not a header the backend special-cases
+    #: into existence. What this setting does is name it, so `deps.py` can
+    #: hold it to a read-only bar:
+    #:
+    #: * it holds `viewer` on every project, so a refusal names a real role;
+    #: * and it does **not** satisfy the "any signed-in user" bar that guards
+    #:   creating a project, a domain or a seed - which a plain identity
+    #:   otherwise would, since those routes have no project to hold a role on.
+    #:
+    #: That second half is the point. Without it, handing the guest an
+    #: identity to read with would also hand it the ability to create
+    #: projects on a public instance.
+    #:
+    #: Only meaningful when `PROXY_SHARED_SECRET` is set; with no secret
+    #: nothing is enforced for anybody. Emptying it disables the concept
+    #: entirely - no identity is then treated as a guest.
+    PUBLIC_VIEWER_EMAIL: str = "guest@public-demo.local"
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     @field_validator("CORS_ORIGINS", mode="before")

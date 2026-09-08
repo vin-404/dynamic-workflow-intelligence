@@ -19,13 +19,22 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.limits import bounded
+from backend.app.api.deps import project_role_guard
 from backend.app.core.mutations import MutationKind, payload_schema
 from backend.app.db import get_db
 from backend.app.services import scenarios, versions as V
 from backend.app.settings import settings
 
-project_router = APIRouter(prefix="/api/projects/{project_id}", tags=["scenarios"])
-router = APIRouter(prefix="/api/scenarios", tags=["scenarios"])
+project_router = APIRouter(
+    prefix="/api/projects/{project_id}",
+    tags=["scenarios"],
+    dependencies=[project_role_guard],
+)
+router = APIRouter(
+    prefix="/api/scenarios",
+    tags=["scenarios"],
+    dependencies=[project_role_guard],
+)
 
 
 class MutationIn(BaseModel):

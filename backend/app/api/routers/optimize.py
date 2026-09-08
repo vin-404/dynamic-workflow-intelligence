@@ -18,12 +18,17 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.api.limits import bounded
+from backend.app.api.deps import project_role_guard
 from backend.app.core.optimization import Budget, ObjectiveWeights
 from backend.app.db import get_db
 from backend.app.services import optimization, versions as V
 from backend.app.settings import settings
 
-router = APIRouter(prefix="/api/projects/{project_id}", tags=["optimize"])
+router = APIRouter(
+    prefix="/api/projects/{project_id}",
+    tags=["optimize"],
+    dependencies=[project_role_guard],
+)
 
 
 class ObjectivesIn(BaseModel):

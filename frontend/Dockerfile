@@ -9,10 +9,15 @@ RUN npm ci
 
 COPY . .
 
-# NEXT_PUBLIC_* is inlined at build time, so the API URL has to be known here.
-# It defaults to localhost for a local build and is overridden per deployment.
-ARG NEXT_PUBLIC_API_URL=http://localhost:8001
-ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
+# Deliberately no NEXT_PUBLIC_API_URL.
+#
+# The browser must only ever talk to this app's own origin: `src/proxy.ts`
+# verifies the Google session there and injects the identity headers the
+# backend trusts. Baking an absolute backend URL into the bundle would send
+# the browser straight to FastAPI, past the session check and the injection -
+# the app would look signed-in while every request arrived anonymous. The
+# backend URL is a *runtime, server-side* setting (API_REWRITE_URL), so it is
+# not needed at build time and is not accepted here.
 
 RUN npm run build
 

@@ -10,7 +10,22 @@
  * project, as context for the user - never in the analysis payload.
  */
 
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
+/**
+ * Always relative. Never configurable.
+ *
+ * Every request goes to this app's own origin, where `src/proxy.ts` verifies
+ * the session and injects the identity headers the backend trusts. That makes
+ * an absolute backend URL here actively dangerous rather than merely
+ * redundant: pointing the browser at FastAPI directly would bypass the origin,
+ * the session check and the injection in one step, and the app would look
+ * signed-in while every request arrived anonymous. This used to read
+ * `NEXT_PUBLIC_API_URL`, whose default in `docker-compose.yml` was exactly
+ * that absolute URL - so the safe configuration depended on someone
+ * remembering to blank a variable. It is not a variable any more.
+ *
+ * `API_REWRITE_URL` (server-side only) is where the backend URL is configured.
+ */
+const BASE = "";
 
 export class ApiError extends Error {
   status: number;
@@ -67,25 +82,18 @@ export class ApiError extends Error {
 }
 
 /**
- * The identity the user picked, sent on every request as `X-User-Id`.
+ * No identity is sent from here, deliberately.
  *
- * Set once at boot rather than read from storage per call, so a component
- * that renders during a switch cannot send a stale id. It is an identity, not
- * a credential: nothing on the server checks it against anything, and nothing
- * is protected by it.
+ * `src/proxy.ts` deletes any `X-User-Id` on an incoming request and sets the
+ * one it derives from the verified session cookie. So a header set here would
+ * be stripped before the backend saw it, and code that looked like it was
+ * choosing an identity would in fact be choosing nothing - which is worse than
+ * not having it. This module used to hold a `setCurrentUser`; the session
+ * replaced it.
  */
-let currentUserId: string | null = null;
-
-export function setCurrentUser(id: string | null) {
-  currentUserId = id;
-}
-
 async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
-    headers: {
-      "Content-Type": "application/json",
-      ...(currentUserId ? { "X-User-Id": currentUserId } : {}),
-    },
+    headers: { "Content-Type": "application/json" },
     cache: "no-store",
     ...init,
   });
@@ -159,6 +167,8 @@ export interface Version {
   content_hash: string;
   is_draft: boolean;
   deadline_day: number | null;
+  /** ISO 8601 UTC, from `WorkflowVersion.created_at`. */
+  created_at: string;
 }
 
 export interface WorkflowTask {
@@ -948,3 +958,981 @@ export const userProjects = (id: string) =>
     projects: { id: string; name: string; role: string }[];
     note: string;
   }>(`/api/users/${id}/projects`);
+
+/* ==================================================================
+ * Phase 11 — replay, forecast, requirement change, import.
+ *
+ * Written in one place, by the integrator, before the four wave-3 UI
+ * agents started — for the same reason `main.py`'s router registration
+ * was: every one of them needs this file, and four concurrent edits to a
+ * shared client is how two panels end up calling the same endpoint two
+ * different ways.
+ *
+ * Types here are shaped from real responses, captured against a running
+ * backend rather than transcribed from a spec. Where a payload is deep
+ * prose rather than data — every `assumptions` block — the type stops at
+ * `AssumptionsBlock` and `assumptionSentences()` renders it, so a new
+ * caveat added by the backend appears on screen without a frontend change.
+ * That is deliberate: the honesty layer must not need a type update to be
+ * visible, or the day someone adds a caveat is the day it stops showing.
+ * ================================================================== */
+
+/**
+ * Every `assumptions` block in this API is a flat bag of prose keyed by a
+ * short slug, sometimes with an `unavailable` list beside it. The UI never
+ * hardcodes the keys.
+ */
+export type AssumptionsBlock = Record<string, unknown>;
+
+export interface UnavailableEntry {
+  /** What could not be assessed. */
+  check?: string;
+  name?: string;
+  why?: string;
+  would_unlock_it?: string;
+  [k: string]: unknown;
+}
+
+/** The prose sentences in an assumptions block, in payload order. */
+export function assumptionSentences(
+  block: AssumptionsBlock | null | undefined,
+): { key: string; text: string }[] {
+  if (!block) return [];
+  return Object.entries(block)
+    .filter(([, v]) => typeof v === "string" && v.trim().length > 0)
+    .map(([key, v]) => ({ key, text: v as string }));
+}
+
+/** The "could not assess" list, whatever key the payload used for it. */
+export function unavailableEntries(
+  block: AssumptionsBlock | null | undefined,
+): UnavailableEntry[] {
+  const raw = block?.unavailable;
+  return Array.isArray(raw) ? (raw as UnavailableEntry[]) : [];
+}
+
+/** Turn `material_change_is_a_human_judgement` into a readable label. */
+export function humanizeKey(key: string): string {
+  const s = key.replace(/_/g, " ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/* ----------------------------------------------------------- replay */
+
+export interface ReplayState {
+  project_id: string;
+  project_name: string;
+  version_id: string;
+  version_no: number;
+  /** The stored version's content hash. It must not change while replaying. */
+  base_content_hash: string;
+  running: boolean;
+  paused: boolean;
+  finished: boolean;
+  stopped: boolean;
+  sim_day: number;
+  sim_date: string;
+  start_day: number;
+  horizon_day: number;
+  horizon_date: string;
+  today_day: number;
+  /** Simulated days per real minute. 60 means one day per second. */
+  speed: number;
+  simulated_days_per_minute: number;
+  seconds_per_simulated_day: number;
+  events_total: number;
+  steps_total: number;
+  subscribers: number;
+  seq: number;
+  writes_nothing: boolean;
+  note: string;
+}
+
+export interface ReplayClock {
+  sim_day: number;
+  sim_date: string;
+  start_day: number;
+  horizon_day: number;
+  horizon_date: string;
+  project_start: string;
+  percent_complete: number;
+}
+
+export interface ReplayEvent {
+  day: number;
+  date: string;
+  task_key: string;
+  task_name: string;
+  actor: string;
+  from_status: string;
+  to_status: string;
+}
+
+export interface ClearedFinding {
+  id: string;
+  kind: string;
+  root_cause: string;
+  task_ids: string[];
+  severity_was: string;
+  explanation_was: string;
+}
+
+export interface SeverityChangedFinding {
+  id: string;
+  kind: string;
+  root_cause: string;
+  task_ids: string[];
+  severity_from: string;
+  severity_to: string;
+  explanation: string;
+}
+
+export interface FindingDelta {
+  /** Whole findings. Same shape the analysis panel already renders. */
+  appeared: Finding[];
+  cleared: ClearedFinding[];
+  severity_changed: SeverityChangedFinding[];
+  unchanged: number;
+}
+
+export interface ReplayProjection {
+  planned_end_day: number;
+  planned_end_date?: string;
+  projected_end_day: number;
+  projected_end_date: string;
+  slip_days: number;
+  deadline_day: number | null;
+  deadline_date: string | null;
+  margin_days: number | null;
+  verdict: string;
+  statement: string;
+  is_probability: false;
+}
+
+/**
+ * Why a frame's numbers are what they are. Never omit this from the UI: a
+ * frame is what the engine *would have said on that simulated day*, computed
+ * from the events known by then and deliberately not from the later ones.
+ */
+export interface ReplayDerived {
+  computed_at_simulated_day: number;
+  events_known: number;
+  events_total: number;
+  events_pending: number;
+  is_reconstruction: boolean;
+  caveats: string[];
+}
+
+export interface ReplayFrame {
+  seq: number;
+  /** `start` | `tick` | `seek` | `restart` */
+  reason: string;
+  clock: ReplayClock;
+  events: ReplayEvent[];
+  delta: FindingDelta;
+  findings: Finding[];
+  finding_counts_by_severity: { high: number; medium: number; low: number };
+  projection: ReplayProjection;
+  statuses: Record<string, string>;
+  critical_path: string[];
+  engine_version: string;
+  input_hash: string;
+  tier_reached: number;
+  checks_run: string[];
+  unavailable_checks: UnavailableCheck[];
+  derived: ReplayDerived;
+  /** Present only when this viewer's queue overflowed and frames were lost. */
+  dropped_frames?: number;
+}
+
+/** One simulated day the replay stops on. `events` is how many land on it. */
+export interface ReplayStep {
+  day: number;
+  date: string;
+  events: number;
+}
+
+export interface ReplayTimeline {
+  project_id: string;
+  version_id: string;
+  project_start: string;
+  start_day: number;
+  horizon_day: number;
+  today_day: number;
+  /**
+   * Every simulated day the replay will stop on — the scrubber's ticks. The
+   * replay steps on every whole day, not only on days an event occurs
+   * (D-139), so this is denser than `events` and is the right thing to snap a
+   * scrub to.
+   */
+  steps: ReplayStep[];
+  events: ReplayEvent[];
+  note: string;
+}
+
+export const startReplay = (
+  id: string,
+  body?: { speed?: number; start_day?: number; version_id?: string },
+) => post<ReplayState>(`/api/projects/${id}/replay`, body ?? {});
+
+export const getReplay = (id: string) =>
+  call<ReplayState & { frame: ReplayFrame | null }>(
+    `/api/projects/${id}/replay`,
+  );
+
+export const controlReplay = (
+  id: string,
+  body: {
+    action: "pause" | "resume" | "seek" | "restart" | "speed";
+    to_day?: number;
+    speed?: number;
+  },
+) => post<ReplayState>(`/api/projects/${id}/replay/control`, body);
+
+export const stopReplay = (id: string) =>
+  del<{ stopped: boolean }>(`/api/projects/${id}/replay`);
+
+export const getReplayTimeline = (id: string) =>
+  call<ReplayTimeline>(`/api/projects/${id}/replay/timeline`);
+
+/**
+ * Subscribe to a replay's Server-Sent Events.
+ *
+ * `EventSource` rather than `fetch` + a reader: it is same-origin, so the
+ * session cookie rides along on its own, and `src/proxy.ts` rewrites `/api/*`
+ * through Next's streaming proxy without buffering. It also reconnects by
+ * itself, which is the behaviour you want on a flaky network and the reason
+ * not to hand-roll this.
+ *
+ * The first event on any connection is always `catchup`, carrying current
+ * state — so a viewer arriving mid-replay sees the world, never an empty
+ * screen. Returns a function that closes the connection; call it from an
+ * effect's cleanup or the stream outlives the component.
+ */
+export function openReplayStream(
+  projectId: string,
+  handlers: {
+    onCatchup?: (state: ReplayState, frame: ReplayFrame | null) => void;
+    onFrame?: (frame: ReplayFrame) => void;
+    onControl?: (action: string, state: ReplayState) => void;
+    onEnd?: () => void;
+    /** The replay is over for everyone: restarted, stopped, or expired. */
+    onClosed?: (why: "restarted" | "stopped" | "expired") => void;
+    onError?: (e: Event) => void;
+  },
+): () => void {
+  const source = new EventSource(`/api/projects/${projectId}/stream`);
+
+  const parse = <T,>(e: MessageEvent): T | null => {
+    try {
+      return JSON.parse(e.data) as T;
+    } catch {
+      return null;
+    }
+  };
+
+  source.addEventListener("catchup", (e) => {
+    const d = parse<{ replay: ReplayState; frame: ReplayFrame | null }>(
+      e as MessageEvent,
+    );
+    if (d) handlers.onCatchup?.(d.replay, d.frame);
+  });
+  source.addEventListener("frame", (e) => {
+    const d = parse<ReplayFrame>(e as MessageEvent);
+    if (d) handlers.onFrame?.(d);
+  });
+  source.addEventListener("control", (e) => {
+    const d = parse<{ action: string; replay: ReplayState }>(e as MessageEvent);
+    if (d) handlers.onControl?.(d.action, d.replay);
+  });
+  source.addEventListener("end", () => handlers.onEnd?.());
+  for (const why of ["restarted", "stopped", "expired"] as const) {
+    source.addEventListener(why, () => {
+      handlers.onClosed?.(why);
+      source.close();
+    });
+  }
+  source.onerror = (e) => handlers.onError?.(e);
+
+  return () => source.close();
+}
+
+/* --------------------------------------------------------- forecast */
+
+export interface ForecastCompletion {
+  p50_day: number;
+  p50_date: string;
+  p80_day: number;
+  p80_date: string;
+  p90_day: number;
+  p90_date: string;
+  mean_day: number;
+  mean_date: string;
+  earliest_day: number;
+  earliest_date: string;
+  latest_day: number;
+  latest_date: string;
+}
+
+export interface ForecastDeadline {
+  deadline_day: number | null;
+  deadline_date: string | null;
+  /** A real probability, under a stated and uncalibrated model. */
+  probability_of_meeting_deadline: number;
+  iterations_meeting_deadline: number;
+  band: string;
+  /** "Band labels are cut points on a continuum" — always render with it. */
+  band_note: string;
+}
+
+export interface HistogramBin {
+  from_day: number;
+  to_day: number;
+  from_date: string;
+  to_date: string;
+  count: number;
+  share: number;
+  cumulative_share: number;
+}
+
+export interface ForecastHistogram {
+  bins: HistogramBin[];
+  bin_count: number;
+  bin_width_days: number;
+  method: string;
+}
+
+export interface TaskForecast {
+  task_key: string;
+  task_name: string;
+  /** Fraction of iterations in which this task lay on the critical path. */
+  criticality_index: number;
+  iterations_on_critical_path: number;
+  mean_duration_days: number;
+  /** True when the spread came from the domain prior, not an estimate. */
+  assumed: boolean;
+  criticality_means: string;
+  duration: {
+    optimistic_days: number;
+    likely_days: number;
+    pessimistic_days: number;
+    relative_spread: number;
+    /** `three_point_estimate` | `spread_prior` | `measured_actual` */
+    spread_provenance: string;
+    assumed: boolean;
+  };
+}
+
+export interface ForecastBlock {
+  kind: string;
+  available: boolean;
+  is_probability: boolean;
+  is_calibrated: boolean;
+  disclaimer: string;
+  what_would_calibrate_it: string;
+  not_the_structural_estimate: string;
+  iterations: number;
+  seed: number;
+  distribution: string;
+  completion: ForecastCompletion;
+  deadline: ForecastDeadline;
+  histogram: ForecastHistogram;
+  tasks: TaskForecast[];
+  assumptions: AssumptionsBlock;
+  unavailable_reason?: string;
+  fall_back_to?: string;
+}
+
+export interface ForecastResponse {
+  project_id: string;
+  project_name: string;
+  version_id: string;
+  version_no: number;
+  project_start: string;
+  today_day: number;
+  deadline_date: string | null;
+  engine_version: string;
+  input_hash: string;
+  tier_reached: number;
+  schedulable: boolean;
+  /**
+   * `monte_carlo_probability` or `structural_estimate`. The UI must say which
+   * of the two it is showing — they are different numbers on different scales
+   * and reading a band from one against a number from the other is a category
+   * error the payload names explicitly.
+   */
+  answer_kind: "monte_carlo_probability" | "structural_estimate";
+  answer_kind_note: string;
+  forecast: ForecastBlock;
+  structural_risk: {
+    score_kind: string;
+    is_probability: false;
+    disclaimer: string;
+    band_counts: Record<string, number>;
+    top: { task_key: string; task_name: string; score: number; band: string }[];
+    assumptions: AssumptionsBlock;
+  };
+  deterministic: {
+    projected_end_day: number;
+    projected_end_date: string;
+    planned_end_day: number;
+    slip_days: number;
+    feasibility: Feasibility;
+    note: string;
+  };
+}
+
+export const getForecast = (
+  id: string,
+  body?: { iterations?: number; seed?: number; version_id?: string },
+) => post<ForecastResponse>(`/api/projects/${id}/forecast`, body ?? {});
+
+export const getForecastAssumptions = (id: string) =>
+  call<AssumptionsBlock>(`/api/projects/${id}/forecast/assumptions`);
+
+/* ----------------------------------------------------- requirements */
+
+export interface RequirementSummary {
+  key: string;
+  version_no: number;
+  text: string;
+  consumed_by: string[];
+  consumed_by_count: number;
+  must_redo_count: number;
+  must_recheck_count: number;
+  completed_tasks_at_risk: string[];
+  completed_days_at_risk: number;
+  blast_radius_effort_days: number;
+  owners_affected: string[];
+  history: { revisions?: number; [k: string]: unknown };
+  history_note: string;
+}
+
+export interface RequirementsList {
+  project_id: string;
+  project_name: string;
+  version_id: string;
+  version_no: number;
+  content_hash: string;
+  requirements: RequirementSummary[];
+  count: number;
+  note: string;
+}
+
+export interface AffectedTaskReason {
+  /** `seed` | `consuming` | `downstream` */
+  via: string;
+  path: string[];
+  hops: number;
+  consumed_from?: string;
+  follows?: string;
+  final_edge_consumes?: boolean;
+  /** A sentence saying why this task is in this list. Render it. */
+  sentence: string;
+}
+
+export interface AffectedTask {
+  key: string;
+  name: string;
+  status: string;
+  effort_days: number;
+  owners: { key: string; label: string }[];
+  reason: AffectedTaskReason;
+  /** must_redo only. */
+  completed_and_lost?: boolean;
+  wasted_days?: number;
+  redo_days?: number;
+}
+
+export interface WastedEffortRow {
+  key: string;
+  name: string;
+  status: string;
+  counts_as_wasted: boolean;
+  effort_days: number;
+  wasted_days: number;
+  redo_days: number;
+  /** The arithmetic, worked out. Put it on the row. */
+  arithmetic: string;
+}
+
+export interface WastedEffort {
+  rows: WastedEffortRow[];
+  completed_task_count: number;
+  /** Days of finished work invalidated. This is the headline number. */
+  wasted_days: number;
+  redo_cost_days: number;
+  additional_effort_days: number;
+  in_flight_days: number;
+  not_yet_started_days: number;
+  blast_radius_effort_days: number;
+  arithmetic: string;
+}
+
+/**
+ * Note `rework_shows_as_calendar_slip` and `caveat`.
+ *
+ * `delta_days` is usually 0 and that is NOT the change being free: the
+ * scheduler is status-blind, so completed work already occupies its full
+ * duration and re-opening it cannot lengthen the critical path (D-157).
+ * Lead the screen with `wasted_effort.wasted_days`, and never show
+ * `delta_days` without `caveat` when `rework_shows_as_calendar_slip` is false.
+ */
+export interface ScheduleImpact {
+  projected_end_day_before: number;
+  projected_end_day_after: number;
+  delta_days: number;
+  direction: string;
+  projected_end_date_before: string;
+  projected_end_date_after: string;
+  deadline_day: number | null;
+  deadline_date: string | null;
+  deadline_survives: boolean;
+  margin_days_before: number | null;
+  margin_days_after: number | null;
+  verdict_before: string;
+  verdict_after: string;
+  verdict_changed: boolean;
+  critical_path_changed: boolean;
+  newly_critical: string[];
+  tasks_moved_count: number;
+  statement: string;
+  is_probability: false;
+  rework_shows_as_calendar_slip: boolean;
+  caveat: string;
+}
+
+/** One affected task as it appears under an owner: enough to render a row. */
+export interface OwnedTask {
+  key: string;
+  name: string;
+  status: string;
+  effort_days: number;
+  completed_and_lost: boolean;
+}
+
+export interface OwnerImpact {
+  resource_key: string;
+  resource_name: string;
+  label: string;
+  kind: string;
+  must_redo: OwnedTask[];
+  must_recheck: OwnedTask[];
+  completed_work_lost_days: number;
+  redo_days: number;
+  blast_radius_effort_days: number;
+  /** A sentence naming what this person specifically loses. */
+  what_they_lose: string;
+}
+
+export interface ReplanBlock {
+  scenario_id: string;
+  kept: boolean;
+  status: string;
+  applied: false;
+  mutations: MutationIn[];
+  inverse_mutations: MutationIn[];
+  validation: Record<string, unknown>;
+  /** Which of the seventeen kinds this replan is expressed in. */
+  expressed_in: string;
+  inspect: string;
+  diff: string;
+  apply: string;
+  discard: string;
+  kept_note: string;
+}
+
+export interface TextDiffSegment {
+  kind?: string;
+  text?: string;
+  [k: string]: unknown;
+}
+
+export interface ImpactReport {
+  project_id: string;
+  project_name: string;
+  version_id: string;
+  version_no: number;
+  engine_version: string;
+  input_hash: string;
+  requirement_key: string;
+  current_text: string;
+  proposed_text: string;
+  from_version: number;
+  to_version: number;
+  text_changed: boolean;
+  text_diff: {
+    identical: boolean;
+    before: string;
+    after: string;
+    removed_words: string[];
+    added_words: string[];
+    segments: TextDiffSegment[];
+    similarity: number;
+    /** Says no cost is derived from the text. Render it beside the diff. */
+    note: string;
+  };
+  directly_consumed_by: string[];
+  seeds_used: string[];
+  scoped: boolean;
+  scoped_out: string[];
+  statuses_restored_by_scoping: string[];
+  blast_radius: {
+    must_redo_count: number;
+    must_recheck_count: number;
+    tasks_in_project: number;
+    share_of_project: number;
+    owners_affected: number;
+  };
+  must_redo: AffectedTask[];
+  must_recheck: AffectedTask[];
+  wasted_effort: WastedEffort;
+  schedule_impact: ScheduleImpact;
+  who_needs_to_know: {
+    by_resource: OwnerImpact[];
+    resource_count: number;
+    unassigned: { must_redo: OwnedTask[]; must_recheck: OwnedTask[]; note: string };
+  };
+  findings: {
+    created: Finding[];
+    cleared: { kind: string; root_cause: string; task_ids: string[] }[];
+    created_count: number;
+    cleared_count: number;
+    unchanged_count: number;
+    before_count: number;
+    after_count: number;
+  };
+  replan: ReplanBlock;
+  analysis_run_id: string;
+  summary: string;
+  base_version_hash_before: string;
+  base_version_hash_after: string;
+  /** Proof on screen that asking cost nothing. */
+  base_unchanged: boolean;
+  applied: false;
+  statement: string;
+  /** True when the requirement is consumed by nothing. Not an error. */
+  no_impact: boolean;
+  assumptions: AssumptionsBlock;
+}
+
+/** One proposed wording. `invalidates` is what makes a comparison real. */
+export interface WordingOption {
+  text: string;
+  label?: string;
+  invalidates?: string[];
+}
+
+export interface ComparedOption {
+  index: number;
+  label: string;
+  text: string;
+  /** The full impact report for this wording. */
+  impact: ImpactReport;
+  cost: Record<string, unknown>;
+  /** Which consumers this wording spares. Empty means it spares none. */
+  invalidates: string[];
+  scoped: boolean;
+  statement: string;
+}
+
+export interface RequirementComparison {
+  project_id: string;
+  requirement_key: string;
+  base: Record<string, unknown>;
+  options: ComparedOption[];
+  /**
+   * `null` when the options are graph-identical — two plain wordings always
+   * cost the same, because the blast radius comes from the dependency graph
+   * and the graph does not change when the sentence does (D-158). Show the
+   * tie and its explanation rather than picking one.
+   */
+  cheapest_option_index: number | null;
+  tie: boolean;
+  tied_option_indexes: number[];
+  identical_cost: boolean;
+  ranking: unknown[];
+  /**
+   * `differences.statement` is the sentence to render — it is where the
+   * explanation of a tie lives. The options carry their own `statement` for
+   * the single-wording case.
+   */
+  differences: { statement: string; varies: unknown; pairwise: unknown[] };
+  applied: false;
+  base_version_hash_before: string;
+  base_version_hash_after: string;
+  assumptions: AssumptionsBlock;
+}
+
+export interface RequirementRevision {
+  version_no: number;
+  text: string;
+  changed_by: string;
+  /** Not `changed_at`. Null on a backfilled row, which claims no timestamp. */
+  recorded_at: string | null;
+  changed_by_user_id: string | null;
+  attributed: boolean;
+  note: string;
+  /** True when this wording was reconstructed at the first apply, not recorded. */
+  backfilled: boolean;
+  provenance_note: string;
+  /** The consumption set as it was *then*, not as it is now. */
+  consumed_by: string[];
+  workflow_version_id: string | null;
+  scenario_id: string | null;
+  impact_summary: Record<string, unknown> | null;
+}
+
+export interface RequirementHistoryResponse {
+  project_id: string;
+  requirement_key: string;
+  current: Record<string, unknown>;
+  revisions: RequirementRevision[];
+  revision_count: number;
+  changes_recorded: number;
+  note: string;
+}
+
+export interface RequirementDiffResponse {
+  requirement_key: string;
+  from_version: number;
+  to_version: number;
+  text_diff: ImpactReport["text_diff"];
+  consumed_by_then: string[];
+  consumed_by_now: string[];
+  consumption_drifted: boolean;
+  note: string;
+  [k: string]: unknown;
+}
+
+export const listRequirements = (id: string) =>
+  call<RequirementsList>(`/api/projects/${id}/requirements`);
+
+export const changeRequirement = (
+  id: string,
+  key: string,
+  body: { new_text: string; version_id?: string; invalidates?: string[] },
+) =>
+  post<ImpactReport>(
+    `/api/projects/${id}/requirements/${encodeURIComponent(key)}/change`,
+    body,
+  );
+
+export const compareRequirement = (
+  id: string,
+  key: string,
+  body: { options: (string | WordingOption)[]; version_id?: string },
+) =>
+  post<RequirementComparison>(
+    `/api/projects/${id}/requirements/${encodeURIComponent(key)}/compare`,
+    body,
+  );
+
+/**
+ * The one route here that writes. It seals a new workflow version and records
+ * a requirement revision; the parent version survives with its content hash
+ * intact, which is what `parent_version.unchanged` is for.
+ */
+export interface RequirementApplyResult {
+  project_id: string;
+  requirement_key: string;
+  from_version: number;
+  to_version: number;
+  previous_text: string;
+  new_text: string;
+  new_version: {
+    id: string;
+    version_no: number;
+    parent_version_id: string | null;
+    content_hash: string;
+  };
+  parent_version: {
+    id: string;
+    version_no: number;
+    content_hash: string;
+    unchanged: boolean;
+  };
+  revision: RequirementRevision;
+  scenario_id: string | null;
+  impact: Record<string, unknown>;
+  applied: true;
+  attributed_to: string | null;
+  attribution_note: string;
+  note: string;
+}
+
+export const applyRequirementChange = (
+  id: string,
+  key: string,
+  body: { new_text: string; version_id?: string; invalidates?: string[] },
+) =>
+  post<RequirementApplyResult>(
+    `/api/projects/${id}/requirements/${encodeURIComponent(key)}/apply`,
+    body,
+  );
+
+export const requirementHistory = (id: string, key: string) =>
+  call<RequirementHistoryResponse>(
+    `/api/projects/${id}/requirements/${encodeURIComponent(key)}/history`,
+  );
+
+export const requirementDiff = (
+  id: string,
+  key: string,
+  fromVersion?: number,
+  toVersion?: number,
+) => {
+  const q = new URLSearchParams();
+  if (fromVersion != null) q.set("from_version", String(fromVersion));
+  if (toVersion != null) q.set("to_version", String(toVersion));
+  const suffix = q.toString() ? `?${q}` : "";
+  return call<RequirementDiffResponse>(
+    `/api/projects/${id}/requirements/${encodeURIComponent(key)}/diff${suffix}`,
+  );
+};
+
+/* ----------------------------------------------------------- import */
+
+export interface ImportSample {
+  name: string;
+  title: string;
+  description: string;
+  source: string;
+  filename: string;
+  bytes: number;
+  lines: number;
+  sha256: string;
+  /** What this fixture is built to exercise. */
+  demonstrates: string[];
+  href: string;
+  csv_href: string;
+}
+
+/** How one column of one row was read. Every inference is visible here. */
+export interface RowInterpretation {
+  value: unknown;
+  raw: string;
+  source: string;
+  how: string;
+  /** True when the value was defaulted or derived, not read. */
+  assumed: boolean;
+}
+
+export interface PreviewRow {
+  row: number;
+  line: number;
+  task_key: string;
+  name: string;
+  notes: string[];
+  interpretation: Record<string, RowInterpretation>;
+}
+
+export interface RejectedRow {
+  row: number;
+  line: number;
+  raw: [string, string][];
+  reason: string;
+}
+
+export interface DroppedDependency {
+  row: number;
+  line: number;
+  column: string;
+  raw: string;
+  task_key: string;
+  reason: string;
+}
+
+export interface ImportCycle {
+  path: string[];
+  length: number;
+  message: string;
+  from_rows: number[];
+  evidence: { row: number; column: string; raw: string; because: string }[];
+}
+
+export interface ImportCounts {
+  tasks: number;
+  dependencies: number;
+  resources: number;
+  assignments: number;
+  rows_read: number;
+  rows_rejected: number;
+  dependencies_dropped: number;
+}
+
+export interface ImportPreview {
+  source: string;
+  csv_sha256: string;
+  can_commit: boolean;
+  blocking: string[];
+  counts: ImportCounts;
+  would_create: {
+    project: { start_date: string; deadline: string | null; deadline_day: number | null };
+    tasks: { key: string; name: string; description: string; effort: number; status: string }[];
+    dependencies: { from_task: string; to_task: string; dep_type: string; consumes: boolean; because: string }[];
+    resources: { key: string; name: string; kind: string; capacity: number; task_count: number }[];
+    assignments: { task_key: string; resource_key: string; allocation: number }[];
+  };
+  rows: PreviewRow[];
+  rejected_rows: RejectedRow[];
+  dropped_dependencies: DroppedDependency[];
+  unmapped_columns: { column: string; reason: string }[];
+  cycles: ImportCycle[];
+  assumptions: AssumptionsBlock;
+  row_numbering: string;
+}
+
+export interface ImportCommitResult {
+  project: {
+    project_id: string;
+    version_id: string;
+    version_no: number;
+    content_hash: string;
+    is_draft: boolean;
+    name: string;
+    start_date: string;
+    deadline: string | null;
+    today_day: number;
+    created_by: string | null;
+    owner_email: string | null;
+  };
+  source: string;
+  csv_sha256: string;
+  counts: ImportCounts;
+  rejected_rows: RejectedRow[];
+  dropped_dependencies: DroppedDependency[];
+  unmapped_columns: { column: string; reason: string }[];
+  assumptions: AssumptionsBlock;
+  next: string;
+}
+
+/** Shared by preview and commit. `commit` re-sends it, so preview is stateless. */
+export interface ImportBody {
+  source: "jira" | "csv";
+  csv_text?: string;
+  sample?: string;
+  mapping?: Record<string, unknown>;
+  delimiter?: string;
+  story_point_days?: number;
+  hours_per_day?: number;
+  estimate_unit?: "seconds" | "hours" | "days";
+  default_effort_days?: number;
+  start_date?: string | null;
+  deadline?: string | null;
+}
+
+export const listImportSamples = () =>
+  call<{ samples: ImportSample[]; note: string }>("/api/import/samples");
+
+export const getImportSample = (name: string) =>
+  call<ImportSample & { suggested: ImportBody }>(
+    `/api/import/samples/${encodeURIComponent(name)}`,
+  );
+
+export const importPreview = (body: ImportBody) =>
+  post<ImportPreview>("/api/import/preview", body);
+
+export const importCommit = (
+  body: ImportBody & { name: string; description?: string; goal?: string; domain_id?: string },
+) => post<ImportCommitResult>("/api/import/commit", body);

@@ -13,6 +13,14 @@ Three schedule runs are not a distribution and this module never calls them
 one. The `monte_carlo` block below is the seam where a real P(deadline) would
 land, and it is deliberately empty: it reports `available: false` and what it
 would need, rather than a number nobody can defend.
+
+Phase 11 fills that seam - in `core/engine/montecarlo.py`, behind
+`POST /api/projects/{project_id}/forecast`, and **not here**. Nothing in this
+module changed except the addition of a pointer to it. Everything above still
+holds: this payload is still three deterministic runs, it still reports
+`is_probability: false`, and the sampled forecast is a separate, differently
+labelled number that is itself a probability under a stated model rather than
+a calibrated one. Neither replaces the other.
 """
 from __future__ import annotations
 
@@ -66,6 +74,25 @@ class ThreePoint:
                 "why_not_faked": (
                     "An invented percentage is worse than no percentage: it "
                     "looks like evidence and is not."
+                ),
+                # Phase 11. The seam is now filled - somewhere else. Nothing
+                # above this line changed: `available: false` says that *this*
+                # payload is still three deterministic runs, and it is.
+                "available_in_this_payload": False,
+                "now_computable_separately": (
+                    "The same three-point estimates can now be sampled: "
+                    "POST /api/projects/{project_id}/forecast runs a seeded "
+                    "Monte Carlo over them and returns P50/P80/P90, a "
+                    "probability of meeting the deadline, and a criticality "
+                    "index per task. That result IS a probability - under a "
+                    "stated model, and an uncalibrated one: durations are "
+                    "sampled independently from Beta-PERT curves fitted to "
+                    "the estimates, resource contention is not simulated, and "
+                    "no forecast has yet been compared against an outcome. "
+                    "This block stays unavailable because the range above is "
+                    "still three deterministic runs and still implies no "
+                    "likelihood. The two are different numbers and neither "
+                    "replaces the other."
                 ),
             },
         }

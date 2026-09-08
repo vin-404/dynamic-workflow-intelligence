@@ -16,6 +16,7 @@ from backend.app.models.analysis import (
     Scenario,
 )
 from backend.app.models.identity import Domain, Project, ProjectMember, User
+from backend.app.models.requirement_history import RequirementRevision
 from backend.app.models.version import (
     Assignment,
     Calendar,
@@ -44,6 +45,7 @@ __all__ = [
     "Constraint",
     "Calendar",
     "Event",
+    "RequirementRevision",
     # change & analysis
     "Scenario",
     "Mutation",

@@ -86,6 +86,63 @@ cd ..
 crash on startup. The defaults in the code already point at SQLite. Leave `.env`
 alone unless you deliberately want Postgres.
 
+### 4. Create `frontend/.env.local` — required since auth landed
+
+The frontend now sits behind a sign-in gate (`src/proxy.ts`). Without this file
+every page redirects to `/login` and every API call returns `401`.
+
+Create `frontend/.env.local` with exactly these four lines:
+
+```
+API_REWRITE_URL=http://localhost:8001
+NEXTAUTH_URL=http://localhost:3000
+AUTH_SECRET=replace-me-with-a-random-string
+PUBLIC_DEMO_VIEWER=1
+```
+
+What each does:
+
+- `API_REWRITE_URL` — where the Next.js **server** reaches the backend. Port
+  8001, matching Terminal 1 below.
+- `NEXTAUTH_URL` — the origin Auth.js builds callback URLs from.
+- `AUTH_SECRET` — signs the session cookie. Any long random string locally;
+  generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+- `PUBLIC_DEMO_VIEWER=1` — **this is the line that lets you in.** It makes a
+  visitor with no session the public read-only guest rather than bouncing them
+  to `/login`. Locally you get read *and* write access, because the read-only
+  half is enforced by the backend, and the backend enforces nothing unless
+  `PROXY_SHARED_SECRET` is set — which it is not, locally.
+
+**You do not need Google credentials for frontend work, and nobody needs to
+share a client secret.** Every screen can be built without ever signing in. If
+you specifically want to exercise the real Google flow, ask for your Gmail
+address to be added as a test user and for the two `AUTH_GOOGLE_*` values.
+
+Windows: write it with `-Encoding ascii`. PowerShell's `utf8` prepends a
+byte-order mark that makes the first key unreadable.
+
+```powershell
+Set-Content -Path frontend\.env.local -Encoding ascii -Value @(
+  'API_REWRITE_URL=http://localhost:8001',
+  'NEXTAUTH_URL=http://localhost:3000',
+  'AUTH_SECRET=replace-me-with-a-random-string',
+  'PUBLIC_DEMO_VIEWER=1'
+)
+```
+
+`frontend/.env.local` is gitignored. It is per-machine and must never be
+committed.
+
+**If you still land on `/login`:** the file is in the wrong place (it belongs in
+`frontend/`, not the repo root), or `PUBLIC_DEMO_VIEWER` is not exactly `1`, or
+the frontend was already running when you created it — Next reads env files at
+startup, so stop and restart it.
+
+**If the page loads but every panel errors:** `API_REWRITE_URL` is wrong, or the
+backend is not running on 8001. The Next server, not your browser, is what
+calls the backend, so a browser devtools Network tab will show a same-origin
+request succeeding while the server-side hop fails.
+
 ---
 
 ## Running it
@@ -171,6 +228,12 @@ pytest backend/tests -v
 
 ## Note for whoever updates this later
 
-After the `refactor/workflow-intelligence-v2` branch merges, the run commands
-will change (the engine moves into `backend/app/core/`, and the port and entry
-point may change). Update this file in the same commit as the merge.
+The `refactor/workflow-intelligence-v2` merge has happened — the engine now
+lives in `backend/app/core/`, and the run commands below are current.
+
+The one thing that drifts fastest is the environment. `frontend/.env.local` is
+required for local work, and the deployed frontend needs more than that
+(`AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `PROXY_SHARED_SECRET`, and a
+`NEXTAUTH_URL` matching the deployment origin). `.env.example` is the reference
+for every variable and says what each one does; if you add one, document it
+there in the same commit.

@@ -18,23 +18,16 @@ import {
   Analysis,
   ApiError,
   Domain,
-  Person,
   Project,
   Workflow,
   analyze,
   getWorkflow,
   listDomains,
   listProjects,
-  setCurrentUser,
 } from "@/lib/api";
 import DependencyGraph from "@/components/DependencyGraph";
 import ErrorBoundary from "@/components/ErrorBoundary";
-import WhoAreYou, {
-  IdentityBadge,
-  loadIdentity,
-  saveIdentity,
-  verifyIdentity,
-} from "@/components/WhoAreYou";
+import { IdentityBadge, useIdentity } from "@/components/Identity";
 import AskPanel from "@/components/AskPanel";
 import Explainer from "@/components/Explainer";
 import FindingsPanel from "@/components/FindingsPanel";
@@ -43,6 +36,10 @@ import RiskPanel from "@/components/RiskPanel";
 import VersionHistory from "@/components/VersionHistory";
 import WhatIfPanel from "@/components/WhatIfPanel";
 import WorkflowBuilder from "@/components/WorkflowBuilder";
+import ForecastPanel from "@/components/ForecastPanel";
+import ImportPanel from "@/components/ImportPanel";
+import LiveFeed from "@/components/LiveFeed";
+import RequirementChange from "@/components/RequirementChange";
 import { MemberList, ProjectCreate } from "@/components/SetupPanel";
 import {
   Badge,
@@ -53,25 +50,28 @@ import {
   ErrorNote,
   Section,
   Spinner,
-  Stat,
   days,
 } from "@/components/ui";
 
 type Stage =
   | "build"
+  | "live"
   | "analyze"
   | "risk"
+  | "requirements"
   | "whatif"
   | "optimize"
   | "history";
 
 const STAGES: { id: Stage; label: string; needsWorkflow: boolean }[] = [
   { id: "build", label: "1 · Build", needsWorkflow: false },
-  { id: "analyze", label: "2 · Bottlenecks", needsWorkflow: true },
-  { id: "risk", label: "3 · Predicted risk", needsWorkflow: true },
-  { id: "whatif", label: "4 · What if", needsWorkflow: true },
-  { id: "optimize", label: "5 · Better workflows", needsWorkflow: true },
-  { id: "history", label: "6 · History", needsWorkflow: false },
+  { id: "live", label: "2 · Live", needsWorkflow: true },
+  { id: "analyze", label: "3 · Bottlenecks", needsWorkflow: true },
+  { id: "risk", label: "4 · Risk & forecast", needsWorkflow: true },
+  { id: "requirements", label: "5 · Requirements", needsWorkflow: true },
+  { id: "whatif", label: "6 · What if", needsWorkflow: true },
+  { id: "optimize", label: "7 · Better workflows", needsWorkflow: true },
+  { id: "history", label: "8 · History", needsWorkflow: false },
 ];
 
 export default function Home() {
@@ -83,11 +83,13 @@ export default function Home() {
   const [stage, setStage] = useState<Stage>("build");
   const [viewVersion, setViewVersion] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState<ApiError | string | null>(null);
   const [busy, setBusy] = useState(false);
-  // Who you are. No password, no session - a name this browser remembers.
-  const [person, setPerson] = useState<Person | null>(null);
-  const [askingWho, setAskingWho] = useState(false);
+  // Who you are: the Google session, read once on mount. Not a choice made
+  // here any more, and not something this client can influence - `proxy.ts`
+  // derives the identity it sends upstream from the session cookie.
+  const { person, failed: identityFailed } = useIdentity();
   // The hash is only ours to write once the initial restore has finished -
   // otherwise the sync effect fires first with no project and wipes the hash
   // we were about to read.
@@ -124,28 +126,6 @@ export default function Home() {
     },
     [],
   );
-
-  // A remembered identity is checked before it is used: after an admin
-  // reset it no longer exists, and a browser that keeps sending a dangling id
-  // would attribute everything to a user who is gone.
-  useEffect(() => {
-    const remembered = loadIdentity();
-    if (!remembered) {
-      setAskingWho(true);
-      return;
-    }
-    setCurrentUser(remembered.id);
-    verifyIdentity(remembered).then((confirmed) => {
-      if (confirmed) {
-        setPerson(confirmed);
-        setCurrentUser(confirmed.id);
-      } else {
-        saveIdentity(null);
-        setCurrentUser(null);
-        setAskingWho(true);
-      }
-    });
-  }, []);
 
   useEffect(() => {
     Promise.all([listProjects(), listDomains()])
@@ -238,20 +218,26 @@ export default function Home() {
 
   /* ------------------------------------------------------- who are you */
 
-  if (askingWho || !person) {
+  // The proxy has already redirected anyone without a session to /login, so
+  // this is one round trip to /api/auth/session and not a sign-in screen.
+  if (!person) {
     return (
       <main className="max-w-2xl w-full mx-auto p-6">
         {header}
-        {renderError(() => location.reload())}
-        <ErrorBoundary what="The name picker">
-          <WhoAreYou
-            onPicked={(picked) => {
-              setPerson(picked);
-              setCurrentUser(picked.id);
-              setAskingWho(false);
-            }}
-          />
-        </ErrorBoundary>
+        {identityFailed ? (
+          <ErrorNote
+            onRetry={() => location.reload()}
+            hint={
+              "Your session did not carry an account id, so every change you " +
+              "made would be refused. Sign out and back in to rebuild it."
+            }
+          >
+            You are signed in, but this session is not linked to an account on
+            this instance.
+          </ErrorNote>
+        ) : (
+          <Spinner label="Checking your session" />
+        )}
       </main>
     );
   }
@@ -261,15 +247,7 @@ export default function Home() {
       <main className="max-w-4xl w-full mx-auto p-6">
         <div className="flex items-start justify-between gap-4">
           {header}
-          <IdentityBadge
-            person={person}
-            onSwitch={() => {
-              saveIdentity(null);
-              setCurrentUser(null);
-              setPerson(null);
-              setAskingWho(true);
-            }}
-          />
+          <IdentityBadge person={person} />
         </div>
 
         {renderError(() => location.reload())}
@@ -283,13 +261,28 @@ export default function Home() {
             }}
             onCancel={() => setCreating(false)}
           />
+        ) : importing ? (
+          <ImportPanel
+            onImported={async (projectId) => {
+              setImporting(false);
+              const fresh = await listProjects();
+              setProjects(fresh);
+              const created = fresh.find((p) => p.id === projectId);
+              if (created) await open(created);
+            }}
+          />
         ) : (
           <Card>
             <CardTitle
               right={
-                <Button variant="primary" onClick={() => setCreating(true)}>
-                  New workflow
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button onClick={() => setImporting(true)}>
+                    Import from Jira
+                  </Button>
+                  <Button variant="primary" onClick={() => setCreating(true)}>
+                    New workflow
+                  </Button>
+                </div>
               }
             >
               Open a workflow
@@ -374,15 +367,7 @@ export default function Home() {
               </Badge>
             )}
             <span className="flex-1" />
-            <IdentityBadge
-              person={person}
-              onSwitch={() => {
-                saveIdentity(null);
-                setCurrentUser(null);
-                setPerson(null);
-                setAskingWho(true);
-              }}
-            />
+            <IdentityBadge person={person} />
           </div>
           {project.goal && (
             <p className="text-sm text-dim mt-0.5">{project.goal}</p>
@@ -448,6 +433,21 @@ export default function Home() {
           </Section>
         )}
 
+        {workflow && stage === "live" && (
+          <Section
+            title="Watch it happen"
+            subtitle="The event log replayed in accelerated time. Findings appear and clear on their own, at the simulated day they would have. Nothing here writes to your workflow."
+          >
+            <ErrorBoundary what="The live replay" resetKey={stage}>
+              <LiveFeed
+                projectId={project.id}
+                workflow={workflow}
+                analysis={analysis}
+              />
+            </ErrorBoundary>
+          </Section>
+        )}
+
         {stage === "analyze" && (
           <Section
             title="Where it is stuck now"
@@ -479,23 +479,44 @@ export default function Home() {
               </EmptyState>
             )}
             {analysis && (
-              <div className="space-y-4">
-                <ErrorBoundary what="The summary" resetKey={stage}>
-                  <Headline analysis={analysis} />
-                </ErrorBoundary>
-                <ErrorBoundary what="The findings panel" resetKey={stage}>
-                  <FindingsPanel analysis={analysis} />
-                </ErrorBoundary>
-                <ErrorBoundary what="The plain-language summary" resetKey={stage}>
-                  <Explainer projectId={project.id} />
-                </ErrorBoundary>
-                {/* The graph is the most likely thing here to throw: it is the
-                    only panel with a third-party layout engine under it. Its
-                    own boundary means a layout bug costs the graph and not the
-                    findings above it. */}
-                <ErrorBoundary what="The dependency graph" resetKey={stage}>
-                  <DependencyGraph analysis={analysis} />
-                </ErrorBoundary>
+              /*
+               * One primary surface, not a stack of equals.
+               *
+               * The dependency map goes first and full width because it is the
+               * only thing on screen that answers "when" and "who" at once,
+               * and the findings list reads as the evidence underneath it. The
+               * numbers and the narration move into a narrow rail beside them:
+               * they are what you glance at, not what you work in. Both of the
+               * things in the main column - a dense finding list and a
+               * time-axis chart - genuinely need the width, which is why the
+               * rail is the thing that gets narrow and why this is two columns
+               * rather than three equal ones.
+               *
+               * It collapses to one column under `lg`, main column first, so a
+               * narrow window degrades to reading order rather than to a
+               * squeezed chart.
+               */
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+                <div className="flex min-w-0 flex-1 flex-col gap-5">
+                  {/* The graph is the most likely thing here to throw: it is
+                      the only panel with a third-party layout engine under it.
+                      Its own boundary means a layout bug costs the graph and
+                      not the findings below it. */}
+                  <ErrorBoundary what="The dependency graph" resetKey={stage}>
+                    <DependencyGraph analysis={analysis} />
+                  </ErrorBoundary>
+                  <ErrorBoundary what="The findings panel" resetKey={stage}>
+                    <FindingsPanel analysis={analysis} />
+                  </ErrorBoundary>
+                </div>
+                <aside className="flex w-full shrink-0 flex-col gap-5 lg:w-72 lg:border-l lg:border-line lg:pl-5">
+                  <ErrorBoundary what="The summary" resetKey={stage}>
+                    <Headline analysis={analysis} />
+                  </ErrorBoundary>
+                  <ErrorBoundary what="The plain-language summary" resetKey={stage}>
+                    <Explainer projectId={project.id} />
+                  </ErrorBoundary>
+                </aside>
               </div>
             )}
           </Section>
@@ -504,12 +525,12 @@ export default function Home() {
         {stage === "risk" && (
           <Section
             title="Where it is likely to get stuck"
-            subtitle="A structural estimate, not a probability — with every factor, weight and reason on show."
+            subtitle="Two different numbers, and the stage says which is which: a structural estimate that ranks exposure and is not a probability, and — when there is anything to sample — a seeded forecast that is one, under a stated and uncalibrated model."
           >
             {busy && !analysis && <Spinner label="Scoring…" />}
             {!busy && !analysis && (
               <EmptyState
-                title="Nothing scored yet"
+                title="The structural score is not computed yet"
                 action={
                   <Button
                     variant="primary"
@@ -520,7 +541,8 @@ export default function Home() {
                 }
               >
                 Risk is computed from the same evaluation as the findings, so
-                it arrives with them.
+                it arrives with them. The forecast below samples the stored
+                workflow directly and does not wait for it.
               </EmptyState>
             )}
             {analysis && (
@@ -541,6 +563,31 @@ export default function Home() {
               />
               </ErrorBoundary>
             )}
+            <ErrorBoundary what="The forecast" resetKey={stage}>
+              <ForecastPanel projectId={project.id} />
+            </ErrorBoundary>
+          </Section>
+        )}
+
+        {workflow && stage === "requirements" && (
+          <Section
+            title="When a requirement changes"
+            subtitle="What a new wording would invalidate, what it would cost, and who needs to know — computed before anything is applied."
+          >
+            <ErrorBoundary what="The requirement panel" resetKey={stage}>
+              <RequirementChange
+                projectId={project.id}
+                workflow={workflow}
+                // Applying a requirement change seals a new version, so every
+                // other stage is now looking at the old one. Re-read it here
+                // rather than leaving the panel to warn about staleness it
+                // cannot fix.
+                onApplied={() => {
+                  setAnalysis(null);
+                  void load(project.id, null);
+                }}
+              />
+            </ErrorBoundary>
           </Section>
         )}
 
@@ -602,47 +649,90 @@ export default function Home() {
   );
 }
 
+/**
+ * The four numbers that answer "where does this land", as one dense line.
+ *
+ * This was four equal-weight tiles in a `grid-cols-4`, which is the layout the
+ * visual pass exists to remove: a box around each number says all four matter
+ * the same amount, and they do not. The projected finish is the answer and the
+ * slip is why anyone cares, so those two carry the size and the colour; the
+ * planned finish and the deadline verdict are context and read as context.
+ * Hierarchy by typography, separators by hairline, no boxes.
+ *
+ * "Projected finish" stays as literal visible text - `e2e/journey.mjs` matches
+ * it, and it is the label a reader scans for.
+ */
 function Headline({ analysis }: { analysis: Analysis }) {
   const f = analysis.feasibility;
+  const slipped = analysis.slip_days > 0;
+  const verdict =
+    f.verdict === "no_deadline_set"
+      ? "none set"
+      : f.verdict === "feasible"
+        ? "feasible"
+        : f.verdict.replace(/_/g, " ");
+
   return (
-    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-      <Stat
-        label="Planned finish"
-        value={`day ${Math.round(analysis.planned_end)}`}
-        sub={analysis.planned_end_date}
-      />
-      <Stat
-        label="Projected finish"
-        value={`day ${Math.round(analysis.projected_end)}`}
-        sub={analysis.projected_end_date}
-        tone={analysis.slip_days > 0 ? "red" : undefined}
-      />
-      <Stat
-        label="Slip"
-        value={days(analysis.slip_days, true)}
-        sub={analysis.slip_days > 0 ? "later than planned" : "on plan"}
-        tone={analysis.slip_days > 0 ? "red" : "green"}
-      />
-      <Stat
-        label="Deadline"
-        value={
-          f.verdict === "no_deadline_set"
-            ? "none set"
-            : f.verdict === "feasible"
-              ? "feasible"
-              : f.verdict.replace(/_/g, " ")
-        }
-        sub={
-          f.margin_days !== null ? `${days(f.margin_days, true)} margin` : undefined
-        }
-        tone={
-          f.verdict === "feasible"
-            ? "green"
-            : f.verdict === "no_deadline_set"
-              ? undefined
-              : "red"
-        }
-      />
+    <div>
+      <div className="text-[11px] tracking-wide text-muted-foreground uppercase">
+        Projected finish
+      </div>
+      <div className="flex items-baseline gap-2">
+        <span
+          className={`text-2xl font-semibold ${
+            slipped ? "text-severity-high" : "text-foreground"
+          }`}
+        >
+          day {Math.round(analysis.projected_end)}
+        </span>
+        <span
+          className={`text-sm font-medium ${
+            slipped ? "text-severity-high" : "text-severity-low"
+          }`}
+        >
+          {days(analysis.slip_days, true)}
+        </span>
+      </div>
+      <div className="text-[11px] text-muted-foreground">
+        {analysis.projected_end_date}
+        {slipped ? " · later than planned" : " · on plan"}
+      </div>
+
+      <dl className="mt-3 flex flex-col gap-1 border-t border-line pt-2 text-[13px]">
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-muted-foreground">planned</dt>
+          <dd className="text-right">
+            <span className="font-medium">
+              day {Math.round(analysis.planned_end)}
+            </span>{" "}
+            <span className="text-[11px] text-muted-foreground">
+              {analysis.planned_end_date}
+            </span>
+          </dd>
+        </div>
+        <div className="flex items-baseline justify-between gap-3">
+          <dt className="text-muted-foreground">deadline</dt>
+          <dd className="text-right">
+            <span
+              className={`font-medium ${
+                f.verdict === "feasible"
+                  ? "text-severity-low"
+                  : f.verdict === "no_deadline_set"
+                    ? "text-foreground"
+                    : "text-severity-high"
+              }`}
+            >
+              {verdict}
+            </span>
+            {f.margin_days !== null && (
+              <span className="text-[11px] text-muted-foreground">
+                {" "}
+                {days(f.margin_days, true)} margin
+              </span>
+            )}
+          </dd>
+        </div>
+      </dl>
     </div>
   );
 }

@@ -1,34 +1,173 @@
 "use client";
 
 /**
- * The workflow, drawn.
+ * The workflow, drawn as time x resource lanes.
  *
- * Refactored from the prototype's version: the node colouring keyed on a
- * hardcoded department palette, which was the domain leak in the frontend.
- * Colour now means *slack* - the thing that is actually true of every
- * workflow in every domain - and the resource is shown as text, taken from
- * the data.
+ * The brief for this panel is "time on the x-axis, resources as lanes, accent
+ * for zero-slack, one marker line for today", and the data supports all four:
+ * every analysis task carries `es`/`ef` (earliest start and finish, in days
+ * from the project start), `lf` (latest finish, so `lf - ef` is the float),
+ * `slack`, `critical`, and the assignee labels that name its lane.
  *
- * This is a view of the graph the builder edits, not a separate feature.
+ * What this replaces: a dagre-laid-out node graph, which answered "what
+ * depends on what" and nothing else. Nothing in it said *when* a task sits or
+ * *who* is doubly booked, which are the two questions a workflow owner
+ * actually has. Laid out on a time axis, contention is visible without a
+ * finding having to name it: two bars overlapping in one lane is one person
+ * in two places.
+ *
+ * What is kept from the node graph: React Flow, as the canvas. It renders the
+ * dependency edges, the pan and zoom, and the day grid, and it is the only
+ * part that was worth keeping. The layout engine (dagre) is gone; positions
+ * are now arithmetic on `es` and the lane index.
+ *
+ * The scale is derived from the container, not fixed. A chart whose x-axis is
+ * time has to show all of the time by default, and this panel is not
+ * full-bleed - it sits in a main column with an inspector rail beside it, so
+ * a fixed pixels-per-day clipped the projected end off the right edge at
+ * common widths. Pixels per day is now `usable width / horizon`, re-derived
+ * on resize, and the tick interval follows it so labels never collide.
+ * Zooming is therefore opt-in rather than the price of reading the chart.
+ *
+ * Colour rules, deliberately narrow:
+ *   - the accent is the zero-slack chain - bars and the edges between them -
+ *     and nothing else;
+ *   - `blocked` is the one severity state that appears, because it is the one
+ *     task state that is a problem rather than a stage;
+ *   - slack is drawn, not coloured: the faint tail after a bar is its float,
+ *     so a task with room looks like a task with room;
+ *   - every colour is a token (`var(--accent)`, `var(--line)`), never a hex.
+ *     The previous version baked dark-mode hexes into JS, which is why the
+ *     graph used to draw near-black edges on a white page in light mode.
+ *
+ * Two stages, one chart
+ * ---------------------
+ * Phase 11 gave this panel a second consumer: the live replay. Rather than
+ * fork it - two charts that drift apart by one commit is the worst of the
+ * options - it takes an optional `live` overlay and folds it into the
+ * analysis it already draws, producing a *view* of the same shape. Every line
+ * of layout, packing, scaling and edge-drawing below is therefore shared, and
+ * the only thing the replay changes is what the engine reported on that
+ * simulated day: each task's status, which tasks are on the zero-slack chain,
+ * where the marker line sits, and which bars just had a finding land on them.
+ *
+ * What the overlay deliberately does *not* move is the geometry. A replay
+ * frame carries statuses and a critical path; it does not re-issue `es`,
+ * `ef`, `lf` or `slack` per task. So bar positions and float strips remain
+ * the stored plan's schedule, and the legend says so in live mode rather than
+ * letting a reader assume the bars slid.
  */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Background,
+  BackgroundVariant,
   Controls,
   Edge,
   Handle,
   MarkerType,
-  MiniMap,
   Node,
   NodeProps,
   Position,
   ReactFlow,
+  useViewport,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import Dagre from "@dagrejs/dagre";
+import { cn } from "@/lib/utils";
 import { Analysis } from "@/lib/api";
-import { Badge, Card, CardTitle } from "./ui";
+import { severityText } from "@/lib/severity";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
+/**
+ * What a replay frame contributes to the chart.
+ *
+ * Exactly the fields a `ReplayFrame` already carries, named for what they do
+ * here rather than for where they came from - so nothing in this file has to
+ * import the replay types, and the analyze stage stays the default path.
+ */
+export type LiveOverlay = {
+  /** `frame.statuses`: task key -> status on the simulated day. */
+  statuses: Record<string, string>;
+  /** `frame.critical_path`: the zero-slack chain as of that day. */
+  criticalPath: string[];
+  /** The simulated clock, which replaces `today` as the marker line. */
+  simDay: number;
+  /** `projection.projected_end_day`, so the horizon still covers the answer. */
+  projectedEndDay: number;
+  /**
+   * Tasks a finding just appeared on or changed severity on, and at what
+   * severity. Drawn as a ring around the bar, so "something happened" is
+   * visible on the hero rather than only in a list below it.
+   */
+  flashTasks?: Record<string, string>;
+};
+
+/* --------------------------------------------------------------- geometry */
+
+/** Pixels per day before the container has been measured. */
+const DAY_W_DEFAULT = 28;
+/** Never squeeze a day below this, even on a very long project. */
+const DAY_W_MIN = 3;
+/** Never stretch one past this, or a four-task project looks like a poster. */
+const DAY_W_MAX = 44;
+/** Room kept at the right edge for the last arrowhead and its key label. */
+const RIGHT_PAD = 46;
+/** One resource lane. */
+const LANE_H = 32;
+/** The bar inside a lane. */
+const BAR_H = 20;
+/** The date ruler across the top of the canvas. */
+const AXIS_H = 28;
+/** The lane-label gutter, which stays put while the timeline pans. */
+const GUTTER = 168;
+
+/**
+ * Tick intervals worth printing on a date axis, in days.
+ *
+ * The interval is the first of these that gives a label enough room, so the
+ * ruler thins out as the project lengthens instead of overprinting itself.
+ */
+const NICE_TICKS = [1, 2, 5, 7, 10, 14, 20, 30, 60, 90, 180, 365];
+
+/** Width a "16 Sep d15" label needs before the next tick starts. */
+const TICK_LABEL_W = 78;
+
+function tickEvery(dayWidth: number): number {
+  return NICE_TICKS.find((n) => n * dayWidth >= TICK_LABEL_W) ?? 365;
+}
+
+/**
+ * The element own width, tracked.
+ *
+ * `ResizeObserver` rather than a window listener: the panel width changes
+ * when the inspector rail beside it appears or the column reflows, which no
+ * window resize event announces.
+ */
+function useMeasuredWidth<T extends HTMLElement>(): [
+  React.RefObject<T | null>,
+  number,
+] {
+  const ref = useRef<T | null>(null);
+  const [width, setWidth] = useState(0);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setWidth(el.clientWidth);
+    const observer = new ResizeObserver((entries) => {
+      const next = entries[0]?.contentRect.width ?? 0;
+      setWidth((prev) => (Math.abs(prev - next) < 1 ? prev : next));
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  return [ref, width];
+}
 
 const STATUS_LABEL: Record<string, string> = {
   done: "Done",
@@ -38,9 +177,69 @@ const STATUS_LABEL: Record<string, string> = {
   not_started: "Not started",
 };
 
-type TaskNodeData = {
+const MONTHS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+];
+
+/**
+ * The calendar date of day `n`.
+ *
+ * The engine's day numbers are calendar days from `project_start` - a task at
+ * `es` 0 starts on the project start date and one at `es` 14 starts fourteen
+ * days later - so this is the arithmetic the API already did for
+ * `start_date`, done in UTC so a timezone cannot shift a label by a day.
+ */
+function dateOfDay(projectStart: string, day: number): string {
+  const base = Date.parse(`${projectStart}T00:00:00Z`);
+  if (Number.isNaN(base)) return `d${day}`;
+  const d = new Date(base + day * 86_400_000);
+  return `${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
+}
+
+/* ------------------------------------------------------------------ lanes */
+
+type Lane = {
+  /** The assignee label as the analysis reports it, or the unassigned bucket. */
+  key: string;
   label: string;
+  capacity: number | null;
+  taskCount: number;
+  bookedDays: number;
+  criticalCount: number;
+  firstDay: number;
+  /**
+   * How many sub-rows this lane needs.
+   *
+   * More than one means the schedule has this resource doing two things in
+   * the same window. Bars stacked in a lane are how that is shown: drawing
+   * them at the same height made them overlap into illegible mush on the
+   * pilot-line fixture, which is exactly the workflow where contention is
+   * the point.
+   */
+  rows: number;
+  /** This lane's first sub-row, counted in rows from the top of the canvas. */
+  rowOffset: number;
+};
+
+/** Leading space keeps it out of the way of any real resource label. */
+const UNASSIGNED = " unassigned";
+
+/* ------------------------------------------------------------------- node */
+
+type BarData = {
   taskKey: string;
+  name: string;
   assignees: string;
   status: string;
   critical: boolean;
@@ -48,154 +247,565 @@ type TaskNodeData = {
   duration: number;
   startDate: string;
   endDate: string;
+  es: number;
+  lf: number;
   risk: number | null;
+  /** Width of the solid bar; the node is wider than this by the float. */
+  durationWidth: number;
+  slackWidth: number;
+  /**
+   * Live only: the severity of a finding that landed on this task on this
+   * simulated day, or null. Its colour comes from `severity.ts` like every
+   * other severity in the product - there is no mapping local to this file.
+   */
+  flashSeverity: string | null;
 };
 
-function TaskNode({ data }: NodeProps) {
-  const d = data as TaskNodeData;
-  const background =
-    d.status === "done"
-      ? "rgba(63, 185, 80, 0.08)"
-      : d.critical
-        ? "rgba(248, 81, 73, 0.10)"
-        : d.slack <= 2
-          ? "rgba(227, 179, 65, 0.08)"
-          : "rgba(28, 35, 44, 0.6)";
-  const border = d.critical
-    ? "#f85149"
-    : d.slack <= 2
-      ? "#e3b341"
-      : "#2a323d";
+/** The bar's border and text: state, in three colours and no more. */
+function barTone(d: BarData): string {
+  if (d.status === "blocked") return "border-severity-high text-foreground";
+  if (d.critical) return "border-accent text-foreground";
+  if (d.status === "done") return "border-line text-dim";
+  return "border-line text-foreground";
+}
+
+/** The tint inside the bar, painted over the opaque shell. */
+function barFill(d: BarData): string {
+  if (d.status === "blocked") return "bg-severity-high/15";
+  if (d.critical) return "bg-accent/15";
+  if (d.status === "done") return "bg-muted";
+  return "bg-panel2";
+}
+
+function TaskBar({ data }: NodeProps) {
+  const d = data as BarData;
+  const wide = d.durationWidth >= 74;
+  const narrow = d.durationWidth < 36;
 
   return (
     <div
-      style={{ background, borderColor: border }}
-      className="border rounded-md px-2.5 py-2 w-[200px] text-[11px]"
+      className="relative"
+      style={{ width: d.durationWidth + d.slackWidth, height: BAR_H }}
     >
-      <Handle type="target" position={Position.Left} />
-      <div className="flex items-center justify-between gap-1 mb-0.5">
-        <span className="font-mono text-dim">{d.taskKey}</span>
-        {d.critical && <span className="text-red text-[10px]">critical</span>}
-        {!d.critical && (
-          <span className="text-dim text-[10px]">{d.slack}d slack</span>
-        )}
-      </div>
-      <div className="text-foreground leading-tight mb-1">{d.label}</div>
-      <div className="text-dim text-[10px] truncate">
-        {d.assignees || "unassigned"}
-      </div>
-      <div className="flex items-center justify-between text-[10px] text-dim mt-0.5">
-        <span>{STATUS_LABEL[d.status] ?? d.status}</span>
-        <span>{d.duration}d</span>
-      </div>
-      <Handle type="source" position={Position.Right} />
+      {/* Pulled a few pixels clear of the bar so the arrowhead lands beside
+          the bar rather than on top of its first character. */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        isConnectable={false}
+        className="!size-1 !min-h-0 !min-w-0 !border-0 !bg-transparent"
+        style={{ left: -3 }}
+      />
+      {/* The float: the room this bar could still slide into, drawn on the
+          bar's baseline. Opaque and attached to the bar, so it reads as this
+          task's slack rather than as a dependency edge crossing the lane. */}
+      {d.slackWidth > 0 && (
+        <div
+          className="absolute bottom-0 h-[5px] rounded-r-[2px] bg-line"
+          style={{ left: d.durationWidth, width: d.slackWidth }}
+        />
+      )}
+      {/* A finding just landed here. A ring, not a pulse: it has to be
+          obvious that something happened without becoming an animation
+          festival, and a static outline is correct under
+          `prefers-reduced-motion` by construction rather than by opting out
+          of something. `border-current` takes its colour from the severity
+          class, so the three states stay the three states. */}
+      {d.flashSeverity && (
+        <div
+          className={cn(
+            "pointer-events-none absolute -inset-[3px] rounded-[6px] border-2 border-current",
+            severityText(d.flashSeverity),
+          )}
+          style={{ width: d.durationWidth + 6 }}
+        />
+      )}
+      <Tooltip>
+        <TooltipTrigger asChild>
+          {/* Two layers on purpose: an opaque `bg-panel` shell so dependency
+              edges pass *behind* a bar instead of showing through a tinted
+              one and appearing to strike out its label, and a tinted inner
+              fill for the state. */}
+          <div
+            className={cn(
+              "absolute inset-y-0 left-0 overflow-hidden rounded-[3px] border bg-panel",
+              barTone(d),
+            )}
+            style={{ width: d.durationWidth }}
+          >
+            <div
+              className={cn(
+                "flex h-full items-center gap-1 px-1",
+                barFill(d),
+              )}
+            >
+              {!narrow && (
+                <span className="shrink-0 font-mono text-[10px] leading-none opacity-80">
+                  {d.taskKey}
+                </span>
+              )}
+              {wide && (
+                <span className="truncate text-[10px] leading-none">
+                  {d.name}
+                </span>
+              )}
+            </div>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="top" className="max-w-xs">
+          <span className="flex flex-col gap-0.5 text-left">
+            <span className="font-mono">
+              {d.taskKey} {d.name}
+            </span>
+            <span className="opacity-80">
+              {d.startDate} to {d.endDate} · {d.duration}d ·{" "}
+              {STATUS_LABEL[d.status] ?? d.status}
+            </span>
+            <span className="opacity-80">
+              {d.critical
+                ? "zero slack, on the critical path"
+                : `${d.slack}d slack · day ${d.es} at the earliest, day ${d.lf} at the latest`}
+            </span>
+            <span className="opacity-80">{d.assignees || "unassigned"}</span>
+            {d.risk !== null && (
+              <span className="opacity-80">risk {d.risk.toFixed(2)}</span>
+            )}
+          </span>
+        </TooltipContent>
+      </Tooltip>
+      {narrow && (
+        <span
+          className="pointer-events-none absolute top-1/2 -translate-y-1/2 whitespace-nowrap font-mono text-[10px] text-dim"
+          style={{ left: d.durationWidth + d.slackWidth + 4 }}
+        >
+          {d.taskKey}
+        </span>
+      )}
+      <Handle
+        type="source"
+        position={Position.Right}
+        isConnectable={false}
+        className="!size-1 !min-h-0 !min-w-0 !border-0 !bg-transparent"
+        style={{ left: d.durationWidth, right: "auto" }}
+      />
     </div>
   );
 }
 
-const nodeTypes = { task: TaskNode };
+const nodeTypes = { bar: TaskBar };
 
-function layout(nodes: Node[], edges: Edge[]) {
-  const g = new Dagre.graphlib.Graph().setDefaultEdgeLabel(() => ({}));
-  g.setGraph({ rankdir: "LR", nodesep: 24, ranksep: 90 });
-  nodes.forEach((n) => g.setNode(n.id, { width: 200, height: 82 }));
-  edges.forEach((e) => g.setEdge(e.source, e.target));
-  Dagre.layout(g);
-  return nodes.map((n) => {
-    const pos = g.node(n.id);
-    return { ...n, position: { x: pos.x - 100, y: pos.y - 41 } };
-  });
+/* --------------------------------------------------------------- overlays */
+
+/**
+ * The gutter, the date ruler and the today marker.
+ *
+ * These track the viewport rather than sit inside it: the lane names have to
+ * stay readable when the timeline is panned sideways, and the ruler has to
+ * stay readable when it is panned vertically. `useViewport` re-renders this
+ * on every pan and zoom, which is exactly the coupling a sticky axis needs.
+ */
+function Chrome({
+  lanes,
+  horizon,
+  todayDay,
+  markerLabel,
+  projectStart,
+  dayWidth,
+  tickDays,
+}: {
+  lanes: Lane[];
+  horizon: number;
+  todayDay: number;
+  /** `today` on the analyze stage, `sim` while a replay is driving it. */
+  markerLabel: string;
+  projectStart: string;
+  dayWidth: number;
+  tickDays: number;
+}) {
+  const { x, y, zoom } = useViewport();
+  const ticks: number[] = [];
+  for (let d = 0; d <= horizon; d += tickDays) ticks.push(d);
+
+  const dayToScreen = (day: number) => x + (GUTTER + day * dayWidth) * zoom;
+
+  return (
+    <div className="pointer-events-none absolute inset-0" style={{ zIndex: 5 }}>
+      {/* The date ruler. */}
+      <div
+        className="absolute inset-x-0 top-0 overflow-hidden border-b border-line bg-panel"
+        style={{ height: AXIS_H }}
+      >
+        {ticks.map((day) => (
+          <span
+            key={day}
+            className="absolute top-1 whitespace-nowrap border-l border-line pt-0.5 pl-1 text-[10px] leading-tight text-dim"
+            style={{ left: dayToScreen(day), height: AXIS_H - 8 }}
+          >
+            {dateOfDay(projectStart, day)}
+            <span className="ml-1 font-mono opacity-70">d{day}</span>
+          </span>
+        ))}
+      </div>
+
+      {/* Today, or the simulated clock. One line, labelled at the foot so it
+          never lands on a bar. In live mode this is the only piece of chrome
+          that moves every frame, which is what makes the chart read as a
+          clock rather than as a picture that happens to be redrawn. */}
+      <div
+        className="absolute border-l border-dashed border-foreground/45"
+        style={{ left: dayToScreen(todayDay), top: AXIS_H, bottom: 0 }}
+      >
+        <span className="absolute bottom-0.5 left-1 whitespace-nowrap font-mono text-[10px] text-foreground/70">
+          {markerLabel} d{Math.round(todayDay * 10) / 10}
+        </span>
+      </div>
+
+      {/* The lane gutter. Opaque, so bars pass behind it, not through it. */}
+      <div
+        className="absolute bottom-0 left-0 overflow-hidden border-r border-line bg-panel"
+        style={{ width: GUTTER, top: AXIS_H }}
+      >
+        {lanes.map((lane) => (
+          <div
+            key={lane.key}
+            className="absolute left-0 flex w-full flex-col justify-center border-b border-line/50 pr-2 pl-3"
+            style={{
+              top: y + lane.rowOffset * LANE_H * zoom,
+              height: lane.rows * LANE_H * zoom,
+            }}
+          >
+            <span className="truncate text-[11px] leading-tight">
+              {lane.label}
+            </span>
+            <span className="truncate font-mono text-[10px] leading-tight text-dim">
+              {lane.taskCount} · {lane.bookedDays}d
+              {lane.capacity !== null && lane.capacity !== 1
+                ? ` · cap ${lane.capacity}`
+                : ""}
+              {lane.criticalCount > 0
+                ? ` · ${lane.criticalCount} zero-slack`
+                : ""}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
-export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
-  const { nodes, edges } = useMemo(() => {
+/* ------------------------------------------------------------------- main */
+
+export default function DependencyGraph({
+  analysis: stored,
+  live,
+}: {
+  analysis: Analysis;
+  /** Omitted on the analyze stage; supplied by `LiveFeed` during a replay. */
+  live?: LiveOverlay;
+}) {
+  const [boxRef, boxWidth] = useMeasuredWidth<HTMLDivElement>();
+
+  /*
+   * One chart, two sources.
+   *
+   * The overlay is folded into an `Analysis`-shaped view here and nowhere
+   * else, so everything below this line is the code the analyze stage has
+   * been running since D-119 - no branch, no second layout path, no chance
+   * of the two drifting. `live` is undefined on the analyze stage and the
+   * memo returns the very object it was given, so that stage does not even
+   * pay for a copy.
+   */
+  const analysis = useMemo<Analysis>(() => {
+    if (!live) return stored;
+    const onChain = new Set(live.criticalPath);
+    return {
+      ...stored,
+      today_day: live.simDay,
+      projected_end: live.projectedEndDay,
+      critical_path: live.criticalPath,
+      tasks: stored.tasks.map((t) => ({
+        ...t,
+        status: live.statuses[t.key] ?? t.status,
+        critical: onChain.has(t.key),
+      })),
+    };
+  }, [stored, live]);
+
+  /* The horizon is whatever has to fit: the latest late finish, the projected
+     end, and today, whichever runs furthest. It does not depend on the scale,
+     because the scale is derived from it.
+
+     The *stored* projected end is in the set as well as the live one, so a
+     replay cannot make the axis shrink underneath a viewer frame by frame. It
+     still grows if a simulated day genuinely pushes the projection past the
+     stored plan - the axis has to show the answer - but it does not breathe. */
+  const horizon = useMemo(
+    () =>
+      Math.max(
+        1,
+        ...analysis.tasks.map((t) => Math.ceil(t.lf)),
+        Math.ceil(stored.projected_end),
+        Math.ceil(analysis.projected_end),
+        Math.ceil(analysis.today_day),
+      ),
+    [analysis, stored.projected_end],
+  );
+
+  /* Pixels per day: the whole project, in the width there is. Clamped at both
+     ends - a very long project stays pannable rather than becoming a hairline,
+     and a very short one does not blow up into a poster. */
+  const dayWidth = useMemo(() => {
+    if (!boxWidth) return DAY_W_DEFAULT;
+    const usable = Math.max(120, boxWidth - GUTTER - RIGHT_PAD);
+    return Math.min(DAY_W_MAX, Math.max(DAY_W_MIN, usable / horizon));
+  }, [boxWidth, horizon]);
+
+  const tickDays = useMemo(() => tickEvery(dayWidth), [dayWidth]);
+
+  const { nodes, edges, lanes, rows } = useMemo(() => {
     const riskByTask = new Map(
       analysis.risk.tasks.map((t) => [t.task_key, t.score]),
     );
-    const rawNodes: Node[] = analysis.tasks.map((task) => ({
-      id: task.key,
-      type: "task",
-      position: { x: 0, y: 0 },
-      data: {
-        label: task.name,
-        taskKey: task.key,
-        assignees: task.assignees.join(", "),
-        status: task.status,
-        critical: task.critical,
-        slack: Math.round(task.slack),
-        duration: Math.round(task.duration),
-        startDate: task.start_date,
-        endDate: task.end_date,
-        risk: riskByTask.get(task.key) ?? null,
-      } satisfies TaskNodeData,
-    }));
+    const metaByLabel = new Map(analysis.resources.map((r) => [r.label, r]));
 
-    const rawEdges: Edge[] = analysis.edges.map((edge) => ({
-      id: `${edge.source}-${edge.target}`,
-      source: edge.source,
-      target: edge.target,
-      animated: edge.consumes,
-      style: {
-        stroke: edge.consumes ? "#4c9aff" : "#2a323d",
-        strokeWidth: edge.consumes ? 1.6 : 1.2,
-        strokeDasharray: edge.consumes ? undefined : "4 3",
-      },
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: edge.consumes ? "#4c9aff" : "#2a323d",
-      },
-    }));
+    /* Lanes: one per resource that actually has work, ordered so the timeline
+       reads as a cascade - earliest work at the top - with the unassigned
+       bucket last. A resource with nothing on it gets no lane; an empty row
+       is a row that says nothing. */
+    const byLane = new Map<
+      string,
+      { label: string; tasks: Analysis["tasks"] }
+    >();
+    for (const task of analysis.tasks) {
+      const labels = task.assignees.length ? task.assignees : [UNASSIGNED];
+      for (const label of labels) {
+        const bucket = byLane.get(label) ?? { label, tasks: [] };
+        bucket.tasks.push(task);
+        byLane.set(label, bucket);
+      }
+    }
 
-    return { nodes: layout(rawNodes, rawEdges), edges: rawEdges };
-  }, [analysis]);
+    /* Sub-rows, by greedy interval packing on the work window (`es` to `ef`).
+       A task goes in the first sub-row whose last task has already finished,
+       so a lane is one row deep until the schedule genuinely asks a resource
+       for two things at once, and then it is two. */
+    const subRow = new Map<string, number>();
+    const rowsOf = new Map<string, number>();
+    for (const [key, bucket] of byLane) {
+      const ends: number[] = [];
+      for (const task of [...bucket.tasks].sort((x, y) => x.es - y.es)) {
+        let row = ends.findIndex((end) => end <= task.es);
+        if (row === -1) {
+          row = ends.length;
+          ends.push(task.ef);
+        } else {
+          ends[row] = task.ef;
+        }
+        subRow.set(`${key}|${task.key}`, row);
+      }
+      rowsOf.set(key, Math.max(1, ends.length));
+    }
+
+    const laneList: Lane[] = [...byLane.entries()]
+      .map(([key, bucket]) => ({
+        key,
+        label: key === UNASSIGNED ? "unassigned" : bucket.label,
+        capacity: metaByLabel.get(key)?.capacity ?? null,
+        taskCount: bucket.tasks.length,
+        bookedDays:
+          Math.round(bucket.tasks.reduce((n, t) => n + t.duration, 0) * 10) /
+          10,
+        criticalCount: bucket.tasks.filter((t) => t.critical).length,
+        firstDay: Math.min(...bucket.tasks.map((t) => t.es)),
+        rows: rowsOf.get(key) ?? 1,
+        rowOffset: 0,
+      }))
+      .sort((a, b) => {
+        if (a.key === UNASSIGNED) return 1;
+        if (b.key === UNASSIGNED) return -1;
+        return a.firstDay - b.firstDay || a.label.localeCompare(b.label);
+      });
+
+    let cursor = 0;
+    for (const lane of laneList) {
+      lane.rowOffset = cursor;
+      cursor += lane.rows;
+    }
+    const totalRows = cursor;
+    const laneOffset = new Map(laneList.map((l) => [l.key, l.rowOffset]));
+
+    /* One node per (task, lane). A task assigned to two people occupies both
+       lanes, because both people are busy - that is the point of a lane view.
+       Only the first is the anchor the dependency edges attach to, so an edge
+       is drawn once rather than once per assignee. */
+    const anchorOf = new Map<string, string>();
+    const rawNodes: Node[] = [];
+    for (const task of analysis.tasks) {
+      const labels = task.assignees.length ? task.assignees : [UNASSIGNED];
+      const durationWidth = Math.max(6, task.duration * dayWidth);
+      const slackWidth = Math.max(0, task.lf - task.ef) * dayWidth;
+      labels.forEach((label, i) => {
+        const id = i === 0 ? task.key : `${task.key}@${label}`;
+        if (i === 0) anchorOf.set(task.key, id);
+        const row =
+          (laneOffset.get(label) ?? 0) + (subRow.get(`${label}|${task.key}`) ?? 0);
+        rawNodes.push({
+          id,
+          type: "bar",
+          draggable: false,
+          selectable: false,
+          position: {
+            x: GUTTER + task.es * dayWidth,
+            y: AXIS_H + row * LANE_H + (LANE_H - BAR_H) / 2,
+          },
+          width: durationWidth + slackWidth,
+          height: BAR_H,
+          data: {
+            taskKey: task.key,
+            name: task.name,
+            assignees: task.assignees.join(", "),
+            status: task.status,
+            critical: task.critical,
+            slack: Math.round(task.slack),
+            duration: Math.round(task.duration * 10) / 10,
+            startDate: task.start_date,
+            endDate: task.end_date,
+            es: Math.round(task.es),
+            lf: Math.round(task.lf),
+            risk: riskByTask.get(task.key) ?? null,
+            durationWidth,
+            slackWidth,
+            flashSeverity: live?.flashTasks?.[task.key] ?? null,
+          } satisfies BarData,
+        });
+      });
+    }
+
+    const criticalTasks = new Set(
+      analysis.tasks.filter((t) => t.critical).map((t) => t.key),
+    );
+
+    const rawEdges: Edge[] = analysis.edges.map((edge) => {
+      const onCritical =
+        criticalTasks.has(edge.source) && criticalTasks.has(edge.target);
+      const stroke = onCritical ? "var(--accent)" : "var(--line)";
+      return {
+        id: `${edge.source}-${edge.target}`,
+        source: anchorOf.get(edge.source) ?? edge.source,
+        target: anchorOf.get(edge.target) ?? edge.target,
+        type: "smoothstep",
+        pathOptions: { borderRadius: 6 },
+        selectable: false,
+        style: {
+          stroke,
+          strokeWidth: onCritical ? 1.6 : 1,
+          strokeDasharray: edge.consumes ? undefined : "3 3",
+        },
+        markerEnd: {
+          type: MarkerType.ArrowClosed,
+          width: 10,
+          height: 10,
+          color: stroke,
+        },
+      };
+    });
+
+    return {
+      nodes: rawNodes,
+      edges: rawEdges,
+      lanes: laneList,
+      rows: totalRows,
+    };
+  }, [analysis, dayWidth, live]);
 
   if (analysis.tasks.length === 0) {
     return (
-      <Card>
-        <CardTitle>The workflow</CardTitle>
-        <p className="text-dim text-sm">
+      <section>
+        <h2 className="text-sm font-medium">The workflow</h2>
+        <p className="mt-1 text-sm text-dim">
           Nothing to draw yet. Add tasks and dependencies in the builder.
         </p>
-      </Card>
+      </section>
     );
   }
 
+  /* Tall enough for every lane up to a point, then it pans. The trailing
+     room is where the today label and the zoom controls sit. */
+  const height = Math.min(560, Math.max(200, AXIS_H + rows * LANE_H + 36));
+
   return (
-    <Card className="p-0 overflow-hidden">
-      <div className="px-4 pt-4 pb-2">
-        <CardTitle
-          right={
-            <div className="flex items-center gap-2">
-              <Badge tone="red">critical</Badge>
-              <Badge tone="amber">≤2d slack</Badge>
-              <Badge tone="accent">artifact edge</Badge>
-              <Badge tone="neutral">ordering only</Badge>
-            </div>
-          }
-        >
-          The workflow
-        </CardTitle>
+    <section>
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1">
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+          <h2 className="text-sm font-medium">The workflow</h2>
+          <p className="font-mono text-[11px] text-dim">
+            {analysis.tasks.length} tasks · {lanes.length} lanes · day 0-
+            {horizon} · {live ? "sim" : "today"} d
+            {Math.round(analysis.today_day)} · projected end d
+            {Math.round(analysis.projected_end)}
+          </p>
+        </div>
+        <p className="text-[11px] text-dim">
+          <span className="text-accent">accent</span> is the zero-slack chain ·
+          the faint tail after a bar is its slack · solid edges carry an
+          artifact, dashed edges are ordering only
+        </p>
       </div>
-      <div style={{ height: 520 }}>
+      {live && (
+        // Said on the chart, not in a footnote: a replay frame carries
+        // statuses and a critical path, not a re-issued schedule. So the
+        // bars sit where the stored plan put them and only their state
+        // moves. A reader who assumed the bars were sliding would be reading
+        // a claim this data cannot make.
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          Bar positions and slack are the stored plan&rsquo;s schedule. What
+          the replay moves is each task&rsquo;s status, the zero-slack chain,
+          and the marker line — those are what a frame actually reports.
+        </p>
+      )}
+
+      <div
+        ref={boxRef}
+        className="overflow-hidden rounded-lg border border-line bg-panel"
+        style={{ height }}
+      >
         <ReactFlow
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
-          fitView
+          defaultViewport={{ x: 0, y: 0, zoom: 1 }}
+          nodesDraggable={false}
+          nodesConnectable={false}
+          elementsSelectable={false}
           proOptions={{ hideAttribution: true }}
-          minZoom={0.2}
+          minZoom={0.25}
+          maxZoom={1.5}
         >
-          <Background gap={20} color="#1c232c" />
-          <Controls showInteractive={false} />
-          <MiniMap
-            pannable
-            zoomable
-            nodeColor={(n) =>
-              (n.data as TaskNodeData).critical ? "#f85149" : "#2a323d"
-            }
+          {/* A gridline per tick and one per lane row. Both read the tokens,
+              so both follow light and dark. */}
+          <Background
+            variant={BackgroundVariant.Lines}
+            gap={[dayWidth * tickDays, LANE_H]}
+            offset={[GUTTER, AXIS_H]}
+            lineWidth={1}
+            color="var(--line)"
+          />
+          <Chrome
+            lanes={lanes}
+            horizon={horizon}
+            todayDay={analysis.today_day}
+            markerLabel={live ? "sim" : "today"}
+            projectStart={analysis.project_start}
+            dayWidth={dayWidth}
+            tickDays={tickDays}
+          />
+          <Controls
+            showInteractive={false}
+            position="bottom-right"
+            fitViewOptions={{ padding: 0.05, maxZoom: 1 }}
           />
         </ReactFlow>
       </div>
-    </Card>
+    </section>
   );
 }

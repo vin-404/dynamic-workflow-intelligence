@@ -1,18 +1,30 @@
 """
-Identity without authentication.
+The people on this instance.
 
-The product is multi-user; it is not multi-tenant and it has no accounts. A
-user picks a name on first visit, the browser remembers it, and that identity
-is what appears on `created_by` and in the member list.
+A `User` row is an identity, and this router is how one comes into existence.
+It stays **open on purpose**: `POST /api/users` is what the Next.js sign-in
+callback calls to mint or find the backend identity for a Google account, so
+gating it behind an identity would be a chicken-and-egg deadlock - nobody
+could ever get their first one.
 
-There is deliberately **no login, no password, no session, no token**. Anyone
-with the URL can pick any identity, including an existing one. That is the
-correct amount of security for a shared demo of a planning tool, and building
-less than a real auth system while pretending otherwise would be worse than
-building none.
+There is deliberately **no login, no password, no session and no token issued
+by this service**. Authentication, where a deployment has any, lives in the
+Next.js server in front of it (`api/identity.py` describes the handshake), and
+a test asserts that `/api/login`, `/api/auth` and friends do not exist here.
 
-Nothing here enforces permission. `ProjectMember.role` is advisory and the UI
-uses it to phrase things, not to forbid them.
+Whether `ProjectMember.role` is advisory or enforced depends on exactly one
+setting, `PROXY_SHARED_SECRET`:
+
+* **unset** - the open, single-player configuration. Anyone with the URL can
+  send any `X-User-Id`, including an existing one, so a role is advisory and
+  the UI uses it to phrase things, not to forbid them. Enforcing a permission
+  against an identity anyone can claim would be theatre.
+* **set** - the identity is vouched for by the proxy, and `api/deps.py`
+  enforces the role: viewer reads and evaluates, editor changes the workflow,
+  owner also changes the member list.
+
+This router is not private either way: on a shared instance everyone can see
+everyone.
 """
 from __future__ import annotations
 
@@ -25,6 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.app.db import get_db
 from backend.app.models import Project, ProjectMember, User
+from backend.app.settings import settings
 
 router = APIRouter(prefix="/api/users", tags=["users"])
 
@@ -130,8 +143,9 @@ async def get_user(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
 async def user_projects(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     """What this person is on, and in what capacity.
 
-    Advisory. Every project on this instance is visible to everyone; this only
-    answers "which are mine".
+    Every project on this instance is visible to everyone in either
+    configuration; this only answers "which are mine", and `roles_enforced`
+    says whether the capacity is advisory or binding.
     """
     rows = (
         await db.execute(
@@ -141,13 +155,20 @@ async def user_projects(user_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
             .order_by(Project.created_at)
         )
     ).all()
+    enforced = bool(settings.PROXY_SHARED_SECRET)
     return {
         "user_id": str(user_id),
         "projects": [
             {"id": str(p.id), "name": p.name, "role": role} for p, role in rows
         ],
+        "roles_enforced": enforced,
         "note": (
-            "Roles are advisory. This instance has no authentication and "
-            "enforces no permissions."
+            "Roles are enforced on this instance: a viewer may read and "
+            "evaluate, an editor may change the workflow, an owner may also "
+            "change the member list. Every project is still visible to "
+            "everyone."
+            if enforced else
+            "Roles are advisory. This instance is not authenticating "
+            "requests, so it enforces no permissions."
         ),
     }

@@ -1985,3 +1985,836 @@ and nothing more, and there is a test that fails if a login endpoint appears.
 6. **The browser walkthroughs need a running stack and a real Chromium.**
    They are in the repo now and scripted, but they are not something a
    reviewer gets for free from `pytest`.
+
+---
+
+# PHASE 10, WAVE 1 — Google sign-in, enforced roles, and the design system
+
+Three agents in parallel, partitioned by file ownership, then integrated by
+hand. Tagged `wave-1-auth`.
+
+## 1 · WHAT CHANGED
+
+**Authentication moved to Next.js.** The browser only ever talks to the Next
+origin. `src/proxy.ts` verifies the Google session, strips any identity headers
+the client sent, and injects `X-User-Id` plus `X-Proxy-Secret` into the
+upstream request. FastAPI honours `X-User-Id` only when the secret matches.
+There is still no login route in FastAPI, and the test asserting so is green.
+
+**Roles are enforced.** `ProjectMember.role` stopped being advisory: a viewer
+reads and evaluates, an editor authors and applies, an owner also changes
+members. One router-level dependency refuses by default, so a new write route
+inherits the guard instead of needing to remember it.
+
+**Both of those are behind one switch.** With `PROXY_SHARED_SECRET` unset,
+everything behaves exactly as it did before this phase. That is what let 780
+existing tests stay green without editing one of them.
+
+**shadcn/ui is installed** with fourteen primitives and a two-vocabulary token
+system: the twelve legacy names the existing panels are written against and the
+shadcn semantic names, wired to one palette, now with light *and* dark values.
+No existing panel component was touched — wave 2 does that.
+
+## 2 · WHAT EACH AGENT PRODUCED
+
+**AUTH-FE** — `auth.ts`, `src/proxy.ts`, `src/app/api/auth/[...nextauth]/route.ts`,
+`src/lib/session.ts`, `src/types/next-auth.d.ts`, `src/app/login/page.tsx`, and
+the removal of the `next.config.ts` rewrite. Auth.js v5, Google provider, JWT
+sessions with no adapter, the backend user upsert on first sign-in, and a
+walkthrough-only Credentials provider.
+
+**AUTH-BE** — `PROXY_SHARED_SECRET` in `settings.py`, the header-pair check in
+`identity.py`, the whole authorization layer in the new `api/deps.py`, one
+guard line on nine routers, and `tests/test_auth.py` (39 tests).
+
+**DESIGN-SYS** — `components.json`, fourteen primitives under
+`src/components/ui/`, `src/lib/utils.ts`, and a rewritten `globals.css`.
+`ui.tsx` was left untouched on purpose (see the deviation below).
+
+**Integration (not delegated)** — `page.tsx`, `layout.tsx`, `src/lib/api.ts`,
+the new `Identity.tsx`, the deletion of `WhoAreYou.tsx`, `e2e/lib.mjs`,
+`e2e/hardening.mjs`, `main.py`'s 403 hint, `conftest.py`'s secret pin,
+`docker-compose.yml`, `frontend/Dockerfile`, `.env.example`, `docs/DEPLOY.md`,
+`docs/DECISIONS.md` (D-73 … D-100) and this file.
+
+## 3 · TESTS
+
+| Check | Before | After |
+|---|---|---|
+| `pytest backend/tests -q` | 780 passed | **819 passed** (+39, none modified) |
+| `demo_check` | ALL BEATS PASSED | **ALL BEATS PASSED** |
+| `npm run e2e` | pass | **ALL CHECKS PASSED** |
+| `npm run e2e:ai` | pass | **ALL CHECKS PASSED** |
+| `npm run e2e:hardening` | pass | **ALL CHECKS PASSED** (rewritten, below) |
+| `npx tsc --noEmit` | clean | clean |
+| `npm run build` | succeeds | succeeds |
+| `npm run lint` | 2 errors, 2 warnings | **1 error, 2 warnings** |
+
+The lint error that went away was `page.tsx:134 set-state-in-effect`, removed
+along with the identity-restoring effect. The remaining three are pre-existing
+and all in files wave 2 owns.
+
+`test_auth.py` covers: the header pair honoured together; `X-User-Id` ignored
+with a missing or wrong secret; the open path asserted rather than assumed;
+viewer/editor/owner across the matrix; the non-member and anonymous cases; and
+two tests that walk **every** route in the application and fail on an unguarded
+write or a stale read-exemption.
+
+## 4 · HOW TO TEST IT
+
+```bash
+# Backend, enforcing (omit the secret for the open path)
+PROXY_SHARED_SECRET=<same value as the frontend> \
+  .venv/Scripts/python.exe -m uvicorn backend.app.main:app --port 8001
+
+# Frontend. frontend/.env.local needs AUTH_GOOGLE_ID, AUTH_GOOGLE_SECRET,
+# AUTH_SECRET, NEXTAUTH_URL and the same PROXY_SHARED_SECRET.
+cd frontend && npm run dev
+```
+
+Open `http://localhost:3000` and you land on `/login`. The walkthroughs need
+`E2E_AUTH_ENABLED=1` on `npm run dev` — Google's consent screen cannot be
+driven headless, and the provider that replaces it cannot exist in a
+production build.
+
+The one command that proves the design, run against the live backend:
+
+```bash
+# The seeded project's own owner id, without the secret. Refused as anonymous.
+curl -X POST localhost:8001/api/projects/00000000-0000-0000-0000-000000000001/tasks \
+  -H "X-User-Id: <the owner's real uuid>" -H "Content-Type: application/json" \
+  -d '{"key":"ZZ1","name":"probe","effort":2}'
+```
+
+## 5 · WHAT WAS VERIFIED, AND HOW
+
+Not reasoned about — run:
+
+* **Impersonation is defeated.** The seeded project's real owner id sent
+  without the secret → 403, `your_role: anonymous`. With a wrong secret → the
+  same. With the correct secret → 201.
+* **Spoofing through the proxy is defeated.** A signed-in client that sent its
+  own `X-User-Id` *and* `X-Proxy-Secret: attacker-guess` was reported by the
+  backend as its *real* session user (`your_role: none`), so the proxy
+  overwrote both headers rather than forwarding either.
+* **The production build is actually protected.** `next start`: `GET /` → 307
+  `/login`, `GET /api/projects` → 401, and `/api/auth/providers` lists Google
+  **only** — the walkthrough provider does not exist in that bundle.
+* **A viewer can still ask a what-if.** Checked because the role matrix looked
+  self-contradictory: creating a scenario needs `editor`, and D-86 claims a
+  viewer may simulate. The UI uses the one-shot `POST /what-if`, which is
+  exempt, so both are true. `journey.mjs` passes as a non-member.
+* **A newcomer's own project works end to end.** Create → they are `owner` →
+  writes succeed → the member row names them. This is also what proves the
+  D-89 identity-header fix, since that row was the thing coming back empty.
+* **The conftest pin holds.** A root `.env` carrying a real
+  `PROXY_SHARED_SECRET` was planted; the suite stayed green; the file was
+  removed.
+
+## 6 · DEVIATIONS FROM THE BRIEF, STATED PLAINLY
+
+1. **`ui.tsx` was not converted to thin re-exports.** The brief asked for that;
+   the agent kept its twenty-one exports *working* by not touching the file.
+   That was a deliberate instruction from the orchestrator — a wave-1 commit
+   that leaves the app looking broken is worse than one that changes nothing
+   visually. The consequence is real: wave 2 inherits the whole migration, and
+   the compatibility layer currently wraps nothing new.
+2. **The proxy file is `src/proxy.ts`, not `middleware.ts`.** Next 16
+   deprecated and renamed the convention. The agent followed the docs over the
+   brief's file list, which is correct.
+3. **`hardening.mjs`'s first section was rewritten, not preserved.** It asserted
+   the name picker's copy — "no password needed", "anyone can pick any name" —
+   which was true and is now false. It now asserts that copy is *absent*, plus
+   a claim the picker could never make: a signed-out `/api/*` call is refused
+   with a 401 in the standard envelope. No analysis copy, number, disclaimer or
+   assumptions block was altered anywhere.
+
+## 7 · RISKS
+
+1. **A real Google sign-in has never happened.** It needs a human at a consent
+   screen. Everything up to the redirect is verified, and the identical
+   callbacks are exercised by the Credentials path — but the Google leg itself
+   is untested. Register the redirect URI as
+   `<NEXTAUTH_URL>/api/auth/callback/google` or it will fail on first contact.
+2. **Light mode has now been looked at, and holds up.** Screenshotted at
+   `colorScheme: light` and `dark` on the workflow list, the builder and the
+   analysis stage: readable in both, no light-on-light failure, no unstyled
+   panel. That was the risk this entry was originally filed for and it is
+   discharged. What is *not* discharged is that the layouts were designed
+   against a dark canvas, so light mode is merely correct rather than
+   considered — wave 2 restyles them and should check both.
+   Relatedly, `DependencyGraph.tsx` hardcodes dark hexes inline
+   (`stroke: "#4c9aff"`, `<Background color="#1c232c" />`), so the graph will
+   show dark-grey edges on a white page until wave 2 replaces them with
+   `var(--accent)` / `var(--line)`.
+3. **`middleware-manifest.json` is empty even on a working build.** AUTH-FE
+   recommended asserting it is non-empty in CI, having found that a misplaced
+   proxy file is silently ignored. That check would be a **false alarm**: the
+   manifest is `{"middleware":{}}` on this build and the production server
+   still redirects and 401s correctly. The trap it warned about is real; the
+   proposed detector is not. Assert the behaviour — `GET /` redirects to
+   `/login` — not the artifact.
+4. **On an enforcing deployment, a newly signed-in user cannot edit the seeded
+   demo projects.** They are not a member, so reads, analysis, risk, optimize
+   and what-if all work while any authoring returns 403. Every one of the six
+   demo stages is a read or an evaluation, so the demo walk is unaffected — but
+   "click Add task on the seeded project" is not something a newcomer can do.
+   Creating their own project makes them owner.
+5. **A viewer can still persist rows.** `optimize(persist_candidates=true)` and
+   `what-if(keep=true)` write `Scenario` rows. Deliberate (D-86, it is what
+   makes a read-only seat useful) but it is an unmetered write available to the
+   least-privileged role, so it is a denial-of-space vector on a public
+   instance.
+6. **`GET /api/analysis/{run_id}` is readable across projects.** Consistent
+   with reads being open (D-85), but it is the route where that decision looks
+   least deliberate rather than inherited.
+7. **`route_template` depends on FastAPI populating `scope["route"]`.** It does
+   on 0.141, and the fallback cannot resolve endpoints through lazy router
+   inclusion — so if a future version stops populating it, classification
+   degrades to concrete URLs and every write is refused. Uncomfortable, but it
+   fails closed.
+8. **The walkthroughs now require `next dev`.** The provider they sign in with
+   is compiled out of a production build by design, so they can never verify a
+   production bundle's app behaviour — only its signed-out behaviour, which is
+   what section 5 checks by hand.
+
+---
+
+# PHASE 10, WAVE 2 — the visual overhaul
+
+Three agents in parallel, partitioned by file ownership, integrated by hand.
+Tagged `wave-2-design`. Decisions D-101 … D-128.
+
+## 1 · WHAT CHANGED
+
+The instruction was to fix a UI that reads as generated, **mostly by
+subtraction**. The result is measurable rather than a matter of taste:
+
+| | Before | After |
+|---|---|---|
+| Findings for the seeded symposium | 11 bordered cards, three levels of border around one sentence, ~4 screens | one ruled list, all 11 findings **and** their arithmetic on one screen |
+| The nine risk factors | behind a per-row accordion, collapsible to nothing | permanently on screen; the score is the smallest number in the section |
+| The headline numbers | four equal-weight tiles in a `grid-cols-4` | one dense typographic line where the projected finish carries the weight |
+| The dependency map | a dagre node graph with dark-mode hexes baked into JS | time on the x-axis, resources as lanes, float drawn, one `today` marker |
+| The diff | stacked lists | one table, real `Before` / `After` / `Delta` columns |
+| `npm run lint` | 2 errors, 2 warnings | **0 problems** |
+
+Everything the brief said to remove is gone: no gradients, no emoji as icons,
+no "AI-powered" or "✨ Smart" badge anywhere, and no uniform card grid. The
+`violet` token is now unused by every component, which closes the half of D-97
+that wave 1 had to leave open.
+
+## 2 · WHAT EACH AGENT PRODUCED
+
+**UI-WORKFLOW** — `DependencyGraph.tsx` rebuilt as a time × resource-lane
+timeline (D-119 … D-123); `WorkflowBuilder.tsx` as a dense table whose cells
+are borderless real inputs (D-124); `SetupPanel.tsx` with the roles copy
+corrected (D-126); `VersionHistory.tsx` as a dense table with the real UTC
+instant (D-127).
+
+**UI-ANALYSIS** — `FindingsPanel.tsx` from cards to rows (D-106);
+`RiskPanel.tsx` with the decomposition permanently open and the bars showing
+contribution against weight (D-108, D-109); `Explainer.tsx`;
+`ErrorBoundary.tsx` restyled with its class and lifecycle untouched (D-114).
+
+**UI-CHANGE** — `DiffView.tsx` as a genuine three-column comparison (D-101);
+`WhatIfPanel.tsx`, `OptimizePanel.tsx` and `AskPanel.tsx`, with `violet`
+retired (D-102) and the pre-existing lint error fixed (D-103).
+
+**Integration (not delegated)** — `page.tsx`: the hero-and-rail layout (D-115)
+and the headline line (D-116). `ui.tsx`: the accent taken off the primary
+button, the spinner and the disclosure triggers (D-117), and `TierBanner` and
+`Assumptions` turned from boxes into rules (D-118). Plus `src/lib/severity.ts`
+as one shared three-state mapping, `VersionOut.created_at` projected so
+`VersionHistory` had a real "when" to show, `e2e/journey.mjs`'s dead locator
+removed, and the dead `.react-flow__minimap` rules deleted from `globals.css`.
+
+## 3 · TESTS — and an honest note on the number
+
+| Check | Result |
+|---|---|
+| `pytest backend/tests -q` | **963 passed** |
+| `demo_check` | **ALL BEATS PASSED** |
+| `npm run e2e` | **ALL CHECKS PASSED** |
+| `npm run e2e:ai` | **ALL CHECKS PASSED** |
+| `npm run e2e:hardening` | **ALL CHECKS PASSED** |
+| `npx tsc --noEmit` | clean |
+| `npm run build` | succeeds |
+| `npm run lint` | **0 problems** (was 4) |
+
+**963 is not all this work's doing.** Wave 1 took the suite from 780 to 819.
+Wave 2 is a visual pass and adds no backend tests. The remainder — including
+`test_requirements.py` and `test_stream.py` — belongs to a *different task
+running concurrently in this same working tree* (see §5). This work's own
+contribution to the count is the 39 tests in `test_auth.py`, which still pass,
+plus one schema field. Quoting 963 as a wave-2 achievement would be borrowing
+someone else's number.
+
+All three walkthroughs were run against a **freshly seeded database and a
+backend in enforcing mode** (`PROXY_SHARED_SECRET` set), which is the
+configuration a deployment uses rather than the permissive one.
+
+## 4 · WHAT WAS VERIFIED BY LOOKING
+
+Every agent was required to screenshot its own panels in **both colour
+schemes** and read the images back, on both seeded projects — the tier-2
+symposium and the tier-0 cold start. That requirement earned its keep: it is
+how the filled-input regression in dark mode was found (`Input`'s own
+`dark:bg-input/30` beating a `bg-transparent`), how the float strip was caught
+reading as a dependency edge, and how three alignment faults in the optimizer
+were found. None of those are visible in a class list.
+
+The orchestrator independently screenshotted the findings, risk, dependency-map
+and history stages in both schemes rather than accepting the reports.
+
+Two facts checked rather than assumed:
+
+* **A viewer can still ask a what-if.** The role matrix looked
+  self-contradictory — creating a scenario needs `editor`, and D-86 claims a
+  viewer may simulate. The UI uses the one-shot `POST /what-if`, which is
+  exempt, so both are true. `journey.mjs` passes as a non-member.
+* **The version timestamp is UTC.** SQLite returns `created_at` with no offset
+  (`2026-09-08T00:36:32.…`). Rendering it in `Asia/Kolkata` and confirming the
+  instant came back unchanged is the difference between a correct provenance
+  panel and one that lies by 5½ hours per reader.
+
+## 5 · A CONCURRENT SESSION WAS EDITING THIS TREE
+
+Recorded because it shaped the wave and would otherwise be invisible in the
+history.
+
+Partway through wave 2, commit **`7f4d342` ("chore: line endings after wave 1")**
+appeared, containing 3,438 changed lines across ten of this wave's in-flight
+component files plus two documents (`docs/PHASE_11_PROMPT.md`,
+`docs/POSITIONING.md`), followed by four new backend routers. It was **another
+Claude Code session** running a different brief in the same directory.
+
+**The orchestrator got this wrong first.** Seeing forbidden backend files and a
+misleading commit message, it concluded its own UI-WORKFLOW agent had gone
+outside its brief and **killed it mid-task**. That was wrong: `PHASE_11_PROMPT.md`
+names a completely different agent roster (FORECAST, INGEST, LIVE, REQUIRE),
+`forecast.py`'s own docstring says "Owned by Agent FORECAST", and the agent's
+last action was `SetupPanel.tsx` — the next file on its assigned list. It was
+resumed and finished normally. The lesson is narrow and worth keeping: *an
+unexplained change in a shared tree is not evidence about your own agent.*
+
+Resolution, by direct negotiation between the two sessions: frontend belongs to
+this task until wave 2 is committed, backend to the other; no more `git add -A`
+from either side; the other session's overlapping wave 3 waits for this commit
+and will build on these panels rather than on `7f4d342`. **Nothing of the other
+session's was deleted or reverted** — its docs and routers are untouched — and
+`7f4d342` is left in place rather than rewritten, because the other session may
+be building on it.
+
+Its `088c21e` was checked rather than trusted: 819 still passed, and it had
+added exactly one entry to `test_auth.py`'s exemption list with a justification
+(an HMAC-signed webhook — a higher bar, not a lower one) instead of weakening
+the guard. Its claim that `requirements/{key}/apply` stays guarded was verified
+against `deps.py`.
+
+That session's agents have also modified `backend/app/core/engine/`
+(`feasibility.py`, `risk.py`, `staleness.py`). This brief declared the engine
+settled and did not touch it; the purity tests still pass.
+
+## 6 · DEVIATIONS FROM THE BRIEF, STATED PLAINLY
+
+1. **One interaction changed.** The nine-factor table can no longer be
+   collapsed (D-108). The brief said the table must not hide behind a single
+   score, and an accordion whose default is closed does exactly that. Every
+   other change in the wave is visual only.
+2. **Two disclaimers were made *more* visible, not less.** "Why the total is
+   not the answer" came out of a disclosure and the per-task risk disclaimer
+   moved above the numbers it governs (D-105). Nothing moved in the other
+   direction; no sentence stating a limit was shortened, softened or hidden.
+3. **One factual copy line was changed, because it had become false.**
+   `SetupPanel`'s "roles are advisory" (D-126), for the same reason as the name
+   picker's copy in wave 1. It now also states that reads stay open, because
+   "roles are enforced" alone over-claims.
+4. **One backend change**, outside the frontend scope: `VersionOut.created_at`.
+   The brief asked for timestamps on the version row and the API did not return
+   one. The alternative was fabricating a "when" client-side in the one panel
+   whose job is provenance.
+5. **`page.tsx` was not fully migrated off the legacy primitives.** Its shell
+   still uses `ui.tsx`'s `Card`, `Section`, `Button`, `Badge`, `EmptyState` and
+   `Spinner`. The brief's `page.tsx` requirements — the hero-and-rail layout and
+   removing the equal-weight tile grid — are done; a wholesale mechanical
+   migration was not asked for and would have been churn for its own sake.
+   Consequence: `ui.tsx` still exports the legacy set, so wave 1's
+   "thin re-exports" item is still open.
+
+## 7 · RISKS
+
+1. **The concurrent session is still running.** Its wave 3 targets six of the
+   same panel files. The agreement is that it builds on these versions, but
+   nothing enforces that, and a `git add -A` from either side would repeat
+   `7f4d342`.
+2. **A real Google sign-in has still never happened.** Unchanged from wave 1
+   and unchanged by anything here: it needs a human at a consent screen.
+3. **Seven shadcn primitives the skill's own rules assume are not installed** —
+   `field`, `empty`, `spinner`, `input-group`, `alert`, `toggle-group`,
+   `native-select`. So forms are hand-built `<label>`s, empty states are
+   headings and paragraphs, and callouts are token markup. Every one of those
+   is a documented rule knowingly not followed because the primitive is absent
+   and adding files to `src/components/ui/` mid-wave would have collided across
+   three agents. `npx shadcn@latest add field empty spinner input-group alert`
+   is the fix, in a quiet tree.
+4. **Severity and band chips override the `Badge` variant's colours via
+   `className`** (D-113), which the shadcn styling rule forbids. Taken
+   deliberately: three severity states with one implementation has a
+   correctness consequence, the styling rule does not. The clean home is a
+   `severity` variant in `badge.tsx`.
+5. **`severity-medium` in light mode (`#8a6300`) is the weakest of the three
+   as a large colour field.** It passes contrast as text; as a 6px bar next to
+   red and grey it reads muddy. A token change, not a panel change.
+6. **The lane view grows taller with contention.** Sub-row packing (D-121) is
+   the honest trade against unreadable overlap, but a workflow with heavy
+   contention across many resources will need vertical panning past the 560px
+   canvas.
+7. **The lane join is by display label, not key.** `AnalysisTaskRow` gives
+   assignee *labels*, so two resources with identical labels would merge into
+   one lane. `resources[].label` is built to be unique, so it holds today; a
+   `resource_keys` field on the task row would make it structural.
+8. **`impact.formula` repeats identically on all eleven findings**
+   (`impact = magnitude x (1 + downstream_affected)`). It is factual and it was
+   visible before, so it was left alone rather than de-duplicated — the "change
+   no factual copy" constraint is explicit and this is the sort of edit that
+   erodes it one defensible step at a time. It is the one piece of genuine
+   noise left in the findings list.
+9. **`@dagrejs/dagre` is now an unused dependency.** Harmless; left in
+   `package.json` rather than churning the lockfile during a live wave.
+10. **The truly-empty findings state is unreachable from either seed.** It was
+    seen only by intercepting the API response, so no walkthrough would catch a
+    regression in it.
+
+---
+
+# PHASE 11, WAVE 2 — CAPABILITY
+
+Tag `wave-2-capability`. Four backend agents in parallel, partitioned strictly
+by file ownership. Frontend untouched by this wave: it was being rewritten
+concurrently by the Phase 10 wave-2 session, and the two sessions agreed a
+split rather than racing on the same tree.
+
+## 1 · WHAT CHANGED
+
+The problem statement asks for a platform that tracks cross-department
+workflows *"and detects bottlenecks, delays and changing requirements in real
+time"*. Three clauses were outstanding. This wave closes them in the backend.
+
+**It is now real time.** A replay engine walks a project's append-only event
+log forward in accelerated simulated time and streams it over Server-Sent
+Events. Findings appear and clear on their own, at the correct *simulated* day
+— not because anything simulates them, but because `Clock` was already an
+argument to the pure engine, so a clock-threshold detector fires on the day it
+would have fired. Every frame is one honest `evaluate()` call over the same
+immutable snapshot. Pausable, resumable, seekable, restartable, many viewers on
+one replay, and it writes nothing at all — no `Event`, no `WorkflowVersion`,
+not even an `AnalysisRun`.
+
+**It now tracks rather than only plans.** A real Jira issue export imports,
+dependencies intact, through a preview-then-commit flow that never touches a
+live workflow. A generic column-mapped CSV path serves everything else. A
+signature-verified GitHub webhook appends to the event log, so the thing the
+replay replays can arrive on its own.
+
+**Requirement change is a first-class capability** instead of one of seventeen
+mutation kinds. `POST .../requirements/{key}/change` returns a full impact
+report and applies nothing: what must be redone versus rechecked and *why* each
+task is in the list it is in, the days of completed work invalidated with the
+arithmetic on the row, who needs to know grouped by owner, the findings created
+and cleared, and a ready-to-apply replan that is a real `Scenario` the existing
+evaluate / diff / apply endpoints accept unchanged.
+
+**And there is a probability now, honestly stated.** A seeded Monte Carlo over
+the three-point estimates tasks already carried returns P50/P80/P90, the
+probability of meeting the deadline, a completion histogram, and every task's
+**criticality index** — the fraction of iterations in which it lies on the
+critical path, which is the rigorous definition of "at risk of becoming a
+bottleneck" and the reason the feature exists.
+
+**Nothing was traded away for that last one.** The platform previously refused
+to state a probability and said so four times in the risk payload. Those four
+statements are byte-identical today. `monte_carlo_run: False`,
+`score_kind: "structural_estimate"`, `is_probability: False` and
+`what_would_make_this_a_probability` all still say exactly what they said, and
+all 50 `test_risk.py` tests plus `test_api.py::test_p0_never_emits_a_probability`
+pass unmodified. The new number arrives in a separate payload that labels
+itself uncalibrated, states that durations are sampled independently and that
+this is optimistic because real delays correlate, and names what would make it
+calibrated. Adding a real probability meant stating new assumptions as plainly
+as the old refusal was stated, not deleting a caveat.
+
+## 2 · WHAT EACH AGENT PRODUCED
+
+**Orchestration (not delegated).** All four agents needed `main.py`,
+`api/deps.py` and `test_auth.py`. Four concurrent edits to a role-guard
+exemption list is how a write route silently becomes viewer-readable, and the
+test that would catch it is the file being raced on. So the route contract was
+declared first, in `088c21e`: four routers stubbed with their real templates
+returning 501, the three shared files wired against them, suite green at 819.
+Agents owned bodies and tests only, and none of the three shared files was
+touched again (D-129).
+
+**LIVE** — `services/replay.py` (new), `routers/stream.py`,
+`tests/test_stream.py` (32 tests). No `incremental.py`: the brief allowed it
+only with a proof of equivalence at every step, full evaluation is ~24 ms
+against a 50 ms step budget, and equivalence across suppression, tiering and
+unavailable-checks could not be proven — so the file does not exist and `core/`
+is untouched by the feature (D-142).
+
+**FORECAST** — `core/engine/montecarlo.py` (new, pure), `routers/forecast.py`,
+additive-only edits to `core/engine/risk.py` (+21, zero deletions) and
+`feasibility.py` (+27, zero deletions), `tests/test_montecarlo.py` (55 tests).
+numpy was **not** added (D-131).
+
+**INGEST** — `app/ingest/` (nine modules plus the sample CSV),
+`routers/ingest.py`, `tests/test_ingest.py` (91 tests), 80 additive lines in
+`seed/fixtures.py`, and one variable in `settings.py`.
+
+**REQUIRE** — `services/requirements.py` (new), `routers/requirements.py`,
+additive-only `core/engine/staleness.py` (+124, zero deletions),
+`models/requirement_history.py` (new) plus two lines in `models/__init__.py`,
+`tests/test_requirements.py` (55 tests).
+
+## 3 · TESTS
+
+| Check | Before | After |
+|---|---|---|
+| `pytest backend/tests -q` | 819 passed | **1054 passed**, 0 failed |
+| `test_stream.py` | — | 32 new |
+| `test_montecarlo.py` | — | 55 new |
+| `test_ingest.py` | — | 91 new |
+| `test_requirements.py` | — | 55 new |
+| `test_risk.py` (unmodified) | 50 passed | 50 passed |
+| `test_core_purity.py` (unmodified) | 44 passed | 44 passed |
+| `test_auth.py` (route walk) | passed | passed |
+
+No existing test was edited by any agent.
+
+`test_stream.py` speaks ASGI directly rather than through `httpx`:
+`ASGITransport` awaits the whole application before returning a response, so it
+cannot stream, and a test that only saw the response after it completed would
+prove nothing about an SSE endpoint. The file carries a ~90-line ASGI client
+that can send a real `http.disconnect`; routing, the role guard, the request-id
+middleware and the error envelope are all the real app, and the lifecycle
+endpoints still go through the ordinary client. It was additionally verified
+against a live uvicorn server.
+
+## 4 · HOW TO TEST IT
+
+```bash
+.venv/Scripts/python.exe -m pytest backend/tests -q          # 1054 passed
+.venv/Scripts/python.exe -m uvicorn backend.app.main:app --port 8001
+```
+
+Import the bundled sample and watch it replay, with no network call:
+
+```bash
+curl -s localhost:8001/api/import/samples
+curl -s localhost:8001/api/import/samples/jira-delivery-platform \
+  | python -c "import json,sys; print(json.dumps(json.load(sys.stdin)['suggested']))" \
+  > /tmp/body.json
+curl -s -X POST localhost:8001/api/import/preview -H 'Content-Type: application/json' \
+  -d @/tmp/body.json
+# then add {"name": "..."} to the body and POST it to /api/import/commit
+
+curl -s -X POST localhost:8001/api/projects/<id>/replay -d '{"speed":60}' \
+  -H 'Content-Type: application/json'
+curl -N localhost:8001/api/projects/<id>/stream         # frames arrive on their own
+curl -s -X POST localhost:8001/api/projects/<id>/forecast -d '{}' \
+  -H 'Content-Type: application/json'
+```
+
+## 5 · WHAT WAS VERIFIED BY THE ORCHESTRATOR, NOT TAKEN ON REPORT
+
+Each agent's headline claim was re-checked independently, because a claim in a
+report is not evidence.
+
+* **The Monte Carlo budget.** Re-timed on a fresh 40-task, 75-dependency
+  workflow: **0.267 s median** over five runs for 5,000 iterations, against a
+  ~2 s budget. Same seed byte-identical, different seed different,
+  P50 ≤ P80 ≤ P90 holding.
+* **"Additive only" on three engine files.** Read as diffs, not asserted:
+  `risk.py` +21/−0, `feasibility.py` +27/−0, `staleness.py` +124/−0. Every
+  existing key, number and disclaimer intact.
+* **"Replay writes nothing" is structural, not merely tested.** Grepped
+  `replay.py` for `.add(`, `.commit()`, `.flush()`, `.delete(` and
+  `write_version`: the only two hits are `days.add(...)` and
+  `self._subs.add(...)`, both Python sets. There is no database write path in
+  the module.
+* **The importer, end to end.** The bundled sample: 17 rows read → 14 tasks,
+  22 dependencies, 5 resources; 3 rejections for three genuinely different
+  reasons (no key, duplicate key, `TBD` story points); one dependency dropped
+  because `DLV-99` lies outside the export; no cycles; 10 findings; and
+  **infeasible by 3 days** on structure alone (end day 23 against deadline 20).
+  The four repeated `Outward issue link (Blocks)` columns are really in the
+  file's header — the case `csv.DictReader` silently collapses.
+* **An apparent contradiction between two agents, chased down.** INGEST
+  reported that imported projects carry no three-point estimates, so every task
+  should be `assumed`; FORECAST's output said otherwise. Both were right: the
+  only two non-assumed tasks are the two that are `done`, because FORECAST
+  holds a completed task's duration constant rather than sampling it — sampling
+  a finished task would invent uncertainty about something that already
+  happened (D-133). Reconciled, not papered over.
+* **File ownership held.** `main.py`, `deps.py` and `test_auth.py` show a
+  zero-line diff. No agent wrote outside its allocation, and nothing under
+  `frontend/` was touched by this wave.
+
+## 6 · DECISIONS
+
+D-129 … D-159 in `docs/DECISIONS.md`. The three that change what someone
+downstream must do:
+
+* **D-131 — numpy was not added.** The brief said to vectorise with numpy;
+  `test_core_purity.py` pins `ALLOWED_THIRD_PARTY = {"networkx"}` and the same
+  brief makes the purity test an absolute constraint. The constraint outranks
+  the implementation instruction, and the stdlib kernel beats the budget by
+  7.5×, so relaxing the allowlist would have weakened a real guarantee to buy
+  nothing measurable.
+* **D-143 — replay state lives in process memory, so the backend must run as a
+  single process.** Recorded in `docs/DEPLOY.md` under its own heading, because
+  it fails silently from the user's side: the live screen simply never starts.
+* **D-157 — the schedule delta on a requirement change is usually 0, and that
+  is not the change being free.** See §7.
+
+## 7 · WHAT WORRIES ME
+
+1. **The requirement screen cannot lead with the date, and the phase brief
+   assumed it could.** `cpm.py` contains no reference to task status — the
+   scheduler is status-blind, so completed work already occupies its full
+   duration and re-opening it cannot lengthen the critical path. The brief's
+   demo line, *"Finish date moves from 23 Sep to 27 Sep"*, will not be true for
+   most changes. The honest number is the effort: on the arithmetic fixture 7
+   days of completed work are genuinely lost and re-spent while the projected
+   finish does not move. **Wave 3's requirement screen must lead with wasted
+   effort, and `docs/HOW_TO_DEMO.md` must be corrected to match.** Making the
+   date move would need a scheduler that compresses completed work out of the
+   remaining plan, which would change what `analyze` means for all four
+   capabilities — so it was not done quietly inside a requirement report.
+2. **Independent sampling makes the forecast too confident, and no amount of
+   better code fixes it.** A 40-task DAG's completion distribution is genuinely
+   tighter than reality because real delays correlate. The payload says so in
+   plain language, but a reader who takes only the number will be
+   over-confident. The honest fix needs data the platform does not have.
+3. **Uncalibrated is uncalibrated.** Nothing here has been checked against an
+   outcome. Until the platform records actuals, the probability is the model's
+   opinion under a stated model.
+4. **The impact report could be read as a judgement about meaning, and it is
+   not one.** It computes a blast radius from the dependency graph; it does not
+   read the two wordings. That caveat leads the assumptions block, the router
+   docstrings and the headline sentence, and the UI must render it beside the
+   numbers rather than behind a disclosure.
+5. **Two wordings of the same requirement cost the same.** `compare` returns an
+   explicit tie rather than an invented difference (D-158). Useful, but it
+   means the "pick the cheaper one" story only works when the options declare
+   which consumers they spare.
+6. **`must_redo` versus `must_recheck` is only as good as the `consumes`
+   flags**, and imported edges all carry `consumes=false` (D-149). So an
+   imported project reports a smaller blast radius than the real one until
+   somebody marks the consuming edges by hand. Both halves are stated in the
+   payloads; neither is enforced by the data model.
+7. **An imported project's forecast is almost entirely assumed.** No Jira export
+   carries three-point estimates, so the distribution comes from the domain
+   prior. It is labelled per task, so it is honest — but it is a wide,
+   wholly-assumed distribution, which is worth knowing before it goes on stage.
+8. **The bundled sample raises four `redundant_dependency` findings.** They are
+   real — Jira exports genuinely carry redundant links — but they are four
+   low-severity rows competing with the bottleneck for attention. Realism was
+   kept over a cleaner demo.
+9. **The role guard holds a database session for the life of an SSE
+   connection.** Harmless on SQLite; on Postgres, size the pool against
+   concurrent viewers rather than requests per second. Noted in `DEPLOY.md`.
+10. **`ENGINE_VERSION` is still `2.3.0-phase4`.** No numeric output of
+    `evaluate()` changed, so a bump was not required — but a reader may expect
+    one after a phase this size.
+
+## 8 · WHAT WAVE 3 INHERITS
+
+Wave 3 was **deferred**, not skipped. The Phase 10 wave-2 session was rewriting
+`FindingsPanel`, `RiskPanel`, `Explainer`, `WhatIfPanel`, `OptimizePanel`,
+`DiffView`, `DependencyGraph`, `SetupPanel`, `VersionHistory`, `page.tsx` and
+`ui.tsx` in this same working tree — the exact files Phase 11's UI-ANALYSIS and
+UI-CHANGE agents own. Starting wave 3 against the mid-wave snapshots in
+`7f4d342` would have meant designing those panels twice and silently
+overwriting someone's work. That session has since committed `c0807d2`
+(tag `wave-2-design`), and wave 3 builds on that, under its D-101…D-128 —
+three severity states from `src/lib/severity.ts`, the accent reserved for the
+zero-slack chain, no `violet`, and the two deliberately different answers on
+native versus Radix selects.
+
+Backend surfaces available to it, all additive, no existing endpoint's shape
+changed:
+
+```
+POST|GET|DELETE /api/projects/{id}/replay
+POST            /api/projects/{id}/replay/control
+GET             /api/projects/{id}/replay/timeline
+GET             /api/projects/{id}/stream            (SSE)
+POST            /api/projects/{id}/forecast
+GET             /api/projects/{id}/forecast/assumptions
+GET             /api/projects/{id}/requirements
+POST            /api/projects/{id}/requirements/{key}/change | compare | apply
+GET             /api/projects/{id}/requirements/{key}/history | diff
+POST            /api/import/preview | /api/import/commit
+GET             /api/import/samples | /api/import/samples/{name} | .../raw
+POST            /api/ingest/github
+```
+
+---
+
+# PHASE 11, WAVE 3 — THE SCREENS
+
+Tag `wave-3-design`. Four frontend agents in parallel, plus one follow-up pass.
+
+This wave was **deferred, not skipped**. The Phase 10 wave-2 session was
+rewriting six of the same panel files in this same working tree; starting
+against its mid-wave snapshots would have meant designing them twice and
+silently overwriting someone's work. It committed `c0807d2` / `wave-2-design`,
+handed the tree over, and this wave built on that — under its D-101 … D-128
+rather than around them.
+
+## 1 · WHAT CHANGED
+
+Three new screens and four rebuilt ones.
+
+**The live screen.** A running clock, events arriving, and findings that appear
+and clear on their own at the correct simulated day. The dependency map is the
+hero in a wide main column with a narrow inspector rail. Play, pause, speed,
+scrub, restart. A viewer arriving mid-replay is handed current state, never an
+empty screen. Nothing on it writes.
+
+**The requirement screen.** Leads with the cost: days of completed work
+invalidated, the blast radius, who needs to know grouped by owner, and the
+arithmetic on every row — then the ready-to-apply replan.
+
+**The forecast panel.** P50/P80/P90, the probability of meeting the deadline, a
+completion histogram, and every task's criticality index, ranked.
+
+**The import panel.** Preview then commit, with every inference the importer
+made visible per row before anything is created.
+
+## 2 · WHAT EACH AGENT PRODUCED
+
+**Integration (not delegated).** `src/lib/api.ts`'s Phase 11 block, `page.tsx`'s
+eight stages and mount points, `journey.mjs`, `globals.css`'s `color-scheme`,
+and the `services/requirements.py` sentence fix. Committed as `757510b` before
+the agents ran, for D-129's reason one layer up.
+
+**UI-LIVE** — `LiveFeed.tsx` (the whole stage, one mount point), `Clock.tsx`,
+`ReplayControls.tsx`, and `DependencyGraph.tsx` extended by **+131/−8** rather
+than forked: an optional `LiveOverlay` prop folded into an `Analysis`-shaped
+view in one memo at the top, so every line of packing, scaling and lane code
+below stays shared and unbranched, and the analyze stage pays nothing.
+
+**UI-REQUIRE** — `RequirementChange.tsx`, `ImpactReport.tsx`,
+`RequirementHistory.tsx`, plus a follow-up pass adding the scoped badge and the
+`onApplied` callback.
+
+**UI-ANALYSIS** — `ForecastPanel.tsx` (13-line stub → ~1,060 lines), and
+`FindingsPanel` / `RiskPanel` / `Explainer` extended.
+
+**UI-CHANGE** — `ImportPanel.tsx`, and `WhatIfPanel` / `OptimizePanel` /
+`DiffView` extended.
+
+## 3 · TESTS
+
+| Check | Result |
+|---|---|
+| `pytest backend/tests -q` | **1054 passed**, 0 failed |
+| `demo_check` (model disabled) | **ALL BEATS PASSED** |
+| `demo_check --provider recorded` | **ALL BEATS PASSED** |
+| `npm run e2e` | **ALL CHECKS PASSED** |
+| `npm run e2e:ai` | **ALL CHECKS PASSED** |
+| `npm run e2e:hardening` | **ALL CHECKS PASSED** |
+| `npx tsc --noEmit` | clean |
+| `npm run lint` | clean |
+| `npm run build` | succeeds |
+
+`journey.mjs` gained sections for live, forecast and requirements. The live one
+asserts the simulated clock **advances on its own** (`0 -> 3` across a 3.5s
+wait), because a screenshot cannot tell a running replay from a stopped one —
+which is the entire risk on that screen.
+
+## 4 · WHAT WAS VERIFIED BY THE ORCHESTRATOR, NOT TAKEN ON REPORT
+
+* **SSE survives the Next proxy** — measured before any agent built on it, in a
+  real browser with a real session: `catchup` at 19ms, then a frame every
+  ~265ms spread over 3.45s, one simulated day each, not buffered. The single
+  biggest risk in the wave, settled as a measurement rather than an argument.
+* **Every reported API mismatch, re-checked against a live response** before
+  changing a line. All four UI-REQUIRE reported were real, as was UI-LIVE's
+  fifth (`ReplayTimeline`). See §6.
+* **The `e2e:ai` failure was diagnosed, not assumed to be a regression.** The
+  seeded project had a `v2 "demo"` version applied — by an earlier
+  `demo_check` run of my own — so its projected end was 22.0 instead of the
+  pristine 26.0 and an exact-number assertion no longer matched. Dev-database
+  state. It passes on a reset database, which is what `HOW_TO_DEMO.md` has
+  always told you to do first.
+* **The running dev backend was serving stale code** — still returning the old,
+  factually wrong `no_impact` sentence hours after the source was fixed.
+  Caught by probing the live server rather than trusting that a dev server
+  reloads; restarted with the same enforcing config before final verification,
+  so the walkthroughs exercise current code.
+
+## 5 · DECISIONS
+
+D-160 … D-172. The ones that changed what someone else must do:
+
+* **D-166 — the requirement screen leads with wasted effort, not the date**,
+  and `+0d` never appears alone while completed days are lost. This corrects
+  the phase brief's own scripted demo line.
+* **D-167 — a scoped report says so on the headline.** Otherwise a scoped
+  zero is screenshot-indistinguishable from an unscoped one.
+* **D-168 — the forecast renders exactly one answer**, and its disambiguation
+  table contains no figures. A warning is a request; a missing code path is a
+  guarantee.
+* **D-172 — the stage is "Risk & forecast"**, because it carries both numbers.
+
+## 6 · THE MISTAKE WORTH RECORDING
+
+`src/lib/api.ts` was written from payloads captured against a running backend
+rather than transcribed from the wave-2 agents' reports. That was the right
+instinct and it was still not enough: **five types were wrong**, every one of
+them nested a level below what the capture printed.
+
+| Type | Written as | Actually |
+|---|---|---|
+| `OwnerImpact.must_redo` | `string[]` | task objects with `name`, `status`, `effort_days` |
+| `RequirementComparison.options[]` | `report`, top-level `statement` | `impact`; sentence on `differences.statement` |
+| `RequirementRevision` | `changed_at`, `consumed_by_task_keys` | `recorded_at`, `consumed_by` |
+| `applyRequirementChange` | `{version_id, version_no}` | neither exists — `to_version`, `new_version{}`, `parent_version.unchanged` |
+| `ReplayTimeline` | `step_days: number[]` | `steps: [{day, date, events}]` |
+
+Every one was found by an agent building against it, and the fourth would have
+shipped a success banner reading **"Version undefined was written"**. Two
+agents wrote defensive shape-readers around the wrong types; both were
+simplified once the types were corrected, rather than left as dead code with a
+stale justification. The lesson is narrow and worth keeping: **capture nested
+shapes, not top-level keys.**
+
+## 7 · WHAT WORRIES ME
+
+1. **`must_redo` is only as good as the `consumes` flags, and imported edges
+   have none.** D-149 makes every imported dependency `consumes=false`, so an
+   imported project reports a smaller blast radius than the real one. Both
+   halves are stated in the payloads, but nothing on the requirements stage
+   says "this project was imported". That is the sharpest remaining gap
+   between two features that each behave correctly alone.
+2. **The independence assumption still makes the forecast too confident**, and
+   no amount of frontend care fixes it. It is stated in plain language beside
+   the number rather than behind a disclosure, which is the most the UI can do.
+3. **`no_impact` with genuinely zero consumers is untested on screen.** No
+   seeded requirement has none. The code path is the simple one — it renders
+   `report.statement` unchanged, with the scoped badge correctly absent.
+4. **`dropped_frames` is code-verified only.** Provoking a 512-frame queue
+   overflow needs a subscriber slower than anything a browser does naturally.
+5. **The forecast panel is long.** The assumptions layer on a Beta-PERT model
+   is genuinely large prose. It is ordered numbers-first and only caveats that
+   qualify a specific figure were lifted beside it; not one sentence was
+   shortened.
+6. **`result.next` renders developer-facing prose on a user screen** after an
+   import (`POST /api/projects/{id}/analyze`). Kept verbatim rather than
+   paraphrasing an API field, but it reads oddly.
+7. **The live stage logs a 404 on every cold arrival**, by design (D-164). The
+   walkthrough exempts exactly that one URL. A future reader may reasonably
+   prefer the route to answer 200-with-`running:false`.
