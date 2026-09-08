@@ -404,6 +404,7 @@ Then the limitations, out loud, before anyone asks — see the list in
 | The requirement report shows `+0d` on the finish date | Expected, and the screen says why. Lead with the wasted-effort figure on the left; the date not moving is the scheduler being status-blind, not the change being free. |
 | The forecast says "structural estimate" instead of a probability | The workflow has nothing to sample — no three-point estimates and a zero variance prior. That is the honest fallback, and it is worth showing rather than hiding. |
 | An imported project's forecast is entirely "assumed" | Correct: no Jira export carries three-point estimates, so the spread comes from the domain prior and every task says so. |
+| **The code on disk and the behaviour on screen disagree** | Suspect the *process*, not the code. A server started without `--reload` serves the code it was started with, for as long as it runs — so a fix you made hours ago may simply not be loaded. Probe the running server (`curl` the endpoint, or read the field in the response) rather than re-reading the source, then restart it. Both of the sessions that built Phase 10 and Phase 11 hit this independently, and both initially misdiagnosed it as a bug in their own new code. |
 | Anything at all, 30 seconds before you start | `reset_db`, restart both, `demo_check`. In that order. |
 
 ## Rehearsal rules
