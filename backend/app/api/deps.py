@@ -70,6 +70,26 @@ ROLE_RANK: dict[str, int] = {"viewer": 1, "editor": 2, "owner": 3}
 NO_ROLE = "none"
 ANONYMOUS = "anonymous"
 
+
+def is_public_viewer(who: User | None) -> bool:
+    """Is this the public read-only guest?
+
+    The guest is a real user row (created through `POST /api/users` like
+    anyone else) that `settings.PUBLIC_VIEWER_EMAIL` names. It exists so a
+    public demo can be *read* without a Google account, which matters when
+    the OAuth app is in Testing mode and an unlisted visitor would otherwise
+    see nothing at all.
+
+    Naming it here rather than adding a column keeps it a configuration fact
+    rather than a schema one, and emptying the setting disables the concept
+    outright - no row is then a guest, and the identity becomes an ordinary
+    user like any other.
+    """
+    configured = (settings.PUBLIC_VIEWER_EMAIL or "").strip().lower()
+    if not configured or who is None:
+        return False
+    return (who.email or "").strip().lower() == configured
+
 #: Non-GET routes that do not change anything a viewer should be protected
 #: from - reads and evaluations that happen to need a request body. Keyed by
 #: `(method, route template)`. This is the *only* way to be exempt: a write
@@ -154,6 +174,34 @@ def _not_signed_in(attempted: str) -> HTTPException:
             "message": (
                 f"{attempted} needs a signed-in identity, and this request "
                 f"has none. {_SIGN_IN}"
+            ),
+        },
+    )
+
+
+def _read_only_guest(attempted: str) -> HTTPException:
+    """A 403 for the public guest on a route with no project to hold a role on.
+
+    Distinct from `_not_signed_in` because that one says "this request has no
+    identity", which would be false: the guest has one, it is simply held to
+    a read-only bar. Telling a judge "you are not signed in" while the header
+    shows them signed in as a guest is the kind of small lie that makes a
+    reader stop believing the rest of the screen.
+    """
+    return HTTPException(
+        status_code=403,
+        detail={
+            "reason": "read_only_guest",
+            "attempted": attempted,
+            "project_id": None,
+            "your_role": "public read-only guest",
+            "required_role": "any signed-in user",
+            "message": (
+                f"{attempted} is not available to the public read-only guest. "
+                "Reading, analysing, risk-scoring, optimising and asking a "
+                "what-if all work as they do for anyone else; creating and "
+                "changing things needs an account. Sign in with Google to do "
+                "this."
             ),
         },
     )
@@ -259,6 +307,15 @@ async def role_on_project(
     """`owner` / `editor` / `viewer`, or `none`, or `anonymous`."""
     if who is None:
         return ANONYMOUS
+    # The public guest holds `viewer` on every project. This grants nothing:
+    # under the rules below, `viewer`, `none` and `anonymous` are already
+    # identical for every route - reads and evaluations are open to all three
+    # and every write needs `editor`. What it changes is that a refusal names
+    # a real role the reader can act on ("your role on this project is
+    # viewer") instead of "you are not a member of this project", which would
+    # send a judge looking for an invitation that is not the problem.
+    if is_public_viewer(who):
+        return "viewer"
     role = (
         await db.execute(
             select(ProjectMember.role).where(
@@ -313,6 +370,15 @@ async def enforce_project_role(
         # subsequently manage the members of.
         if who is None:
             raise _not_signed_in(attempted)
+        # ...but "somebody" cannot include the public read-only guest. These
+        # are the only writes a role cannot gate, because there is no project
+        # to hold a role on - so without this line, handing a guest an
+        # identity to *read* with would also hand every anonymous visitor on
+        # a public URL the ability to create projects and domains. This is
+        # the one place the guest needs naming; the role ranking below is
+        # untouched.
+        if is_public_viewer(who):
+            raise _read_only_guest(attempted)
         return
 
     held = await role_on_project(db, project_id, who)
@@ -328,8 +394,11 @@ async def require_signed_in(
     Only for routes that have no project to hold a role on. Like everything
     else here, it is a no-op with no `PROXY_SHARED_SECRET` configured.
     """
-    if settings.PROXY_SHARED_SECRET and who is None:
-        raise _not_signed_in("This request")
+    if settings.PROXY_SHARED_SECRET:
+        if who is None:
+            raise _not_signed_in("This request")
+        if is_public_viewer(who):
+            raise _read_only_guest("This request")
     return who
 
 

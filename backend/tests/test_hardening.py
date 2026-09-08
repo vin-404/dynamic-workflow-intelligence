@@ -109,6 +109,12 @@ class TestConfiguration:
             "API_REWRITE_URL",
             "AUTH_GOOGLE_ID", "AUTH_GOOGLE_SECRET", "AUTH_SECRET",
             "NEXTAUTH_URL", "E2E_AUTH_ENABLED",
+            # The public-read-only switch is the *proxy's* decision, so it is
+            # read in Next and never here. Its counterpart
+            # `PUBLIC_VIEWER_EMAIL` *is* a Settings field - it has to be, it
+            # is what holds that identity to a read-only bar - so it is not
+            # listed here and this test checks it for real.
+            "PUBLIC_DEMO_VIEWER",
         }
         assert documented <= known, documented - known
 

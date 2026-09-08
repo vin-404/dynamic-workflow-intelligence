@@ -10,7 +10,8 @@
     "e2e": "node e2e/journey.mjs e2e/.shots",
     "e2e:ai": "node e2e/ai.mjs e2e/.shots",
     "e2e:hardening": "node e2e/hardening.mjs e2e/.shots",
-    "e2e:all": "npm run e2e && npm run e2e:ai && npm run e2e:hardening"
+    "e2e:all": "npm run e2e && npm run e2e:ai && npm run e2e:hardening",
+    "e2e:public": "node e2e/public-viewer.mjs http://localhost:3000 http://localhost:3100 e2e/.shots"
   },
   "dependencies": {
     "@dagrejs/dagre": "^3.1.1",

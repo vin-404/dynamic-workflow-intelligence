@@ -102,6 +102,31 @@ class Settings(BaseSettings):
     #: also change the member list.
     PROXY_SHARED_SECRET: str = ""
 
+    #: The email of the **public read-only guest**, the identity the Next.js
+    #: proxy forwards for a visitor with no session when its own
+    #: `PUBLIC_DEMO_VIEWER=1` is set (a public demo, where the Google app is
+    #: in Testing mode and a judge with an unlisted address would otherwise be
+    #: locked out entirely).
+    #:
+    #: It is a **real user row**, created through the same `POST /api/users`
+    #: upsert a person goes through - not a header the backend special-cases
+    #: into existence. What this setting does is name it, so `deps.py` can
+    #: hold it to a read-only bar:
+    #:
+    #: * it holds `viewer` on every project, so a refusal names a real role;
+    #: * and it does **not** satisfy the "any signed-in user" bar that guards
+    #:   creating a project, a domain or a seed - which a plain identity
+    #:   otherwise would, since those routes have no project to hold a role on.
+    #:
+    #: That second half is the point. Without it, handing the guest an
+    #: identity to read with would also hand it the ability to create
+    #: projects on a public instance.
+    #:
+    #: Only meaningful when `PROXY_SHARED_SECRET` is set; with no secret
+    #: nothing is enforced for anybody. Emptying it disables the concept
+    #: entirely - no identity is then treated as a guest.
+    PUBLIC_VIEWER_EMAIL: str = "guest@public-demo.local"
+
     model_config = {"env_file": ".env", "extra": "ignore"}
 
     @field_validator("CORS_ORIGINS", mode="before")

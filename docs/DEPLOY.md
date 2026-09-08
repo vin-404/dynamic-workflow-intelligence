@@ -51,6 +51,7 @@ to it. Step 3 fixes it.
    | `CORS_ORIGINS` | `http://localhost:3000` for now; add the Vercel URL after step 2 |
    | `ADMIN_TOKEN` | a long random string, if you want the reset button |
    | `PROXY_SHARED_SECRET` | a long random string — **the same one you set on Vercel** |
+   | `PUBLIC_VIEWER_EMAIL` | leave at the default unless you also change it on Vercel |
 
    Leave `DATABASE_URL` unset for SQLite. Leave `PORT` unset — Render injects
    it and the image reads it.
@@ -95,6 +96,7 @@ to it. Step 3 fixes it.
    | `AUTH_SECRET` | `python -c "import secrets; print(secrets.token_urlsafe(32))"` |
    | `NEXTAUTH_URL` | `https://<your-app>.vercel.app` |
    | `PROXY_SHARED_SECRET` | the same value you set on Render |
+   | `PUBLIC_DEMO_VIEWER` | `1` **only** for a public demo — see below |
 
    **There is no `NEXT_PUBLIC_API_URL`, and adding one back would break the
    security model.** The browser talks only to the Vercel origin, because that
@@ -219,6 +221,89 @@ token puts the database back to both seed domains without a redeploy.
 
 ---
 
+## A public demo: `PUBLIC_DEMO_VIEWER`
+
+**The problem this exists for.** A Google OAuth app in **Testing** mode admits
+only the addresses on its test-user list. Combined with a hard sign-in wall in
+front of every page and every API call, that means a stranger who opens the
+public link — a hackathon judge, a reviewer, anyone — sees a Google error page
+and never reaches the product at all. It is not a login screen, it is a locked
+door, and it is invisible to everyone whose address *is* on the list, which is
+everyone who built it.
+
+Publishing the OAuth app is the real fix and it needs Google's review. Until
+then, set on **Vercel**:
+
+```
+PUBLIC_DEMO_VIEWER=1
+```
+
+### What a guest can and cannot do
+
+| | |
+|---|---|
+| **Can** | Read every project. Run the analysis, the risk score, the Monte Carlo forecast, the optimiser, a what-if, a requirement-change report. Watch a replay. See every number and every caveat. |
+| **Cannot** | Anything that changes state. Creating or editing a task, dependency, resource or assignment; sealing a version; creating or applying a scenario; changing the member list; creating a project, a domain or a seed; importing. |
+
+Two properties worth understanding, because they are what make the claim
+trustworthy rather than cosmetic:
+
+- **The refusal is the backend's.** A mutation comes back as the same `403`
+  from the same role check in `api/deps.py` that refuses a `viewer`, carrying
+  the role held and the role required. The buttons are deliberately **not**
+  hidden — a guest who clicks *New workflow* fills the form and gets a
+  readable refusal that says to sign in. A UI that declined to offer the
+  button would be a claim you could not check; this one is enforced where the
+  API is, so it holds for anyone calling it directly too.
+- **A session always wins.** The guest identity is only ever reached when
+  there is no session at all. Turning a public demo on does not demote the
+  people who can sign in, and `/login` stays reachable from the public build.
+
+The guest is a **real user row**, created through the same `POST /api/users`
+upsert a Google user goes through on first sign-in — not a header the backend
+special-cases into existence. It owns nothing and is a member of nothing.
+
+### The one thing that will bite you
+
+`PUBLIC_DEMO_VIEWER=1` on its own is **not enough**, and the failure is silent
+in the dangerous direction:
+
+> **`PROXY_SHARED_SECRET` must be set on Render *and* Vercel, to the same
+> value, in the same window.** Until it is set on the **backend**, the backend
+> is in its pre-auth open mode: it trusts `X-User-Id` exactly as it arrives and
+> enforces no role at all. A guest would then be able to change things.
+
+So the order matters. Set `PROXY_SHARED_SECRET` on Render first and confirm it
+took effect, then turn `PUBLIC_DEMO_VIEWER=1` on at Vercel. Reversed, there is
+a window in which the public link is writable by strangers.
+
+Confirm it with two calls before you hand the link to anyone:
+
+```bash
+# 1. A guest can read.
+curl -s -o /dev/null -w '%{http_code}\n' https://<frontend>/api/projects
+# expect 200
+
+# 2. A guest cannot write. This is the one that matters.
+curl -s -X POST https://<frontend>/api/projects \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"probe","start_date":"2026-01-01","today_day":0}'
+# expect 403 with "reason":"read_only_guest"
+```
+
+If the second returns **201**, `PROXY_SHARED_SECRET` is not set on the backend.
+Turn `PUBLIC_DEMO_VIEWER` off until it is.
+
+### Turning it off
+
+Unset `PUBLIC_DEMO_VIEWER` (or set it to anything other than `1`) and restart.
+It is read at runtime, so this is a restart and not a rebuild — deliberately,
+because a build-time flag could not be switched off without shipping a new
+bundle. Nothing else changes: the guest's user row stays, owning nothing, and
+becomes an ordinary unused account.
+
+---
+
 ## Re-pointing the frontend at a new backend
 
 The backend URL is now read at runtime by the Next.js proxy, not compiled into
@@ -278,6 +363,7 @@ not the number of requests per second.
 | `PORT` | injected | `10000` | Set by the platform; the image reads it. Do not hardcode. |
 | `ENVIRONMENT` | no | `production` | Hides exception detail from 500 responses. |
 | `ADMIN_TOKEN` | no | a long random string | Guards `POST /admin/reset-seed`. **Empty disables the endpoint.** |
+| `PUBLIC_VIEWER_EMAIL` | no | `guest@public-demo.local` | Names the public read-only guest, so the API can hold it to a read-only bar: `viewer` on every project, and **not** enough to satisfy the "any signed-in user" bar that guards creating a project, a domain or a seed. Emptying it makes that row an ordinary user. Must match the frontend's. |
 | `PROXY_SHARED_SECRET` | recommended | 32+ random bytes | Backend half of the identity handshake. `X-User-Id` is honoured only when `X-Proxy-Secret` matches, and `ProjectMember.role` becomes enforced. **Empty keeps the pre-auth open behaviour**, which is what a fresh clone and the test suite run. Must equal the frontend's. Setting it without `ADMIN_TOKEN` also disables `POST /api/seed/reset`. |
 | `SEED_ON_STARTUP` | no | `true` | Load both demo domains at boot. Idempotent. |
 | `GITHUB_WEBHOOK_SECRET` | no | 32+ random bytes | Secret GitHub signs each delivery with. `POST /api/ingest/github` recomputes HMAC-SHA256 over the raw body and compares it in constant time. **Empty disables the endpoint** (403) - a webhook has no session, so the signature is the whole of its authentication and there is no unsigned development mode. The webhook URL also carries `?project_id=<uuid>`, which is visible to anyone who can read the repository's webhook settings; the signature, not the id, is what gates the write. |
@@ -297,6 +383,8 @@ not the number of requests per second.
 | `AUTH_SECRET` | **yes** | 32+ random bytes | Signs and encrypts the session cookie. |
 | `NEXTAUTH_URL` | **yes** | `https://app.vercel.app` | The origin Auth.js builds callback URLs from. Must match what Google has registered. |
 | `PROXY_SHARED_SECRET` | recommended | 32+ random bytes | Frontend half of the identity handshake. Must equal the backend's. Unset on both sides = open mode. |
+| `PUBLIC_DEMO_VIEWER` | no | `1` | Lets a visitor with no Google session **read** the app instead of being sent to `/login`. Anything but `1` is off, which is the default. Read at runtime, so it is a restart and not a rebuild. See **A public demo** below. |
+| `PUBLIC_VIEWER_EMAIL` | no | `guest@public-demo.local` | Names the guest identity. Must match the backend's. Both default to the same value, so normally neither needs setting. |
 | `E2E_AUTH_ENABLED` | **never in a deployment** | `1` | Adds a password-free sign-in for the browser walkthroughs. Requires `NODE_ENV != production`, so a `next build` bundle cannot contain it — but do not set it anyway. |
 | `NEXT_PUBLIC_API_URL` | **removed** | — | Deliberately no longer read. See the note in the Vercel step above: a browser-side backend URL bypasses the session check entirely. |
 
@@ -313,6 +401,9 @@ no real values.
 | Page loads, every panel empty, console shows a CORS error | The frontend origin is not in `CORS_ORIGINS` | Add it, comma-separated, redeploy the backend |
 | Page loads, panels empty, console shows a 404 or `ERR_CONNECTION_REFUSED` on `/api/...` | `API_REWRITE_URL` wrong | Fix it and restart; it is read at runtime, so no rebuild is needed |
 | Every `/api/*` call returns 401 while the app looks signed-in | The session carries no backend user id | Sign out and back in. If it persists the backend was unreachable at sign-in; check `/ready` |
+| A stranger can **write** on the public link | `PUBLIC_DEMO_VIEWER=1` is set on Vercel but `PROXY_SHARED_SECRET` is **not** set on Render, so the backend is in open mode and enforces nothing | Turn `PUBLIC_DEMO_VIEWER` off, set the secret on the backend, confirm a guest `POST /api/projects` returns 403, then turn it back on |
+| Judges see a Google error page, not the app | The OAuth app is in Testing mode and their address is not a test user | `PUBLIC_DEMO_VIEWER=1` on Vercel, having first checked the secret is set on Render |
+| The guest line does not appear, but the API works | The frontend was built before this feature, or something set `PUBLIC_DEMO_VIEWER` to a value other than `1` | It must be exactly `1`. Restart; no rebuild is needed |
 | A write returns 403 naming a role | Working as designed — `PROXY_SHARED_SECRET` is set and you are a `viewer`, or not a member | An owner adds you as an `editor` on the project |
 | Sign-in returns `?error=AccessDenied` | The backend refused the user upsert at sign-in — usually the backend is down or `PROXY_SHARED_SECRET` does not match | Check `/ready`, then compare the secret on both sides byte for byte |
 | Sign-in returns `?error=Configuration` | `AUTH_GOOGLE_ID`/`AUTH_GOOGLE_SECRET`/`AUTH_SECRET` missing | Set all three and redeploy |

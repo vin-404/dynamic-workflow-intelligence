@@ -176,3 +176,116 @@ export async function upsertBackendUser(input: {
   }
   return id;
 }
+
+/* ------------------------------------------------------ the public guest */
+
+/**
+ * Is this build serving a **public read-only demo**?
+ *
+ * The problem it exists for: a Google OAuth app in Testing mode only admits
+ * addresses on its test-user list, so a hard sign-in wall on a public link
+ * shows an unlisted visitor a Google error page and nothing else. For a demo
+ * that is judged by strangers opening a URL, that is not a login screen, it
+ * is a locked door.
+ *
+ * `1` and nothing else. Unset, empty, `"true"`, `"yes"` all mean off, so the
+ * mode cannot be switched on by a vague value - it is the kind of flag that
+ * should need an exact answer. Read at runtime (`proxy.ts` runs in the Node
+ * runtime), never inlined, so turning it on is a restart and not a rebuild.
+ */
+export function publicViewerEnabled(): boolean {
+  return process.env.PUBLIC_DEMO_VIEWER === "1";
+}
+
+/**
+ * The guest's email and name.
+ *
+ * Must match `settings.PUBLIC_VIEWER_EMAIL` on the backend, which is what
+ * holds this identity to a read-only bar. The two defaults agree; if you
+ * change one, change the other, or the guest becomes an ordinary user that
+ * can create projects.
+ */
+export const PUBLIC_VIEWER_EMAIL = "guest@public-demo.local";
+export const PUBLIC_VIEWER_NAME = "Read-only guest";
+
+/**
+ * The guest's backend id, upserted once per server instance.
+ *
+ * It goes through `POST /api/users` - the same upsert a real Google user goes
+ * through on first sign-in - so the guest is a genuine row that owns nothing
+ * and is a member of nothing, rather than a header the backend has been
+ * taught to special-case. The cache is a promise, so concurrent first
+ * requests share one upsert instead of racing; a failure clears it so the
+ * next request retries rather than being stuck with a rejected promise.
+ *
+ * Returns `null` if the backend cannot be reached. The caller must then fall
+ * back to the signed-out behaviour - never forward the request anonymously,
+ * which would look like it worked and quietly drop the identity.
+ */
+let guestIdPromise: Promise<string> | null = null;
+let guestIdAt = 0;
+let lastKnownGuestId: string | null = null;
+
+/**
+ * How long a cached guest id is trusted before it is re-upserted.
+ *
+ * Not an optimisation - a correctness fix, found by resetting the database
+ * while a public build was running. `reset_db` (and `POST /admin/reset-seed`,
+ * which `docs/HOW_TO_DEMO.md` tells a presenter to run 30 seconds before they
+ * start) deletes every user row, including the guest's. A cache held for the
+ * life of the process then points at a row that no longer exists: the backend
+ * looks up the id, finds nothing, and serves the request as **anonymous**.
+ * Reads still work, so nothing looks broken - but the identity is silently
+ * gone and refusals change shape.
+ *
+ * Re-upserting on a timer fixes it without a round trip per request, because
+ * the upsert is idempotent: if the row survived, the same id comes back; if it
+ * was deleted, it is recreated. One call per five minutes per instance.
+ *
+ * This is the same hazard Phase 9 wrote `verifyIdentity` for on the browser
+ * side (D-66's "a browser's remembered id is dangling after a reset - it must
+ * find out"), reappearing server-side the moment an id was cached here.
+ */
+const GUEST_ID_TTL_MS = 5 * 60 * 1000;
+
+export async function publicViewerId(): Promise<string | null> {
+  const stale = Date.now() - guestIdAt > GUEST_ID_TTL_MS;
+  if (!guestIdPromise || stale) {
+    const attempt = upsertBackendUser({
+      email: PUBLIC_VIEWER_EMAIL,
+      name: PUBLIC_VIEWER_NAME,
+    });
+    guestIdPromise = attempt;
+    guestIdAt = Date.now();
+    attempt
+      .then((id) => {
+        lastKnownGuestId = id;
+      })
+      .catch(() => {
+        // Let the next request try again rather than caching a rejection.
+        if (guestIdPromise === attempt) guestIdPromise = null;
+      });
+  }
+  try {
+    return await guestIdPromise;
+  } catch {
+    // A refresh that failed against a backend blip should not turn a working
+    // public demo into a locked door: the previous id is still very likely
+    // right, and if it is not, the request is refused upstream where the
+    // reason can be seen. Only a first-ever failure returns null, and the
+    // proxy fails closed on that.
+    return lastKnownGuestId;
+  }
+}
+
+/** The guest as the UI's `Person`, or `null` when the mode is off. */
+export async function publicViewerPerson(): Promise<{
+  id: string;
+  email: string;
+  name: string;
+} | null> {
+  if (!publicViewerEnabled()) return null;
+  const id = await publicViewerId();
+  if (!id) return null;
+  return { id, email: PUBLIC_VIEWER_EMAIL, name: PUBLIC_VIEWER_NAME };
+}
