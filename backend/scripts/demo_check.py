@@ -430,6 +430,329 @@ async def walk(client: AsyncClient, expect_model: bool) -> None:
         },
     )
 
+    # -- 10 - Import: the data arrives without being typed ------------------
+    beat("10 -", "Import: a real Jira export, and every guess on show")
+    samples = (await client.get("/api/import/samples")).json()
+    check("a Jira-shaped sample ships with the app", len(samples["samples"]) >= 1)
+    sample_name = samples["samples"][0]["name"]
+    suggested = (
+        await client.get(f"/api/import/samples/{sample_name}")
+    ).json()["suggested"]
+
+    preview = (await post("/api/import/preview", suggested)).json()
+    check(
+        "the preview would create a real workflow",
+        preview["counts"]["tasks"] >= 10 and preview["counts"]["dependencies"] >= 15,
+        f"{preview['counts']['tasks']} tasks, "
+        f"{preview['counts']['dependencies']} dependencies",
+    )
+    # Repeated same-named columns are the thing `csv.DictReader` silently
+    # collapses, and collapsing them loses most of the graph. If this number
+    # falls, the importer has quietly stopped reading the file properly.
+    check(
+        "the repeated Jira link columns all survived",
+        preview["counts"]["dependencies"] >= 20,
+        f"{preview['counts']['dependencies']} dependencies",
+    )
+    check(
+        "every unmappable row is reported rather than dropped",
+        len(preview["rejected_rows"]) == preview["counts"]["rows_rejected"] >= 1,
+        f"{preview['counts']['rows_rejected']} reported with reasons",
+    )
+    check(
+        "each rejected row says why, in a sentence",
+        all(len(r.get("reason", "")) > 20 for r in preview["rejected_rows"]),
+    )
+    check(
+        "a link pointing outside the export is dropped and named",
+        len(preview["dropped_dependencies"]) >= 1,
+        str([d["raw"] for d in preview["dropped_dependencies"]]),
+    )
+    check("nothing blocks this import", preview["can_commit"] is True)
+
+    # The inference is the part that must be visible. An import that silently
+    # defaulted an estimate would look identical to one that read it.
+    interpreted = [
+        field
+        for row in preview["rows"]
+        for field, how in row["interpretation"].items()
+        if how.get("assumed")
+    ]
+    check(
+        "every guessed field is labelled as a guess, per row",
+        len(interpreted) >= 1,
+        f"{len(interpreted)} assumed readings across {len(preview['rows'])} rows",
+    )
+
+    imported = (await post("/api/import/commit", {
+        **suggested, "name": "Delivery Platform (demo import)",
+    })).json()
+    imported_id = imported["project"]["project_id"]
+    check("the import commits to a new project", bool(imported_id))
+    check(
+        "the rejected rows survive into the commit response",
+        len(imported["rejected_rows"]) == len(preview["rejected_rows"]),
+    )
+
+    imported_analysis = (await post(f"/api/projects/{imported_id}/analyze")).json()
+    check(
+        "the imported workflow analyses to something worth looking at",
+        len(imported_analysis["findings"]) >= 5,
+        f"{len(imported_analysis['findings'])} findings",
+    )
+    check(
+        "and it honestly reports a lower evidence tier, because no history was invented",
+        imported_analysis["tier_reached"] <= 1
+        and len(imported_analysis["unavailable_checks"]) >= 1,
+        f"tier {imported_analysis['tier_reached']}, "
+        f"{len(imported_analysis['unavailable_checks'])} checks unavailable",
+    )
+
+    # -- 11 - Replay: it happens without a button press --------------------
+    beat("11 -", "Replay: the event log, forward in accelerated time")
+    hash_before = (
+        await client.get(f"/api/projects/{CAMPUS}/workflow")
+    ).json()["version"]["content_hash"]
+
+    started = (await post(f"/api/projects/{CAMPUS}/replay", {"speed": 600})).json()
+    check("a replay starts over the stored version", started["running"] is True)
+    check(
+        "and says outright that it writes nothing",
+        started["writes_nothing"] is True,
+    )
+    timeline = (
+        await client.get(f"/api/projects/{CAMPUS}/replay/timeline")
+    ).json()
+    check(
+        "the replay stops on every simulated day, not only on event days",
+        len(timeline["steps"]) > len(timeline["events"]),
+        f"{len(timeline['steps'])} steps for {len(timeline['events'])} events",
+    )
+
+    seeked = (await post(f"/api/projects/{CAMPUS}/replay/control", {
+        "action": "seek", "to_day": timeline["steps"][-1]["day"],
+    })).json()
+    check("a replay is seekable", seeked["sim_day"] == timeline["steps"][-1]["day"])
+
+    frame = (await client.get(f"/api/projects/{CAMPUS}/replay")).json()["frame"]
+    check("a viewer arriving mid-replay is handed a frame", frame is not None)
+    check(
+        "the frame says it is a reconstruction, not current truth",
+        frame["derived"]["is_reconstruction"] is True
+        and len(frame["derived"]["caveats"]) >= 1,
+        f"{len(frame['derived']['caveats'])} caveats stated",
+    )
+    check(
+        "it says how much of the log it knew when it computed",
+        frame["derived"]["events_known"] <= frame["derived"]["events_total"],
+        f"{frame['derived']['events_known']} of {frame['derived']['events_total']}",
+    )
+    check(
+        "a replayed projection is still not a probability",
+        frame["projection"]["is_probability"] is False,
+    )
+    # The whole promise of the feature, checked rather than asserted.
+    await client.delete(f"/api/projects/{CAMPUS}/replay")
+    hash_after = (
+        await client.get(f"/api/projects/{CAMPUS}/workflow")
+    ).json()["version"]["content_hash"]
+    check(
+        "replaying left the stored workflow byte-identical",
+        hash_before == hash_after,
+        hash_before[:16],
+    )
+
+    # -- 12 - Forecast: a probability, and the estimate it is not -----------
+    beat("12 -", "Forecast: a real probability, and what it rests on")
+    fc = (await post(f"/api/projects/{CAMPUS}/forecast", {"seed": 4242})).json()
+    block = fc["forecast"]
+    check("a Monte Carlo forecast is available here", block["available"] is True)
+    check(
+        "the response says which of the two numbers it is answering with",
+        fc["answer_kind"] == "monte_carlo_probability" and bool(fc["answer_kind_note"]),
+    )
+    check(
+        "P50 <= P80 <= P90",
+        block["completion"]["p50_day"]
+        <= block["completion"]["p80_day"]
+        <= block["completion"]["p90_day"],
+        f"{block['completion']['p50_day']} / {block['completion']['p80_day']} / "
+        f"{block['completion']['p90_day']}",
+    )
+    check(
+        "it is a probability, and it says it is an uncalibrated one",
+        block["is_probability"] is True and block["is_calibrated"] is False,
+    )
+    assumption_text = " ".join(
+        str(v) for v in block["assumptions"].values() if isinstance(v, str)
+    ).lower()
+    check(
+        "the assumptions state that durations are sampled independently",
+        "independent" in assumption_text,
+    )
+    check(
+        "and that this is optimistic, because real delays correlate",
+        "optimistic" in assumption_text and "correlate" in assumption_text,
+    )
+    check(
+        "and that resource contention was not simulated",
+        "contention" in assumption_text,
+    )
+    check(
+        "the seed and iteration count are on the payload, so it is reproducible",
+        block["seed"] == 4242 and block["iterations"] >= 100,
+    )
+    repeat = (await post(f"/api/projects/{CAMPUS}/forecast", {"seed": 4242})).json()
+    check(
+        "the same seed reproduces the same forecast exactly",
+        repeat["forecast"]["completion"] == block["completion"],
+    )
+    check(
+        "every task carries a criticality index",
+        all("criticality_index" in t for t in block["tasks"]) and len(block["tasks"]) > 0,
+    )
+    check(
+        "a task whose spread came from the prior is labelled assumed",
+        all(
+            t["assumed"] == (t["duration"]["spread_provenance"] == "spread_prior")
+            for t in block["tasks"]
+        ),
+    )
+    # Adding a probability did not license removing the old refusal.
+    check(
+        "the structural estimate beside it still refuses to be a probability",
+        fc["structural_risk"]["is_probability"] is False,
+    )
+    check(
+        "and the deterministic feasibility does too",
+        fc["deterministic"]["feasibility"]["is_probability"] is False,
+    )
+
+    # The cold-start project has no three-point estimates anywhere. It still
+    # forecasts, because the domain carries a variance prior - but every task's
+    # spread is then an assumption rather than a measurement, and the payload
+    # has to say so per task. That is the honest middle case between "a real
+    # forecast" and "nothing to sample", and it is the one an imported project
+    # always lands in.
+    cold_fc = (await post(f"/api/projects/{cold}/forecast")).json()
+    cold_tasks = cold_fc["forecast"]["tasks"]
+    check(
+        "a workflow with no estimates still forecasts, from the domain's prior",
+        cold_fc["forecast"]["available"] is True and len(cold_tasks) > 0,
+        cold_fc["answer_kind"],
+    )
+    check(
+        "and every one of its tasks is labelled as assumed, not measured",
+        all(
+            t["assumed"] and t["duration"]["spread_provenance"] == "spread_prior"
+            for t in cold_tasks
+        ),
+        f"{len(cold_tasks)} tasks, all from the prior",
+    )
+
+    # -- 13 - Requirement change: the differentiator -----------------------
+    beat("13 -", "A requirement changes: what it invalidates, and what it costs")
+    reqs = (await client.get(f"/api/projects/{CAMPUS}/requirements")).json()
+    check("requirements are first class", reqs["count"] >= 1)
+    key = reqs["requirements"][0]["key"]
+
+    hash_before = (
+        await client.get(f"/api/projects/{CAMPUS}/workflow")
+    ).json()["version"]["content_hash"]
+    impact = (await post(
+        f"/api/projects/{CAMPUS}/requirements/{key}/change",
+        {"new_text": "Two-day event, 700 attendees, hybrid attendance"},
+    )).json()
+
+    check(
+        "work that consumed the requirement is separated from work merely downstream",
+        len(impact["must_redo"]) >= 1
+        and impact["blast_radius"]["must_redo_count"] == len(impact["must_redo"]),
+        f"{len(impact['must_redo'])} must redo, "
+        f"{len(impact['must_recheck'])} must recheck",
+    )
+    check(
+        "each affected task says why it is in the list it is in",
+        all(t["reason"]["sentence"] for t in impact["must_redo"]),
+    )
+    check(
+        "completed work that is now invalid is counted in days",
+        impact["wasted_effort"]["wasted_days"] > 0,
+        f"{impact['wasted_effort']['wasted_days']}d lost, "
+        f"{impact['wasted_effort']['redo_cost_days']}d to redo",
+    )
+    check(
+        "the arithmetic is shown on the row, not just totalled",
+        all(r["arithmetic"] for r in impact["wasted_effort"]["rows"]),
+    )
+    check(
+        "the people who need to know are grouped by owner",
+        impact["who_needs_to_know"]["resource_count"] >= 1,
+        f"{impact['who_needs_to_know']['resource_count']} owners affected",
+    )
+    # D-157. The date usually does not move, and the payload must say why
+    # rather than letting a zero read as "this change is free".
+    check(
+        "when the finish date does not move, the report says that is not the same as free",
+        impact["schedule_impact"]["delta_days"] != 0
+        or (
+            impact["schedule_impact"]["rework_shows_as_calendar_slip"] is False
+            and len(impact["schedule_impact"]["caveat"]) > 40
+        ),
+        f"delta {impact['schedule_impact']['delta_days']}d",
+    )
+    check(
+        "the replan comes back as a real, unapplied scenario",
+        impact["replan"]["applied"] is False and bool(impact["replan"]["scenario_id"]),
+    )
+    check(
+        "expressed in the mutation algebra that already existed",
+        len(impact["replan"]["mutations"]) >= 1,
+        impact["replan"]["expressed_in"],
+    )
+    evaluated = await post(f"/api/scenarios/{impact['replan']['scenario_id']}/evaluate")
+    check(
+        "and the existing scenario endpoints accept it unchanged",
+        evaluated.status_code == 200,
+    )
+    check(
+        "asking cost nothing: the base version is unchanged",
+        impact["base_unchanged"] is True and impact["applied"] is False,
+    )
+    hash_after = (
+        await client.get(f"/api/projects/{CAMPUS}/workflow")
+    ).json()["version"]["content_hash"]
+    check(
+        "confirmed against the stored hash, not just the claim",
+        hash_before == hash_after,
+    )
+    # The caveat that matters most on this whole screen.
+    judgement = impact["assumptions"]["material_change_is_a_human_judgement"]
+    check(
+        "it states that whether the wording really invalidates the work is a human call",
+        "not from the two texts" in judgement
+        and "your call" in judgement
+        and "nothing in this system makes it for you" in judgement,
+    )
+    check(
+        "and that no language model was involved in any of it",
+        "no_language_model_is_involved" in impact["assumptions"],
+    )
+
+    # Two plain wordings cost the same, and the honest answer is to say so.
+    compared = (await post(
+        f"/api/projects/{CAMPUS}/requirements/{key}/compare",
+        {"options": ["Two-day event, 700 attendees", "Extend the event to two days"]},
+    )).json()
+    check(
+        "comparing two wordings reports a tie rather than inventing a difference",
+        compared["cheapest_option_index"] is None or compared["tie"] is True,
+    )
+    check(
+        "and explains why the graph cannot tell them apart",
+        len(compared["differences"]["statement"]) > 40,
+    )
+
 
 async def main_async(provider: str) -> int:
     from backend.app.main import app

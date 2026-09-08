@@ -3,7 +3,7 @@
 What this is now, what it can and cannot do, what was deleted, what was
 decided, and what I would look at first if I were reviewing it.
 
-All nine phases are complete, committed and tagged (`phase-0-plan` through `phase-9-deploy`).
+All eleven phases are complete, committed and tagged (`phase-0-plan` through `phase-11-complete`). Phase 10 added Google sign-in, enforced roles and the shadcn design system; Phase 11 closed the three clauses of the problem statement that were still outstanding - *in real time*, *tracks* rather than plans, and *changing requirements* as a first-class capability - and turned a refusal to state a probability into a stated, uncalibrated one.
 
 ---
 
@@ -33,6 +33,21 @@ In this order. It takes about twenty minutes.
    a refusal keeping its structure through the error envelope, readiness
    failing while liveness passes, the optimizer returning partial results
    when it runs out of budget.
+8. **`backend/app/core/engine/montecarlo.py`** — the forecast, and its
+   `assumptions` block. Read the block before the numbers: it is the clearest
+   single example of what this codebase means by honesty. It states the
+   distribution family and why, the spread's provenance per task, the seed,
+   that resource contention is not simulated, and that independent sampling is
+   optimistic — for a number it could simply have printed.
+9. **`backend/app/services/replay.py`** — every frame is one `evaluate()` call
+   over the same immutable snapshot. There is no simulation in it, and no
+   database write path at all: grep it for `.commit()` and the only hits are
+   Python sets.
+10. **`backend/app/services/requirements.py`**, `_assumptions()` — the sentence
+    that leads it says the report computes a blast radius from the dependency
+    graph and does not read the two texts, so whether the wording really
+    invalidates the work is the user's call. That is the most important
+    sentence in the feature.
 
 Then run the demo: `docs/HOW_TO_DEMO.md`. To deploy it: `docs/DEPLOY.md`.
 
@@ -76,13 +91,35 @@ A factor that cannot be measured reports `available: false`, contributes
 zero, and is listed in the assumptions with what would unlock it. It is never
 imputed and never silently dropped.
 
-**Cannot.** **This is not a probability, and the payload says so four times.**
-It is an additive structural estimate on a 0–1 scale that ranks tasks by
-exposure. It has no calibration data, so it cannot tell you a task is "70%
-likely to slip", and the response names exactly what would make it a real
-probability (per-domain historical variance, and a Monte Carlo pass over it —
-the seam exists and is empty). Band labels (high / moderate / low) are cut
-points on a continuum and are never shown without the number.
+**Can, since Phase 11: state an actual probability.** A seeded Monte Carlo
+samples the three-point estimates tasks already carried — Beta-PERT fitted
+exactly to the three points (D-130) — and returns P50/P80/P90 completion dates,
+the probability of meeting the deadline, a completion histogram, and for every
+task its **criticality index**: the fraction of iterations in which it lay on
+the critical path. That last one is the rigorous form of "at risk of becoming a
+bottleneck", and it is the number the feature exists for. 5,000 iterations over
+a 40-task workflow in **0.267s**, seeded, so a figure on screen is
+reproducible.
+
+**Cannot.** **The structural score is still not a probability, and its payload
+still says so four times** — those four statements are byte-identical to what
+they said before Phase 11, and all 50 tests asserting them pass unmodified.
+Adding a real number licensed stating new assumptions, not deleting old
+caveats.
+
+And the new number is **uncalibrated, and says so**. Nothing in this system has
+ever compared a forecast against what actually happened. It samples durations
+**independently**, which is optimistic because real delays correlate — the week
+the supplier is late is the week the reviewer is on leave — so the true spread
+is wider than reported and P80/P90 are nearer than they look. Resource
+contention is not simulated at all. Beta-PERT is bounded above by the
+pessimistic estimate, so no simulated run can exceed the worst case anyone
+wrote down. All four of those are in the payload, in plain language, not in a
+comment. When there is nothing to sample the structural estimate is returned
+instead and the response says which of the two it is answering with — reading a
+band from one against a number from the other is a category error the payload
+names explicitly. Band labels remain cut points on a continuum and are never
+shown without the number.
 
 ### Capability 3 — simulate hypotheticals without touching the real workflow
 
@@ -126,6 +163,71 @@ gives you is optimal *within your constraints*.
 
 ---
 
+### The three clauses Phase 11 closed
+
+The problem statement asks for a platform that tracks cross-department
+workflows, responsibilities and dependencies **while detecting bottlenecks,
+delays and changing requirements in real time**. Three clauses in that sentence
+were not honestly delivered before Phase 11.
+
+**"In real time."** *Can.* A replay engine walks a project's append-only event
+log forward in accelerated simulated time and streams it over Server-Sent
+Events. Findings appear and clear on their own at the correct simulated day —
+not because anything simulates them, but because `Clock` was already an
+argument to the pure engine, so a check that fires after three idle days fires
+on the day it would have. Every frame is one full `evaluate()` call over the
+same immutable snapshot. Pausable, seekable, restartable, many viewers on one
+replay, and it writes nothing: no event row, no version, not even an
+`AnalysisRun`. The stored content hash is asserted identical before and after.
+
+*Cannot.* A replay lives in the process that started it, so **the backend must
+run as a single process** (D-143) — with more than one worker, the stream and
+the replay can land on different ones and the live screen silently never
+starts. This is not a live feed from a real system either: it replays a log
+that already exists. The GitHub webhook is what lets that log grow on its own.
+
+**"Tracks."** *Can.* A real Jira issue export imports with its dependencies
+intact — including the repeated same-named link columns that `csv.DictReader`
+silently collapses, where every count still looks right while most of the graph
+is gone. Preview then commit, never into a live workflow. Every inference is
+visible per row before anything is created, every unmappable row is reported
+with its reason, and a cycle is refused at preview with the path named. A
+signature-verified GitHub webhook appends transitions to the event log; with no
+secret configured it refuses rather than accepting unsigned writes.
+
+*Cannot.* No Jira API client, no OAuth, no polling sync — the import is a file
+and a webhook. Imported edges all carry `consumes=false`, because a tracker's
+"blocks" link says nothing about artifact consumption; the consequence is that
+an imported project **under-reports its requirement-change blast radius** until
+someone marks the consuming edges by hand. That is stated in the payload and it
+is the sharpest remaining seam between two features that are each correct
+alone.
+
+**"Changing requirements."** *Can.* A first-class capability rather than one of
+seventeen mutation kinds. Asking what a re-wording would cost returns work that
+must be **redone** (it consumed something now wrong) separately from work that
+must merely be **rechecked**, with the consuming path that put each task in its
+list; the days of completed work invalidated, with the arithmetic on the row;
+who needs to know, grouped by owner; the findings created and cleared; and a
+ready-to-apply replan that is a real scenario the existing evaluate / diff /
+apply endpoints accept unchanged. No eighteenth mutation kind was added.
+Requirement versions are first class, with history and diffs.
+
+*Cannot.* **It does not read your two sentences and decide whether the meaning
+changed.** It computes a blast radius from the dependency graph *assuming* the
+meaning moved materially, and the report says so before it says anything else.
+Two different wordings of the same requirement therefore cost exactly the same,
+and comparing them returns an explicit tie rather than an invented difference —
+a comparison becomes real only when the options declare which consumers each
+one spares. And the **projected finish usually does not move**, which is not
+the change being free: the scheduler is status-blind, so completed work already
+occupies its span and re-opening it cannot lengthen the critical path. Rather
+than build a second scheduler to make a demo line come true, the report states
+the limit, names what would lift it, and the screen leads with the effort cost
+instead.
+
+---
+
 ## 3 · Every deliberate deletion
 
 | Deleted | Phase | Why |
@@ -148,11 +250,16 @@ Nothing else was deleted. `backend/alembic/` is inert but retained (D-03).
 
 ## 4 · Test inventory
 
-**780 passing, 0 failing, 0 skipped**, in about 19 seconds — and the same 780 against real Postgres.
+**1,054 passing, 0 failing, 0 skipped**, in about 34 seconds. 780 at the end of Phase 9, 819 after Phase 10's auth work, 1,054 after Phase 11 — and **not one existing test was edited to get there**, which is the number that actually matters. Every caveat the suite pinned before still holds.
 
 | File | Tests | Covers |
 |---|---:|---|
 | `test_properties.py` | 168 | Property tests: mutation inverse round-trips, content-hash order independence, schedule invariants, effort conservation |
+| `test_ingest.py` | 91 | Jira CSV with repeated link columns, every rejected row reported, cycles refused at preview, the signed GitHub webhook, commit parity with a hand-made project |
+| `test_montecarlo.py` | 55 | Seed reproducibility, criticality index at 1.0 and 0.0, P50 ≤ P80 ≤ P90, widening a spread, the assumptions block, the fully-assumed fallback |
+| `test_requirements.py` | 55 | Wasted-effort arithmetic, the no-impact answer, the report mutating nothing, revision history and diffs, comparing wordings, the guarded apply |
+| `test_auth.py` | 39 | The header pair, role enforcement across the matrix, and two tests that walk every route and fail on an unguarded write |
+| `test_stream.py` | 32 | Findings appearing and clearing at the right simulated day, the base hash unchanged, disconnect leaking no task, pause/seek/restart, concurrent viewers |
 | `test_ai_boundary.py` | 85 | The two AI invariants, structured output discipline, SDK contract against recorded responses, every capability under `NullProvider` |
 | `test_mutations.py` | 80 | The closed algebra: schemas, semantic validation, appliers, inverses, rejections |
 | `test_engine.py` | 64 | The migrated engine's behaviour, preserved from the prototype |
