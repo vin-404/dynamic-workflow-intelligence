@@ -36,6 +36,10 @@ import RiskPanel from "@/components/RiskPanel";
 import VersionHistory from "@/components/VersionHistory";
 import WhatIfPanel from "@/components/WhatIfPanel";
 import WorkflowBuilder from "@/components/WorkflowBuilder";
+import ForecastPanel from "@/components/ForecastPanel";
+import ImportPanel from "@/components/ImportPanel";
+import LiveFeed from "@/components/LiveFeed";
+import RequirementChange from "@/components/RequirementChange";
 import { MemberList, ProjectCreate } from "@/components/SetupPanel";
 import {
   Badge,
@@ -51,19 +55,23 @@ import {
 
 type Stage =
   | "build"
+  | "live"
   | "analyze"
   | "risk"
+  | "requirements"
   | "whatif"
   | "optimize"
   | "history";
 
 const STAGES: { id: Stage; label: string; needsWorkflow: boolean }[] = [
   { id: "build", label: "1 · Build", needsWorkflow: false },
-  { id: "analyze", label: "2 · Bottlenecks", needsWorkflow: true },
-  { id: "risk", label: "3 · Predicted risk", needsWorkflow: true },
-  { id: "whatif", label: "4 · What if", needsWorkflow: true },
-  { id: "optimize", label: "5 · Better workflows", needsWorkflow: true },
-  { id: "history", label: "6 · History", needsWorkflow: false },
+  { id: "live", label: "2 · Live", needsWorkflow: true },
+  { id: "analyze", label: "3 · Bottlenecks", needsWorkflow: true },
+  { id: "risk", label: "4 · Forecast", needsWorkflow: true },
+  { id: "requirements", label: "5 · Requirements", needsWorkflow: true },
+  { id: "whatif", label: "6 · What if", needsWorkflow: true },
+  { id: "optimize", label: "7 · Better workflows", needsWorkflow: true },
+  { id: "history", label: "8 · History", needsWorkflow: false },
 ];
 
 export default function Home() {
@@ -75,6 +83,7 @@ export default function Home() {
   const [stage, setStage] = useState<Stage>("build");
   const [viewVersion, setViewVersion] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState<ApiError | string | null>(null);
   const [busy, setBusy] = useState(false);
   // Who you are: the Google session, read once on mount. Not a choice made
@@ -252,13 +261,28 @@ export default function Home() {
             }}
             onCancel={() => setCreating(false)}
           />
+        ) : importing ? (
+          <ImportPanel
+            onImported={async (projectId) => {
+              setImporting(false);
+              const fresh = await listProjects();
+              setProjects(fresh);
+              const created = fresh.find((p) => p.id === projectId);
+              if (created) await open(created);
+            }}
+          />
         ) : (
           <Card>
             <CardTitle
               right={
-                <Button variant="primary" onClick={() => setCreating(true)}>
-                  New workflow
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button onClick={() => setImporting(true)}>
+                    Import from Jira
+                  </Button>
+                  <Button variant="primary" onClick={() => setCreating(true)}>
+                    New workflow
+                  </Button>
+                </div>
               }
             >
               Open a workflow
@@ -409,6 +433,21 @@ export default function Home() {
           </Section>
         )}
 
+        {workflow && stage === "live" && (
+          <Section
+            title="Watch it happen"
+            subtitle="The event log replayed in accelerated time. Findings appear and clear on their own, at the simulated day they would have. Nothing here writes to your workflow."
+          >
+            <ErrorBoundary what="The live replay" resetKey={stage}>
+              <LiveFeed
+                projectId={project.id}
+                workflow={workflow}
+                analysis={analysis}
+              />
+            </ErrorBoundary>
+          </Section>
+        )}
+
         {stage === "analyze" && (
           <Section
             title="Where it is stuck now"
@@ -523,6 +562,20 @@ export default function Home() {
               />
               </ErrorBoundary>
             )}
+            <ErrorBoundary what="The forecast" resetKey={stage}>
+              <ForecastPanel projectId={project.id} />
+            </ErrorBoundary>
+          </Section>
+        )}
+
+        {workflow && stage === "requirements" && (
+          <Section
+            title="When a requirement changes"
+            subtitle="What a new wording would invalidate, what it would cost, and who needs to know — computed before anything is applied."
+          >
+            <ErrorBoundary what="The requirement panel" resetKey={stage}>
+              <RequirementChange projectId={project.id} workflow={workflow} />
+            </ErrorBoundary>
           </Section>
         )}
 
