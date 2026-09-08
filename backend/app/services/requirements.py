@@ -1085,13 +1085,31 @@ async def impact(
         "base_unchanged": base_after.content_hash == hash_before,
         "applied": False,
 
+        # Two very different situations produce identical zeros, and saying
+        # the wrong one is worse than saying nothing. "Nothing consumes this"
+        # is a fact about the workflow; "you scoped every consumer out" is a
+        # report of the reader's own judgement. Asserting the first when the
+        # second is true tells someone their requirement is free to change
+        # when what actually happened is that they said so themselves.
         "statement": (
             _headline(req.key, stale, wasted, who, schedule)
             if not nothing_happened else
-            f"Nothing consumes {req.key} and nothing follows work that does, "
-            f"so re-wording it invalidates no work, wastes no completed "
-            f"effort and moves no date. That is a real answer, not an empty "
-            f"one: this requirement can be changed freely."
+            (
+                f"Nothing is invalidated, because every task that consumes "
+                f"{req.key} was scoped out of this change. "
+                f"{req.key} is consumed by "
+                f"{', '.join(sorted(req.consumed_by))}, and you marked each "
+                f"one as work this wording does not invalidate. The zero "
+                f"below is your judgement about meaning, not a finding about "
+                f"the workflow."
+            )
+            if scoped and req.consumed_by else
+            (
+                f"Nothing consumes {req.key} and nothing follows work that "
+                f"does, so re-wording it invalidates no work, wastes no "
+                f"completed effort and moves no date. That is a real answer, "
+                f"not an empty one: this requirement can be changed freely."
+            )
         ),
         "no_impact": nothing_happened,
         "assumptions": _assumptions(

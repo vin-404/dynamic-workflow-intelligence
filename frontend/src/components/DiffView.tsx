@@ -38,6 +38,22 @@ import { days } from "./ui";
 const ICON = "size-3.5 shrink-0";
 /** Column and section labels: small, quiet, upper. */
 const LABEL = "text-[11px] font-medium uppercase tracking-wider text-dim";
+/**
+ * A list whose length is the workflow's, not the diff's, scrolls in its own
+ * box.
+ *
+ * Three things here are one row per *task* or per *mutation* rather than a
+ * fixed set of measurements: the moved-tasks table, the unavailability
+ * adjustments and the inverse mutations. On the seeded fixtures they are a
+ * dozen rows and this changes nothing; on an imported Jira export of four
+ * hundred issues, "which tasks move" is four hundred rows pushing the
+ * immutability proof — the thing at the bottom that a sceptical reader came
+ * for — a screen and a half below the fold. The comparison table itself is
+ * deliberately *not* capped: it is seven rows by construction and it is the
+ * answer.
+ */
+const SCROLL =
+  "max-h-[24rem] overflow-y-auto overscroll-contain rounded-md border border-border/60";
 
 /**
  * Better, worse, or no change — in the three states `severity.ts` already
@@ -317,7 +333,8 @@ export default function DiffView({ result }: { result: SimulationResponse }) {
           >
             Which tasks move, and by how much
           </Head>
-          <Table className="max-w-4xl text-[13px]">
+          <div className={cn(SCROLL, "max-w-4xl")}>
+          <Table className="text-[13px]">
             <TableHeader>
               <TableRow className="border-border hover:bg-transparent">
                 <TableHead className={cn("h-7 px-2", LABEL)}>Task</TableHead>
@@ -372,6 +389,7 @@ export default function DiffView({ result }: { result: SimulationResponse }) {
               ))}
             </TableBody>
           </Table>
+          </div>
         </section>
       )}
 
@@ -389,15 +407,17 @@ export default function DiffView({ result }: { result: SimulationResponse }) {
           <p className="mb-1.5 max-w-3xl text-xs text-dim">
             {result.after.resource_unavailability.method}
           </p>
-          <ul className="flex flex-col gap-0.5 text-xs">
-            {result.after.resource_unavailability.adjustments?.map((a) => (
-              <li key={a.task}>
-                <span className="font-mono text-dim">{a.task}</span>{" "}
-                {a.task_name} — {days(a.days_added)} added because{" "}
-                {a.resource_name} is away during its window
-              </li>
-            ))}
-          </ul>
+          <div className={cn(SCROLL, "max-w-3xl px-2.5 py-1.5")}>
+            <ul className="flex flex-col gap-0.5 text-xs">
+              {result.after.resource_unavailability.adjustments?.map((a) => (
+                <li key={a.task}>
+                  <span className="font-mono text-dim">{a.task}</span>{" "}
+                  {a.task_name} — {days(a.days_added)} added because{" "}
+                  {a.resource_name} is away during its window
+                </li>
+              ))}
+            </ul>
+          </div>
         </section>
       )}
 
@@ -444,14 +464,20 @@ export default function DiffView({ result }: { result: SimulationResponse }) {
             {result.scenario_hash.slice(0, 32)}…
           </dd>
         </dl>
-        <Reveal summary="The mutations that would undo this">
-          <ul className="flex flex-col gap-0.5 font-mono text-[11px] text-dim">
-            {result.inverse_mutations.map((m, i) => (
-              <li key={i}>
-                {m.kind} {JSON.stringify(m.payload)}
-              </li>
-            ))}
-          </ul>
+        <Reveal
+          summary={`The ${result.inverse_mutations.length} mutation${
+            result.inverse_mutations.length === 1 ? "" : "s"
+          } that would undo this`}
+        >
+          <div className={cn(SCROLL, "max-w-3xl px-2.5 py-1.5")}>
+            <ul className="flex flex-col gap-0.5 font-mono text-[11px] break-all text-dim">
+              {result.inverse_mutations.map((m, i) => (
+                <li key={i}>
+                  {m.kind} {JSON.stringify(m.payload)}
+                </li>
+              ))}
+            </ul>
+          </div>
         </Reveal>
       </section>
     </div>

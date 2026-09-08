@@ -55,6 +55,32 @@
   }
 }
 
+/*
+ * `color-scheme` is what makes the *browser's own* widgets follow the theme -
+ * the date picker's calendar indicator, scrollbars, the focus ring on native
+ * controls. Nothing set it before, so Chromium painted every one of them for a
+ * light page: on the dark canvas the date inputs' calendar glyph came out
+ * black on near-black and was effectively invisible. Found by looking at a
+ * screenshot, not by reading a class list.
+ *
+ * It belongs here rather than as a utility class on each `type="date"`,
+ * because it is a property of the theme and not of an input - the same two
+ * inputs in two different panels had already grown two different answers.
+ */
+:root {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not(.light) {
+    color-scheme: dark;
+  }
+}
+
+:root.dark {
+  color-scheme: dark;
+}
+
 /* --------------------------------------------------------------- light mode */
 
 :root {

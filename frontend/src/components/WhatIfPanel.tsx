@@ -306,14 +306,47 @@ function RecipeForm({
   const recipe = RECIPES.find((r) => r.id === recipeId)!;
   const set = (k: string, v: string) => setArgs({ ...args, [k]: v });
 
-  const ready = recipe.needs.every((need) => {
-    if (need === "task") return !!args.task;
-    if (need === "resource") return !!args.resource;
-    if (need === "days") return !!args.days;
-    if (need === "parts") return !!args.parts;
-    if (need === "window") return !!args.from_day && !!args.to_day;
-    return true;
-  });
+  /**
+   * Why "Add change" is unavailable, in the user's words, or `null`.
+   *
+   * The original guard only asked whether each field had *something* in it,
+   * so three shapes of nonsense reached the engine and came back as a
+   * refusal: an unavailability window that ends before it starts, and a
+   * "stop one task waiting on another" naming the same task twice, which is
+   * an edge that cannot exist. A refusal is a good thing when the system
+   * declined something meaningful; spending one on a form the composer could
+   * have caught teaches the reader to discount them.
+   */
+  const blocked = ((): string | null => {
+    for (const need of recipe.needs) {
+      if (need === "task" && !args.task) return "choose a task";
+      if (need === "resource" && !args.resource) {
+        return recipeId === "drop_dep"
+          ? "choose the task that would stop waiting"
+          : workflow.resources.length === 0
+            ? "this workflow has nobody to be unavailable"
+            : "choose who";
+      }
+      if (need === "days" && !(Number(args.days) > 0)) {
+        return "the delay has to be more than zero days";
+      }
+      if (need === "parts" && !(Number(args.parts) >= 1)) {
+        return recipeId === "capacity"
+          ? "capacity has to be at least one"
+          : "a task has to be split across at least one person";
+      }
+      if (need === "window") {
+        if (!args.from_day || !args.to_day) return "set both days";
+        if (Number(args.to_day) <= Number(args.from_day)) {
+          return "the window has to end after it starts";
+        }
+      }
+    }
+    if (recipeId === "drop_dep" && args.task && args.task === args.resource) {
+      return "a task cannot wait on itself, so there is no such dependency";
+    }
+    return null;
+  })();
 
   return (
     <div className="flex flex-wrap items-end gap-2">
@@ -407,7 +440,7 @@ function RecipeForm({
 
       <Button
         variant="secondary"
-        disabled={!ready}
+        disabled={blocked !== null}
         onClick={() => {
           const mutations = recipe.build(args);
           onAdd(mutations[0], recipe.describe(args));
@@ -415,6 +448,9 @@ function RecipeForm({
       >
         Add change
       </Button>
+      {blocked && (
+        <span className="pb-1.5 text-[11px] text-dim">{blocked}</span>
+      )}
     </div>
   );
 }

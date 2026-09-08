@@ -16,6 +16,19 @@
  * Both of those, and the note saying this text cannot introduce a number,
  * are unconditional: there is no disclosure to open and no card to close.
  * The narration reads as a quoted aside off a rule, not as a boxed panel.
+ *
+ * So is the third: **which numbers were checked**. That line used to appear
+ * only when the list was non-empty, which meant the guarantee was invisible
+ * in exactly the case where it had nothing to report - and "no numbers were
+ * checked" and "the check did not run" looked identical on screen. It is
+ * unconditional now, and says `none` in words.
+ *
+ * Phase 11 added a real probability to this product, on the forecast stage.
+ * This component gained nothing from it. It narrates the deterministic
+ * analysis of the stage it is mounted on; it is never handed a forecast
+ * number and has no numeric claim of its own, and the scope line beside the
+ * button says so rather than leaving a reader to assume the reach of a
+ * "plain language" button.
  */
 
 import { useState } from "react";
@@ -52,7 +65,8 @@ export default function Explainer({ projectId }: { projectId: string }) {
             {busy ? "Writing…" : "Say this in plain language"}
           </Button>
           <span className="text-xs text-muted-foreground">
-            Rewords the analysis above. It cannot change a number.
+            Rewords the findings and the schedule above. It cannot change a
+            number, and it is never given the forecast&apos;s.
           </span>
         </div>
       )}
@@ -96,14 +110,17 @@ export default function Explainer({ projectId }: { projectId: string }) {
             </div>
           )}
 
-          {narration.numbers_checked.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Numbers checked against the engine output:{" "}
+          {/* Unconditional: "none" is a result, not an absence of one. */}
+          <p className="text-xs text-muted-foreground">
+            Numbers checked against the engine output:{" "}
+            {narration.numbers_checked.length > 0 ? (
               <span className="font-mono">
                 {narration.numbers_checked.join(", ")}
               </span>
-            </p>
-          )}
+            ) : (
+              <span>none — this wording states no figure of its own</span>
+            )}
+          </p>
 
           <p className="text-xs text-muted-foreground">{narration.note}</p>
         </div>

@@ -12,6 +12,15 @@
  * probability. The three-point range is three deterministic schedule runs,
  * and the panel says so where the range appears.
  *
+ * Phase 11 put a real probability on this same stage, in the forecast panel
+ * below. Nothing here was softened for it - the disclaimer, the
+ * `is_probability: false` labelling and the three-point method note are all
+ * byte-identical. What changed is that the two sentences the backend added to
+ * keep the two numbers apart are now on screen, and the block explaining why
+ * *this* range carries no percentage came out of its disclosure, because a
+ * reader who never opens a triangle now has a percentage on the same screen
+ * and no account of why this number is not one.
+ *
  * Layout follows from that: the nine-factor table is the largest thing on the
  * stage and the score is a single small figure beside its task's name. The
  * table is never collapsed - picking a row in the exposure list re-points it,
@@ -19,7 +28,6 @@
  */
 
 import { useState } from "react";
-import { ChevronRightIcon } from "lucide-react";
 import { Analysis, RiskFactor, TaskRisk } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { bandClasses, bandText, severityFill } from "@/lib/severity";
@@ -37,9 +45,22 @@ import {
 } from "@/components/ui/table";
 import { Assumptions, Worked, days } from "./ui";
 
-const SUMMARY =
-  "flex cursor-pointer list-none items-center gap-1 marker:content-none " +
-  "[&::-webkit-details-marker]:hidden";
+/**
+ * Read a documented-but-untyped string off a payload block.
+ *
+ * `lib/api.ts` types `risk.assumptions` and `three_point.monte_carlo` as
+ * closed objects, and that file belongs to the integrator. Phase 11's backend
+ * added three sentences to those two blocks whose entire job is to keep the
+ * structural score and the forecast from being read against each other. The
+ * client's own rule is that the honesty layer must not need a type update to
+ * become visible - so they are read defensively here rather than left off the
+ * screen until someone widens an interface. A missing key renders nothing;
+ * it never renders `undefined`.
+ */
+function prose(block: object, key: string): string | null {
+  const v = (block as Record<string, unknown>)[key];
+  return typeof v === "string" && v.trim().length > 0 ? v : null;
+}
 
 /**
  * A risk *band* is `low` / `moderate` / `high`; `severityFill` speaks
@@ -147,29 +168,30 @@ export default function RiskPanel({
               {tp.method}
             </p>
 
-            <details className="group">
-              <summary
-                className={cn(
-                  SUMMARY,
-                  "text-xs text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <ChevronRightIcon
-                  aria-hidden
-                  className="size-3.5 transition-transform group-open:rotate-90"
-                />
-                Why there is no percentage here
-              </summary>
-              <div className="mt-1.5 flex max-w-4xl flex-col gap-1 border-l border-border pl-3 text-xs">
-                <p className="text-foreground/90">{tp.monte_carlo.why}</p>
+            {/*
+              * Open, not a disclosure (D-105). This is the block that says
+              * why the range above is not a likelihood, and there is now a
+              * genuine probability further down the same stage - so leaving
+              * it one click away is leaving the two numbers one click away
+              * from being confused.
+              */}
+            <div className="flex max-w-4xl flex-col gap-1 border-l border-border pl-3 text-xs">
+              <p className="text-[11px] font-medium tracking-wider uppercase text-muted-foreground">
+                Why this range carries no percentage
+              </p>
+              <p className="text-foreground/90">{tp.monte_carlo.why}</p>
+              <p className="text-muted-foreground">
+                It would report: {tp.monte_carlo.what_it_would_report}
+              </p>
+              <p className="text-severity-medium">
+                {tp.monte_carlo.why_not_faked}
+              </p>
+              {prose(tp.monte_carlo, "now_computable_separately") && (
                 <p className="text-muted-foreground">
-                  It would report: {tp.monte_carlo.what_it_would_report}
+                  {prose(tp.monte_carlo, "now_computable_separately")}
                 </p>
-                <p className="text-severity-medium">
-                  {tp.monte_carlo.why_not_faked}
-                </p>
-              </div>
-            </details>
+              )}
+            </div>
           </>
         )}
       </section>
@@ -190,6 +212,17 @@ export default function RiskPanel({
         <p className="max-w-4xl text-xs text-muted-foreground">
           {risk.assumptions.disclaimer}
         </p>
+        {/*
+          * The sentence that keeps this number and the forecast's apart. It
+          * belongs beside the score rather than in the assumptions block at
+          * the foot of the section, because the mistake it prevents is made
+          * while looking at the ranking.
+          */}
+        {prose(risk.assumptions, "score_kind_is_not_the_forecast_kind") && (
+          <p className="max-w-4xl text-xs text-severity-medium">
+            {prose(risk.assumptions, "score_kind_is_not_the_forecast_kind")}
+          </p>
+        )}
 
         <FactorTable task={focus} />
 
@@ -256,6 +289,11 @@ export default function RiskPanel({
             ],
             ["Rework modelled", risk.assumptions.rework_modelled ? "yes" : "no"],
             ["Monte Carlo run", risk.assumptions.monte_carlo_run ? "yes" : "no"],
+            [
+              "A probability, separately",
+              prose(risk.assumptions, "forecast_offered_separately") ??
+                "The forecast panel below samples the same three-point estimates and reports a probability. It is a different number on a different scale.",
+            ],
             [
               "Factors unavailable",
               risk.assumptions.factors_unavailable.length

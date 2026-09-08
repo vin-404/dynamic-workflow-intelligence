@@ -67,7 +67,7 @@ const STAGES: { id: Stage; label: string; needsWorkflow: boolean }[] = [
   { id: "build", label: "1 · Build", needsWorkflow: false },
   { id: "live", label: "2 · Live", needsWorkflow: true },
   { id: "analyze", label: "3 · Bottlenecks", needsWorkflow: true },
-  { id: "risk", label: "4 · Forecast", needsWorkflow: true },
+  { id: "risk", label: "4 · Risk & forecast", needsWorkflow: true },
   { id: "requirements", label: "5 · Requirements", needsWorkflow: true },
   { id: "whatif", label: "6 · What if", needsWorkflow: true },
   { id: "optimize", label: "7 · Better workflows", needsWorkflow: true },
@@ -525,12 +525,12 @@ export default function Home() {
         {stage === "risk" && (
           <Section
             title="Where it is likely to get stuck"
-            subtitle="A structural estimate, not a probability — with every factor, weight and reason on show."
+            subtitle="Two different numbers, and the stage says which is which: a structural estimate that ranks exposure and is not a probability, and — when there is anything to sample — a seeded forecast that is one, under a stated and uncalibrated model."
           >
             {busy && !analysis && <Spinner label="Scoring…" />}
             {!busy && !analysis && (
               <EmptyState
-                title="Nothing scored yet"
+                title="The structural score is not computed yet"
                 action={
                   <Button
                     variant="primary"
@@ -541,7 +541,8 @@ export default function Home() {
                 }
               >
                 Risk is computed from the same evaluation as the findings, so
-                it arrives with them.
+                it arrives with them. The forecast below samples the stored
+                workflow directly and does not wait for it.
               </EmptyState>
             )}
             {analysis && (
@@ -574,7 +575,18 @@ export default function Home() {
             subtitle="What a new wording would invalidate, what it would cost, and who needs to know — computed before anything is applied."
           >
             <ErrorBoundary what="The requirement panel" resetKey={stage}>
-              <RequirementChange projectId={project.id} workflow={workflow} />
+              <RequirementChange
+                projectId={project.id}
+                workflow={workflow}
+                // Applying a requirement change seals a new version, so every
+                // other stage is now looking at the old one. Re-read it here
+                // rather than leaving the panel to warn about staleness it
+                // cannot fix.
+                onApplied={() => {
+                  setAnalysis(null);
+                  void load(project.id, null);
+                }}
+              />
             </ErrorBoundary>
           </Section>
         )}

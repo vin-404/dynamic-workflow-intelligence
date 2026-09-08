@@ -2659,3 +2659,162 @@ POST            /api/import/preview | /api/import/commit
 GET             /api/import/samples | /api/import/samples/{name} | .../raw
 POST            /api/ingest/github
 ```
+
+---
+
+# PHASE 11, WAVE 3 — THE SCREENS
+
+Tag `wave-3-design`. Four frontend agents in parallel, plus one follow-up pass.
+
+This wave was **deferred, not skipped**. The Phase 10 wave-2 session was
+rewriting six of the same panel files in this same working tree; starting
+against its mid-wave snapshots would have meant designing them twice and
+silently overwriting someone's work. It committed `c0807d2` / `wave-2-design`,
+handed the tree over, and this wave built on that — under its D-101 … D-128
+rather than around them.
+
+## 1 · WHAT CHANGED
+
+Three new screens and four rebuilt ones.
+
+**The live screen.** A running clock, events arriving, and findings that appear
+and clear on their own at the correct simulated day. The dependency map is the
+hero in a wide main column with a narrow inspector rail. Play, pause, speed,
+scrub, restart. A viewer arriving mid-replay is handed current state, never an
+empty screen. Nothing on it writes.
+
+**The requirement screen.** Leads with the cost: days of completed work
+invalidated, the blast radius, who needs to know grouped by owner, and the
+arithmetic on every row — then the ready-to-apply replan.
+
+**The forecast panel.** P50/P80/P90, the probability of meeting the deadline, a
+completion histogram, and every task's criticality index, ranked.
+
+**The import panel.** Preview then commit, with every inference the importer
+made visible per row before anything is created.
+
+## 2 · WHAT EACH AGENT PRODUCED
+
+**Integration (not delegated).** `src/lib/api.ts`'s Phase 11 block, `page.tsx`'s
+eight stages and mount points, `journey.mjs`, `globals.css`'s `color-scheme`,
+and the `services/requirements.py` sentence fix. Committed as `757510b` before
+the agents ran, for D-129's reason one layer up.
+
+**UI-LIVE** — `LiveFeed.tsx` (the whole stage, one mount point), `Clock.tsx`,
+`ReplayControls.tsx`, and `DependencyGraph.tsx` extended by **+131/−8** rather
+than forked: an optional `LiveOverlay` prop folded into an `Analysis`-shaped
+view in one memo at the top, so every line of packing, scaling and lane code
+below stays shared and unbranched, and the analyze stage pays nothing.
+
+**UI-REQUIRE** — `RequirementChange.tsx`, `ImpactReport.tsx`,
+`RequirementHistory.tsx`, plus a follow-up pass adding the scoped badge and the
+`onApplied` callback.
+
+**UI-ANALYSIS** — `ForecastPanel.tsx` (13-line stub → ~1,060 lines), and
+`FindingsPanel` / `RiskPanel` / `Explainer` extended.
+
+**UI-CHANGE** — `ImportPanel.tsx`, and `WhatIfPanel` / `OptimizePanel` /
+`DiffView` extended.
+
+## 3 · TESTS
+
+| Check | Result |
+|---|---|
+| `pytest backend/tests -q` | **1054 passed**, 0 failed |
+| `demo_check` (model disabled) | **ALL BEATS PASSED** |
+| `demo_check --provider recorded` | **ALL BEATS PASSED** |
+| `npm run e2e` | **ALL CHECKS PASSED** |
+| `npm run e2e:ai` | **ALL CHECKS PASSED** |
+| `npm run e2e:hardening` | **ALL CHECKS PASSED** |
+| `npx tsc --noEmit` | clean |
+| `npm run lint` | clean |
+| `npm run build` | succeeds |
+
+`journey.mjs` gained sections for live, forecast and requirements. The live one
+asserts the simulated clock **advances on its own** (`0 -> 3` across a 3.5s
+wait), because a screenshot cannot tell a running replay from a stopped one —
+which is the entire risk on that screen.
+
+## 4 · WHAT WAS VERIFIED BY THE ORCHESTRATOR, NOT TAKEN ON REPORT
+
+* **SSE survives the Next proxy** — measured before any agent built on it, in a
+  real browser with a real session: `catchup` at 19ms, then a frame every
+  ~265ms spread over 3.45s, one simulated day each, not buffered. The single
+  biggest risk in the wave, settled as a measurement rather than an argument.
+* **Every reported API mismatch, re-checked against a live response** before
+  changing a line. All four UI-REQUIRE reported were real, as was UI-LIVE's
+  fifth (`ReplayTimeline`). See §6.
+* **The `e2e:ai` failure was diagnosed, not assumed to be a regression.** The
+  seeded project had a `v2 "demo"` version applied — by an earlier
+  `demo_check` run of my own — so its projected end was 22.0 instead of the
+  pristine 26.0 and an exact-number assertion no longer matched. Dev-database
+  state. It passes on a reset database, which is what `HOW_TO_DEMO.md` has
+  always told you to do first.
+* **The running dev backend was serving stale code** — still returning the old,
+  factually wrong `no_impact` sentence hours after the source was fixed.
+  Caught by probing the live server rather than trusting that a dev server
+  reloads; restarted with the same enforcing config before final verification,
+  so the walkthroughs exercise current code.
+
+## 5 · DECISIONS
+
+D-160 … D-172. The ones that changed what someone else must do:
+
+* **D-166 — the requirement screen leads with wasted effort, not the date**,
+  and `+0d` never appears alone while completed days are lost. This corrects
+  the phase brief's own scripted demo line.
+* **D-167 — a scoped report says so on the headline.** Otherwise a scoped
+  zero is screenshot-indistinguishable from an unscoped one.
+* **D-168 — the forecast renders exactly one answer**, and its disambiguation
+  table contains no figures. A warning is a request; a missing code path is a
+  guarantee.
+* **D-172 — the stage is "Risk & forecast"**, because it carries both numbers.
+
+## 6 · THE MISTAKE WORTH RECORDING
+
+`src/lib/api.ts` was written from payloads captured against a running backend
+rather than transcribed from the wave-2 agents' reports. That was the right
+instinct and it was still not enough: **five types were wrong**, every one of
+them nested a level below what the capture printed.
+
+| Type | Written as | Actually |
+|---|---|---|
+| `OwnerImpact.must_redo` | `string[]` | task objects with `name`, `status`, `effort_days` |
+| `RequirementComparison.options[]` | `report`, top-level `statement` | `impact`; sentence on `differences.statement` |
+| `RequirementRevision` | `changed_at`, `consumed_by_task_keys` | `recorded_at`, `consumed_by` |
+| `applyRequirementChange` | `{version_id, version_no}` | neither exists — `to_version`, `new_version{}`, `parent_version.unchanged` |
+| `ReplayTimeline` | `step_days: number[]` | `steps: [{day, date, events}]` |
+
+Every one was found by an agent building against it, and the fourth would have
+shipped a success banner reading **"Version undefined was written"**. Two
+agents wrote defensive shape-readers around the wrong types; both were
+simplified once the types were corrected, rather than left as dead code with a
+stale justification. The lesson is narrow and worth keeping: **capture nested
+shapes, not top-level keys.**
+
+## 7 · WHAT WORRIES ME
+
+1. **`must_redo` is only as good as the `consumes` flags, and imported edges
+   have none.** D-149 makes every imported dependency `consumes=false`, so an
+   imported project reports a smaller blast radius than the real one. Both
+   halves are stated in the payloads, but nothing on the requirements stage
+   says "this project was imported". That is the sharpest remaining gap
+   between two features that each behave correctly alone.
+2. **The independence assumption still makes the forecast too confident**, and
+   no amount of frontend care fixes it. It is stated in plain language beside
+   the number rather than behind a disclosure, which is the most the UI can do.
+3. **`no_impact` with genuinely zero consumers is untested on screen.** No
+   seeded requirement has none. The code path is the simple one — it renders
+   `report.statement` unchanged, with the scoped badge correctly absent.
+4. **`dropped_frames` is code-verified only.** Provoking a 512-frame queue
+   overflow needs a subscriber slower than anything a browser does naturally.
+5. **The forecast panel is long.** The assumptions layer on a Beta-PERT model
+   is genuinely large prose. It is ordered numbers-first and only caveats that
+   qualify a specific figure were lifted beside it; not one sentence was
+   shortened.
+6. **`result.next` renders developer-facing prose on a user screen** after an
+   import (`POST /api/projects/{id}/analyze`). Kept verbatim rather than
+   paraphrasing an API field, but it reads oddly.
+7. **The live stage logs a 404 on every cold arrival**, by design (D-164). The
+   walkthrough exempts exactly that one URL. A future reader may reasonably
+   prefer the route to answer 200-with-`running:false`.

@@ -58,6 +58,8 @@ export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
     );
   }, [analysis.findings, tierFilter]);
 
+  const shown = groups.reduce((n, [, findings]) => n + findings.length, 0);
+
   const tiers = Object.keys(analysis.finding_counts_by_tier)
     .map(Number)
     .sort();
@@ -103,15 +105,25 @@ export default function FindingsPanel({ analysis }: { analysis: Analysis }) {
       ) : (
         <>
           <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+            {/*
+              * Both halves of this sentence count the same set. It used to
+              * read the unfiltered total against the filtered cause count, so
+              * picking a tier said "11 findings across 2 causes" while two
+              * findings were on screen. The total is still reachable - it is
+              * on the "all tiers" control - so nothing was lost by making the
+              * headline agree with the rows beneath it.
+              */}
             <h3 className="text-sm">
               <span className="font-semibold">
-                {analysis.findings.length} finding
-                {analysis.findings.length === 1 ? "" : "s"}
+                {shown} finding{shown === 1 ? "" : "s"}
               </span>
               <span className="text-muted-foreground">
                 {" "}
                 across {groups.length} cause
                 {groups.length === 1 ? "" : "s"}
+                {tierFilter !== null
+                  ? ` · tier ${tierFilter} of ${analysis.findings.length}`
+                  : ""}
               </span>
             </h3>
             <div className="ml-auto flex flex-wrap items-center gap-1">
@@ -260,7 +272,12 @@ function FindingRow({
             {finding.severity}
           </span>
           {onCriticalPath && (
-            <span className="text-[11px] text-accent">critical path</span>
+            <span
+              className="text-[11px] text-accent"
+              title="Zero slack in today's deterministic schedule. The forecast stage reports the probabilistic form of this - the fraction of simulated runs in which the task lay on the critical path."
+            >
+              critical path
+            </span>
           )}
           <span className="text-[11px] text-muted-foreground">
             tier {finding.tier} · {finding.tier_name}

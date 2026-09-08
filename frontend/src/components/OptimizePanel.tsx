@@ -46,6 +46,28 @@ const LABEL = "text-[11px] font-medium uppercase tracking-wider text-dim";
 /** A constraint id, a generator name: an identifier on record, not a status. */
 const TOKEN =
   "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
+/**
+ * The whole-field comparison scrolls in its own box.
+ *
+ * It is one row per candidate, and the budget above it goes to 500 — so the
+ * one control on this screen that can make the table enormous is sitting
+ * directly above the table. The per-candidate criterion table is not capped:
+ * it is six rows, one per criterion, and it is the thing the panel exists to
+ * show.
+ */
+const SCROLL =
+  "max-h-[26rem] overflow-y-auto overscroll-contain rounded-md border border-border/60";
+
+/** The server's own bounds on the budget, enforced before the request. */
+const BUDGET = {
+  candidates: { min: 1, max: 500 },
+  seconds: { min: 1, max: 60 },
+};
+
+function clamp(value: number, min: number, max: number): number {
+  if (!Number.isFinite(value)) return min;
+  return Math.min(max, Math.max(min, Math.round(value)));
+}
 
 /**
  * What the search is doing, in the order it does it.
@@ -153,9 +175,21 @@ export default function OptimizePanel({
     setBusy(true);
     setError(null);
     try {
+      // Clamped here rather than on every keystroke: `min`/`max` on a number
+      // input are advisory, and clearing the field makes `Number("")` zero -
+      // which is a budget of nothing, refused by the server with a message
+      // about a field the user was only in the middle of retyping. Clamping
+      // at the request keeps the field editable and the request valid.
       const response = await optimize(projectId, {
         aggressive: withAggressive,
-        budget: { max_candidates: maxCandidates, max_seconds: maxSeconds },
+        budget: {
+          max_candidates: clamp(
+            maxCandidates,
+            BUDGET.candidates.min,
+            BUDGET.candidates.max,
+          ),
+          max_seconds: clamp(maxSeconds, BUDGET.seconds.min, BUDGET.seconds.max),
+        },
         objectives: weights ?? undefined,
       });
       setResult(response);
@@ -213,8 +247,8 @@ export default function OptimizePanel({
             <span className={LABEL}>Max candidates</span>
             <Input
               type="number"
-              min={1}
-              max={500}
+              min={BUDGET.candidates.min}
+              max={BUDGET.candidates.max}
               value={maxCandidates}
               onChange={(e) => setMaxCandidates(Number(e.target.value))}
             />
@@ -223,8 +257,8 @@ export default function OptimizePanel({
             <span className={LABEL}>Max seconds</span>
             <Input
               type="number"
-              min={1}
-              max={60}
+              min={BUDGET.seconds.min}
+              max={BUDGET.seconds.max}
               value={maxSeconds}
               onChange={(e) => setMaxSeconds(Number(e.target.value))}
             />
@@ -494,14 +528,16 @@ function CandidateBody({
 
       <div className="mb-3">
         <div className="mb-1 text-[11px] text-dim">The exact changes:</div>
-        <ol className="flex flex-col gap-0.5 font-mono text-[11px]">
-          {candidate.mutation_summary.map((m, i) => (
-            <li key={i} className="flex gap-2">
-              <span className="w-4 shrink-0 text-right text-dim">{i + 1}</span>
-              <span className="min-w-0">{m}</span>
-            </li>
-          ))}
-        </ol>
+        <div className={cn(SCROLL, "max-w-3xl px-2.5 py-1.5")}>
+          <ol className="flex flex-col gap-0.5 font-mono text-[11px]">
+            {candidate.mutation_summary.map((m, i) => (
+              <li key={i} className="flex gap-2">
+                <span className="w-4 shrink-0 text-right text-dim">{i + 1}</span>
+                <span className="min-w-0">{m}</span>
+              </li>
+            ))}
+          </ol>
+        </div>
       </div>
 
       {candidate.scores && (
@@ -598,9 +634,14 @@ function CandidateBody({
 /* ------------------------------------------------------ the whole field */
 
 function ComparisonTable({ result }: { result: OptimizeResponse }) {
-  const criteria = result.candidates[0]?.scores?.criteria ?? [];
+  // The header comes from whichever candidate actually carries scores, not
+  // from the first one: an unscored candidate at the head of the list left
+  // the table with no column headings while every row below it had cells.
+  const criteria =
+    result.candidates.find((c) => c.scores)?.scores?.criteria ?? [];
   return (
     <div>
+      <div className={SCROLL}>
       <Table className="min-w-[760px] text-xs">
         <TableHeader>
           <TableRow className="border-border hover:bg-transparent">
@@ -664,6 +705,7 @@ function ComparisonTable({ result }: { result: OptimizeResponse }) {
           ))}
         </TableBody>
       </Table>
+      </div>
       <p className="mt-2 max-w-3xl text-[11px] text-dim">
         <span className="font-medium text-foreground">
           Why the total is not the answer.

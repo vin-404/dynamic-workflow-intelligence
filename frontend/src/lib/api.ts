@@ -1145,14 +1145,29 @@ export interface ReplayFrame {
   dropped_frames?: number;
 }
 
+/** One simulated day the replay stops on. `events` is how many land on it. */
+export interface ReplayStep {
+  day: number;
+  date: string;
+  events: number;
+}
+
 export interface ReplayTimeline {
   project_id: string;
+  version_id: string;
+  project_start: string;
   start_day: number;
   horizon_day: number;
-  /** Every simulated day the replay will stop on — the scrubber's ticks. */
-  step_days: number[];
+  today_day: number;
+  /**
+   * Every simulated day the replay will stop on — the scrubber's ticks. The
+   * replay steps on every whole day, not only on days an event occurs
+   * (D-139), so this is denser than `events` and is the right thing to snap a
+   * scrub to.
+   */
+  steps: ReplayStep[];
   events: ReplayEvent[];
-  [k: string]: unknown;
+  note: string;
 }
 
 export const startReplay = (
@@ -1432,6 +1447,7 @@ export interface AffectedTask {
 export interface WastedEffortRow {
   key: string;
   name: string;
+  status: string;
   counts_as_wasted: boolean;
   effort_days: number;
   wasted_days: number;
@@ -1486,13 +1502,22 @@ export interface ScheduleImpact {
   caveat: string;
 }
 
+/** One affected task as it appears under an owner: enough to render a row. */
+export interface OwnedTask {
+  key: string;
+  name: string;
+  status: string;
+  effort_days: number;
+  completed_and_lost: boolean;
+}
+
 export interface OwnerImpact {
   resource_key: string;
   resource_name: string;
   label: string;
   kind: string;
-  must_redo: string[];
-  must_recheck: string[];
+  must_redo: OwnedTask[];
+  must_recheck: OwnedTask[];
   completed_work_lost_days: number;
   redo_days: number;
   blast_radius_effort_days: number;
@@ -1566,7 +1591,7 @@ export interface ImpactReport {
   who_needs_to_know: {
     by_resource: OwnerImpact[];
     resource_count: number;
-    unassigned: { must_redo: string[]; must_recheck: string[]; note: string };
+    unassigned: { must_redo: OwnedTask[]; must_recheck: OwnedTask[]; note: string };
   };
   findings: {
     created: Finding[];
@@ -1598,15 +1623,24 @@ export interface WordingOption {
   invalidates?: string[];
 }
 
+export interface ComparedOption {
+  index: number;
+  label: string;
+  text: string;
+  /** The full impact report for this wording. */
+  impact: ImpactReport;
+  cost: Record<string, unknown>;
+  /** Which consumers this wording spares. Empty means it spares none. */
+  invalidates: string[];
+  scoped: boolean;
+  statement: string;
+}
+
 export interface RequirementComparison {
+  project_id: string;
   requirement_key: string;
-  options: {
-    index: number;
-    label: string;
-    text: string;
-    report: ImpactReport;
-    [k: string]: unknown;
-  }[];
+  base: Record<string, unknown>;
+  options: ComparedOption[];
   /**
    * `null` when the options are graph-identical — two plain wordings always
    * cost the same, because the blast radius comes from the dependency graph
@@ -1614,30 +1648,49 @@ export interface RequirementComparison {
    * tie and its explanation rather than picking one.
    */
   cheapest_option_index: number | null;
-  statement: string;
+  tie: boolean;
+  tied_option_indexes: number[];
+  identical_cost: boolean;
+  ranking: unknown[];
+  /**
+   * `differences.statement` is the sentence to render — it is where the
+   * explanation of a tie lives. The options carry their own `statement` for
+   * the single-wording case.
+   */
+  differences: { statement: string; varies: unknown; pairwise: unknown[] };
+  applied: false;
+  base_version_hash_before: string;
+  base_version_hash_after: string;
   assumptions: AssumptionsBlock;
-  [k: string]: unknown;
 }
 
 export interface RequirementRevision {
   version_no: number;
   text: string;
   changed_by: string;
-  changed_at: string | null;
+  /** Not `changed_at`. Null on a backfilled row, which claims no timestamp. */
+  recorded_at: string | null;
+  changed_by_user_id: string | null;
+  attributed: boolean;
   note: string;
+  /** True when this wording was reconstructed at the first apply, not recorded. */
   backfilled: boolean;
-  consumed_by_task_keys: string[];
+  provenance_note: string;
+  /** The consumption set as it was *then*, not as it is now. */
+  consumed_by: string[];
+  workflow_version_id: string | null;
+  scenario_id: string | null;
   impact_summary: Record<string, unknown> | null;
-  [k: string]: unknown;
 }
 
 export interface RequirementHistoryResponse {
+  project_id: string;
   requirement_key: string;
-  current_version_no: number;
+  current: Record<string, unknown>;
   revisions: RequirementRevision[];
-  count: number;
+  revision_count: number;
+  changes_recorded: number;
   note: string;
-  [k: string]: unknown;
 }
 
 export interface RequirementDiffResponse {
@@ -1675,12 +1728,45 @@ export const compareRequirement = (
     body,
   );
 
+/**
+ * The one route here that writes. It seals a new workflow version and records
+ * a requirement revision; the parent version survives with its content hash
+ * intact, which is what `parent_version.unchanged` is for.
+ */
+export interface RequirementApplyResult {
+  project_id: string;
+  requirement_key: string;
+  from_version: number;
+  to_version: number;
+  previous_text: string;
+  new_text: string;
+  new_version: {
+    id: string;
+    version_no: number;
+    parent_version_id: string | null;
+    content_hash: string;
+  };
+  parent_version: {
+    id: string;
+    version_no: number;
+    content_hash: string;
+    unchanged: boolean;
+  };
+  revision: RequirementRevision;
+  scenario_id: string | null;
+  impact: Record<string, unknown>;
+  applied: true;
+  attributed_to: string | null;
+  attribution_note: string;
+  note: string;
+}
+
 export const applyRequirementChange = (
   id: string,
   key: string,
   body: { new_text: string; version_id?: string; invalidates?: string[] },
 ) =>
-  post<{ version_id: string; version_no: number; [k: string]: unknown }>(
+  post<RequirementApplyResult>(
     `/api/projects/${id}/requirements/${encodeURIComponent(key)}/apply`,
     body,
   );

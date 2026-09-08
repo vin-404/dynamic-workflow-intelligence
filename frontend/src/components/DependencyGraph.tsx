@@ -39,6 +39,23 @@
  *   - every colour is a token (`var(--accent)`, `var(--line)`), never a hex.
  *     The previous version baked dark-mode hexes into JS, which is why the
  *     graph used to draw near-black edges on a white page in light mode.
+ *
+ * Two stages, one chart
+ * ---------------------
+ * Phase 11 gave this panel a second consumer: the live replay. Rather than
+ * fork it - two charts that drift apart by one commit is the worst of the
+ * options - it takes an optional `live` overlay and folds it into the
+ * analysis it already draws, producing a *view* of the same shape. Every line
+ * of layout, packing, scaling and edge-drawing below is therefore shared, and
+ * the only thing the replay changes is what the engine reported on that
+ * simulated day: each task's status, which tasks are on the zero-slack chain,
+ * where the marker line sits, and which bars just had a finding land on them.
+ *
+ * What the overlay deliberately does *not* move is the geometry. A replay
+ * frame carries statuses and a critical path; it does not re-issue `es`,
+ * `ef`, `lf` or `slack` per task. So bar positions and float strips remain
+ * the stored plan's schedule, and the legend says so in live mode rather than
+ * letting a reader assume the bars slid.
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -58,11 +75,36 @@ import {
 import "@xyflow/react/dist/style.css";
 import { cn } from "@/lib/utils";
 import { Analysis } from "@/lib/api";
+import { severityText } from "@/lib/severity";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+
+/**
+ * What a replay frame contributes to the chart.
+ *
+ * Exactly the fields a `ReplayFrame` already carries, named for what they do
+ * here rather than for where they came from - so nothing in this file has to
+ * import the replay types, and the analyze stage stays the default path.
+ */
+export type LiveOverlay = {
+  /** `frame.statuses`: task key -> status on the simulated day. */
+  statuses: Record<string, string>;
+  /** `frame.critical_path`: the zero-slack chain as of that day. */
+  criticalPath: string[];
+  /** The simulated clock, which replaces `today` as the marker line. */
+  simDay: number;
+  /** `projection.projected_end_day`, so the horizon still covers the answer. */
+  projectedEndDay: number;
+  /**
+   * Tasks a finding just appeared on or changed severity on, and at what
+   * severity. Drawn as a ring around the bar, so "something happened" is
+   * visible on the hero rather than only in a list below it.
+   */
+  flashTasks?: Record<string, string>;
+};
 
 /* --------------------------------------------------------------- geometry */
 
@@ -211,6 +253,12 @@ type BarData = {
   /** Width of the solid bar; the node is wider than this by the float. */
   durationWidth: number;
   slackWidth: number;
+  /**
+   * Live only: the severity of a finding that landed on this task on this
+   * simulated day, or null. Its colour comes from `severity.ts` like every
+   * other severity in the product - there is no mapping local to this file.
+   */
+  flashSeverity: string | null;
 };
 
 /** The bar's border and text: state, in three colours and no more. */
@@ -255,6 +303,21 @@ function TaskBar({ data }: NodeProps) {
         <div
           className="absolute bottom-0 h-[5px] rounded-r-[2px] bg-line"
           style={{ left: d.durationWidth, width: d.slackWidth }}
+        />
+      )}
+      {/* A finding just landed here. A ring, not a pulse: it has to be
+          obvious that something happened without becoming an animation
+          festival, and a static outline is correct under
+          `prefers-reduced-motion` by construction rather than by opting out
+          of something. `border-current` takes its colour from the severity
+          class, so the three states stay the three states. */}
+      {d.flashSeverity && (
+        <div
+          className={cn(
+            "pointer-events-none absolute -inset-[3px] rounded-[6px] border-2 border-current",
+            severityText(d.flashSeverity),
+          )}
+          style={{ width: d.durationWidth + 6 }}
         />
       )}
       <Tooltip>
@@ -345,6 +408,7 @@ function Chrome({
   lanes,
   horizon,
   todayDay,
+  markerLabel,
   projectStart,
   dayWidth,
   tickDays,
@@ -352,6 +416,8 @@ function Chrome({
   lanes: Lane[];
   horizon: number;
   todayDay: number;
+  /** `today` on the analyze stage, `sim` while a replay is driving it. */
+  markerLabel: string;
   projectStart: string;
   dayWidth: number;
   tickDays: number;
@@ -381,13 +447,16 @@ function Chrome({
         ))}
       </div>
 
-      {/* Today. One line, labelled at the foot so it never lands on a bar. */}
+      {/* Today, or the simulated clock. One line, labelled at the foot so it
+          never lands on a bar. In live mode this is the only piece of chrome
+          that moves every frame, which is what makes the chart read as a
+          clock rather than as a picture that happens to be redrawn. */}
       <div
         className="absolute border-l border-dashed border-foreground/45"
         style={{ left: dayToScreen(todayDay), top: AXIS_H, bottom: 0 }}
       >
         <span className="absolute bottom-0.5 left-1 whitespace-nowrap font-mono text-[10px] text-foreground/70">
-          today d{todayDay}
+          {markerLabel} d{Math.round(todayDay * 10) / 10}
         </span>
       </div>
 
@@ -426,21 +495,60 @@ function Chrome({
 
 /* ------------------------------------------------------------------- main */
 
-export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
+export default function DependencyGraph({
+  analysis: stored,
+  live,
+}: {
+  analysis: Analysis;
+  /** Omitted on the analyze stage; supplied by `LiveFeed` during a replay. */
+  live?: LiveOverlay;
+}) {
   const [boxRef, boxWidth] = useMeasuredWidth<HTMLDivElement>();
+
+  /*
+   * One chart, two sources.
+   *
+   * The overlay is folded into an `Analysis`-shaped view here and nowhere
+   * else, so everything below this line is the code the analyze stage has
+   * been running since D-119 - no branch, no second layout path, no chance
+   * of the two drifting. `live` is undefined on the analyze stage and the
+   * memo returns the very object it was given, so that stage does not even
+   * pay for a copy.
+   */
+  const analysis = useMemo<Analysis>(() => {
+    if (!live) return stored;
+    const onChain = new Set(live.criticalPath);
+    return {
+      ...stored,
+      today_day: live.simDay,
+      projected_end: live.projectedEndDay,
+      critical_path: live.criticalPath,
+      tasks: stored.tasks.map((t) => ({
+        ...t,
+        status: live.statuses[t.key] ?? t.status,
+        critical: onChain.has(t.key),
+      })),
+    };
+  }, [stored, live]);
 
   /* The horizon is whatever has to fit: the latest late finish, the projected
      end, and today, whichever runs furthest. It does not depend on the scale,
-     because the scale is derived from it. */
+     because the scale is derived from it.
+
+     The *stored* projected end is in the set as well as the live one, so a
+     replay cannot make the axis shrink underneath a viewer frame by frame. It
+     still grows if a simulated day genuinely pushes the projection past the
+     stored plan - the axis has to show the answer - but it does not breathe. */
   const horizon = useMemo(
     () =>
       Math.max(
         1,
         ...analysis.tasks.map((t) => Math.ceil(t.lf)),
+        Math.ceil(stored.projected_end),
         Math.ceil(analysis.projected_end),
         Math.ceil(analysis.today_day),
       ),
-    [analysis],
+    [analysis, stored.projected_end],
   );
 
   /* Pixels per day: the whole project, in the width there is. Clamped at both
@@ -567,6 +675,7 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
             risk: riskByTask.get(task.key) ?? null,
             durationWidth,
             slackWidth,
+            flashSeverity: live?.flashTasks?.[task.key] ?? null,
           } satisfies BarData,
         });
       });
@@ -607,7 +716,7 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
       lanes: laneList,
       rows: totalRows,
     };
-  }, [analysis, dayWidth]);
+  }, [analysis, dayWidth, live]);
 
   if (analysis.tasks.length === 0) {
     return (
@@ -631,8 +740,9 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
           <h2 className="text-sm font-medium">The workflow</h2>
           <p className="font-mono text-[11px] text-dim">
             {analysis.tasks.length} tasks · {lanes.length} lanes · day 0-
-            {horizon} · today d{analysis.today_day} · projected end d
-            {analysis.projected_end}
+            {horizon} · {live ? "sim" : "today"} d
+            {Math.round(analysis.today_day)} · projected end d
+            {Math.round(analysis.projected_end)}
           </p>
         </div>
         <p className="text-[11px] text-dim">
@@ -641,6 +751,18 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
           artifact, dashed edges are ordering only
         </p>
       </div>
+      {live && (
+        // Said on the chart, not in a footnote: a replay frame carries
+        // statuses and a critical path, not a re-issued schedule. So the
+        // bars sit where the stored plan put them and only their state
+        // moves. A reader who assumed the bars were sliding would be reading
+        // a claim this data cannot make.
+        <p className="mb-2 text-[11px] text-muted-foreground">
+          Bar positions and slack are the stored plan&rsquo;s schedule. What
+          the replay moves is each task&rsquo;s status, the zero-slack chain,
+          and the marker line — those are what a frame actually reports.
+        </p>
+      )}
 
       <div
         ref={boxRef}
@@ -672,6 +794,7 @@ export default function DependencyGraph({ analysis }: { analysis: Analysis }) {
             lanes={lanes}
             horizon={horizon}
             todayDay={analysis.today_day}
+            markerLabel={live ? "sim" : "today"}
             projectStart={analysis.project_start}
             dayWidth={dayWidth}
             tickDays={tickDays}
