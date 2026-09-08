@@ -12,9 +12,21 @@
  * API, and every rejection is shown with the reason the backend gave, because
  * those reasons are the product: "T17 -> T01 would create a circular
  * dependency: T16 -> T17 -> T01 -> ..." is worth more than a red border.
+ *
+ * Wave 2, presentation only: three headed sections instead of three cards,
+ * and the work is a table rather than a stack of full-width inputs. The
+ * editing behaviour is untouched - every control is the same control, patched
+ * on the same blur, with the same request.
+ *
+ * The table cells hold real inputs, drawn without their borders until they
+ * are hovered or focused. That is a deliberate divergence from the shadcn
+ * `Input` default: seventeen rows of outlined boxes reads as a form, and the
+ * point of this table is that it reads as data you can type into.
  */
 
 import { useMemo, useState } from "react";
+import { Lock, X } from "lucide-react";
+import { cn } from "cn";
 import {
   ApiError,
   Workflow,
@@ -29,19 +41,31 @@ import {
   patchTask,
   removeAssignment,
 } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import {
-  Badge,
-  Button,
-  Card,
-  CardTitle,
-  Disclose,
-  EmptyState,
-  ErrorNote,
-  Field,
-  Input,
   Select,
-  days,
-} from "./ui";
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import { ErrorNote, days } from "./ui";
 
 const STATUSES = ["not_started", "in_progress", "in_review", "blocked", "done"];
 const STATUS_LABEL: Record<string, string> = {
@@ -52,6 +76,25 @@ const STATUS_LABEL: Record<string, string> = {
   done: "Done",
 };
 
+/**
+ * Radix's Select refuses an empty string as an item value, and the previous
+ * native `<select>`s used `""` for "nothing chosen". This is that sentinel;
+ * it never leaves the component - state still holds `""`.
+ */
+const NONE = "__none__";
+
+/** A borderless cell input: the border arrives on hover and focus. */
+const CELL =
+  "h-7 rounded-md border-transparent bg-transparent px-1.5 text-sm " +
+  "hover:border-input focus-visible:border-ring " +
+  "dark:bg-transparent dark:disabled:bg-transparent";
+
+/** The same idea for a cell's select trigger. */
+const CELL_TRIGGER =
+  "h-7 w-full justify-between border-transparent bg-transparent px-1.5 " +
+  "text-sm hover:border-input focus-visible:border-ring dark:bg-transparent " +
+  "dark:hover:bg-transparent";
+
 function nextTaskKey(workflow: Workflow): string {
   const numbers = workflow.tasks
     .map((t) => /^T(\d+)$/.exec(t.key)?.[1])
@@ -60,6 +103,76 @@ function nextTaskKey(workflow: Workflow): string {
   const next = (numbers.length ? Math.max(...numbers) : 0) + 1;
   return `T${String(next).padStart(2, "0")}`;
 }
+
+/* ------------------------------------------------------------ small parts */
+
+/** A section heading. Typography carries it; there is no box. */
+function Head({
+  title,
+  count,
+  note,
+}: {
+  title: string;
+  count: number;
+  note?: string;
+}) {
+  return (
+    <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+      <h2 className="text-sm font-medium">{title}</h2>
+      <span className="font-mono text-[11px] text-dim">{count}</span>
+      {note && <span className="text-[11px] text-dim">{note}</span>}
+    </div>
+  );
+}
+
+/** A composer field: label above control, tight. */
+function Lbl({
+  label,
+  hint,
+  className,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className={cn("flex flex-col gap-1", className)}>
+      <span className="text-[11px] leading-none text-dim">{label}</span>
+      {children}
+      {hint && <span className="text-[10px] leading-none text-dim">{hint}</span>}
+    </label>
+  );
+}
+
+/** A row-level remove control. Dim until you are near it. */
+function Remove({
+  onClick,
+  disabled,
+  label,
+  title,
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  label: string;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-label={label}
+      title={title ?? label}
+      className="text-dim transition-colors hover:text-severity-high disabled:opacity-40"
+    >
+      <X className="size-3.5" />
+    </button>
+  );
+}
+
+/* ------------------------------------------------------------------- main */
 
 export default function WorkflowBuilder({
   workflow,
@@ -97,7 +210,7 @@ export default function WorkflowBuilder({
   }, [workflow.constraints]);
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-6">
       {error && (
         <ErrorNote
           onRetry={() => setError(null)}
@@ -106,13 +219,15 @@ export default function WorkflowBuilder({
         >
           <p>{error.userMessage}</p>
           {error.cycles && (
-            <p className="mt-1 font-mono text-xs text-amber">
+            <p className="mt-1 font-mono text-xs text-severity-medium">
               {error.cycles[0].join(" → ")} → {error.cycles[0][0]}
             </p>
           )}
           {error.constraint && (
-            <p className="mt-1 text-xs">
-              <Badge tone="violet">{error.constraint.constraint}</Badge>{" "}
+            <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-mono text-foreground">
+                {error.constraint.constraint}
+              </span>
               <span className="text-dim">
                 {error.constraint.constraint_reason}
               </span>
@@ -121,12 +236,16 @@ export default function WorkflowBuilder({
         </ErrorNote>
       )}
 
+      {/* The order matches the stage's own subtitle - who does the work, then
+          the work, then what waits on what - so it is not reshuffled here. */}
       <ResourcePanel
         workflow={workflow}
         busy={busy}
         onCreate={(body) => run(() => createResource(projectId, body))}
         onDelete={(key) => run(() => deleteResource(projectId, key))}
       />
+
+      <Separator />
 
       <TaskPanel
         workflow={workflow}
@@ -144,6 +263,8 @@ export default function WorkflowBuilder({
         }
       />
 
+      <Separator />
+
       <DependencyPanel
         workflow={workflow}
         busy={busy}
@@ -151,135 +272,6 @@ export default function WorkflowBuilder({
         onDelete={(from, to) => run(() => deleteDependency(projectId, from, to))}
       />
     </div>
-  );
-}
-
-/* ------------------------------------------------------------- resources */
-
-function ResourcePanel({
-  workflow,
-  busy,
-  onCreate,
-  onDelete,
-}: {
-  workflow: Workflow;
-  busy: boolean;
-  onCreate: (body: {
-    key: string;
-    name: string;
-    kind: string;
-    capacity: number;
-    parent_key: string | null;
-  }) => void;
-  onDelete: (key: string) => void;
-}) {
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState("person");
-  const [capacity, setCapacity] = useState(1);
-  const [parent, setParent] = useState("");
-
-  const teams = workflow.resources.filter((r) => r.kind !== "person");
-
-  function submit() {
-    if (!name.trim()) return;
-    const key = name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 30);
-    onCreate({
-      key,
-      name: name.trim(),
-      kind,
-      capacity,
-      parent_key: parent || null,
-    });
-    setName("");
-    setParent("");
-  }
-
-  return (
-    <Card>
-      <CardTitle right={<span className="text-xs text-dim">{workflow.resources.length}</span>}>
-        Who and what does the work
-      </CardTitle>
-
-      {workflow.resources.length === 0 ? (
-        <p className="text-dim text-sm mb-3">
-          Nothing is assignable yet. A resource is a person, a team, a machine
-          or a budget line — the engine only ever sees a name, a kind and a
-          capacity, which is what keeps it domain-agnostic.
-        </p>
-      ) : (
-        <div className="flex flex-wrap gap-1.5 mb-3">
-          {workflow.resources.map((r) => (
-            <span
-              key={r.key}
-              className="inline-flex items-center gap-1.5 bg-panel2 border border-line rounded px-2 py-1 text-xs"
-            >
-              <span className="text-dim">{r.kind}</span>
-              <span>{r.name}</span>
-              <span className="text-dim">cap {r.capacity}</span>
-              {r.parent_key && (
-                <span className="text-dim">
-                  in {workflow.resources.find((p) => p.key === r.parent_key)?.name}
-                </span>
-              )}
-              <button
-                onClick={() => onDelete(r.key)}
-                disabled={busy}
-                title="Remove"
-                className="text-dim hover:text-red ml-0.5"
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 items-end">
-        <Field label="Name" className="sm:col-span-2">
-          <Input
-            value={name}
-            placeholder="Priya, Marketing, Test rig…"
-            onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-          />
-        </Field>
-        <Field label="Kind">
-          <Select value={kind} onChange={(e) => setKind(e.target.value)}>
-            <option value="person">person</option>
-            <option value="team">team</option>
-            <option value="equipment">equipment</option>
-            <option value="budget">budget</option>
-          </Select>
-        </Field>
-        <Field label="Capacity" hint="How many at once">
-          <Input
-            type="number"
-            min={0}
-            value={capacity}
-            onChange={(e) => setCapacity(Number(e.target.value))}
-          />
-        </Field>
-        <div className="flex gap-2">
-          <Field label="Belongs to" className="flex-1">
-            <Select value={parent} onChange={(e) => setParent(e.target.value)}>
-              <option value="">—</option>
-              {teams.map((t) => (
-                <option key={t.key} value={t.key}>
-                  {t.name}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          <Button onClick={submit} disabled={busy || !name.trim()}>
-            Add resource
-          </Button>
-        </div>
-      </div>
-      <p className="text-[11px] text-dim mt-2">
-        A team&apos;s capacity can be lower than its headcount — that gap is how
-        a bottleneck gets found.
-      </p>
-    </Card>
   );
 }
 
@@ -331,61 +323,80 @@ function TaskPanel({
     setDivisible(true);
   }
 
+  const totalEffort =
+    Math.round(workflow.tasks.reduce((n, t) => n + t.effort, 0) * 10) / 10;
+
   return (
-    <Card>
-      <CardTitle right={<span className="text-xs text-dim">{workflow.tasks.length}</span>}>
-        The work
-      </CardTitle>
+    <section>
+      <Head
+        title="The work"
+        count={workflow.tasks.length}
+        note={
+          workflow.tasks.length
+            ? `${days(totalEffort)} of effort in total`
+            : undefined
+        }
+      />
 
       {workflow.tasks.length === 0 ? (
-        <EmptyState title="No tasks yet">
+        <p className="max-w-2xl text-sm text-dim">
           Add the first piece of work below. Effort is the amount of work in
           days, not the elapsed time — the engine derives duration from effort
           and who is on it, and it will not pretend two people halve a task.
-        </EmptyState>
+        </p>
       ) : (
-        <div className="overflow-x-auto -mx-1">
-          <table className="w-full text-sm min-w-[720px]">
-            <thead>
-              <tr className="text-left text-[11px] uppercase tracking-wider text-dim">
-                <th className="font-medium py-1.5 px-1 w-14">Key</th>
-                <th className="font-medium py-1.5 px-1">Task</th>
-                <th className="font-medium py-1.5 px-1 w-20">Effort</th>
-                <th className="font-medium py-1.5 px-1 w-24">Divisible</th>
-                <th className="font-medium py-1.5 px-1 w-32">Status</th>
-                <th className="font-medium py-1.5 px-1 w-56">Assigned to</th>
-                <th className="w-8" />
-              </tr>
-            </thead>
-            <tbody>
-              {workflow.tasks.map((task) => (
-                <TaskRow
-                  key={task.key}
-                  task={task}
-                  workflow={workflow}
-                  busy={busy}
-                  constraints={constraintsByTarget.get(task.key) ?? []}
-                  onPatch={onPatch}
-                  onDelete={onDelete}
-                  onAssign={onAssign}
-                  onUnassign={onUnassign}
-                />
+        <Table className="min-w-[760px]">
+          <TableHeader>
+            <TableRow className="hover:bg-transparent">
+              {[
+                ["Key", "w-14"],
+                ["Task", ""],
+                ["Effort", "w-20"],
+                ["Divisible", "w-24"],
+                ["Status", "w-32"],
+                ["Assignees", "w-60"],
+              ].map(([label, width]) => (
+                <TableHead
+                  key={label}
+                  className={cn(
+                    "h-7 px-1.5 text-[11px] font-medium tracking-wider text-dim uppercase",
+                    width,
+                  )}
+                >
+                  {label}
+                </TableHead>
               ))}
-            </tbody>
-          </table>
-        </div>
+              <TableHead className="h-7 w-8 px-1.5" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {workflow.tasks.map((task) => (
+              <TaskRow
+                key={task.key}
+                task={task}
+                workflow={workflow}
+                busy={busy}
+                constraints={constraintsByTarget.get(task.key) ?? []}
+                onPatch={onPatch}
+                onDelete={onDelete}
+                onAssign={onAssign}
+                onUnassign={onUnassign}
+              />
+            ))}
+          </TableBody>
+        </Table>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-6 gap-2 items-end mt-4 pt-3 border-t border-line">
-        <Field label="New task" className="sm:col-span-2">
+      <div className="mt-4 grid grid-cols-1 items-end gap-2 sm:grid-cols-6">
+        <Lbl label="New task" className="sm:col-span-2">
           <Input
             value={name}
             placeholder="Draft the budget…"
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
           />
-        </Field>
-        <Field label="Effort" hint="days of work">
+        </Lbl>
+        <Lbl label="Effort" hint="days of work">
           <Input
             type="number"
             min={0}
@@ -393,56 +404,76 @@ function TaskPanel({
             value={effort}
             onChange={(e) => setEffort(Number(e.target.value))}
           />
-        </Field>
-        <Field label="Divisible" hint="can more people help?">
+        </Lbl>
+        <Lbl label="Divisible" hint="can more people help?">
           <Select
             value={divisible ? "yes" : "no"}
-            onChange={(e) => setDivisible(e.target.value === "yes")}
+            onValueChange={(v) => setDivisible(v === "yes")}
           >
-            <option value="yes">Yes</option>
-            <option value="no">No — one signature</option>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="yes">Yes</SelectItem>
+                <SelectItem value="no">No — one signature</SelectItem>
+              </SelectGroup>
+            </SelectContent>
           </Select>
-        </Field>
-        <Field label="Assign to">
-          <Select value={assignee} onChange={(e) => setAssignee(e.target.value)}>
-            <option value="">nobody yet</option>
-            {workflow.resources.map((r) => (
-              <option key={r.key} value={r.key}>
-                {r.name}
-              </option>
-            ))}
+        </Lbl>
+        <Lbl label="Assign to">
+          <Select
+            value={assignee || NONE}
+            onValueChange={(v) => setAssignee(v === NONE ? "" : v)}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value={NONE}>nobody yet</SelectItem>
+                {workflow.resources.map((r) => (
+                  <SelectItem key={r.key} value={r.key}>
+                    {r.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
           </Select>
-        </Field>
-        <Button variant="primary" onClick={submit} disabled={busy || !name.trim()}>
+        </Lbl>
+        <Button onClick={submit} disabled={busy || !name.trim()}>
           Add task
         </Button>
       </div>
 
       {templates && templates.length > 0 && workflow.tasks.length === 0 && (
-        <div className="mt-3">
-          <Disclose summary={`Start from this domain's templates (${templates.length})`}>
-            <div className="flex flex-wrap gap-1.5">
-              {templates.map((t) => (
-                <Button
-                  key={t.name}
-                  onClick={() => {
-                    setName(t.name);
-                    setEffort(t.effort);
-                    setDivisible(t.divisible !== false);
-                  }}
-                >
-                  {t.name} · {days(t.effort)}
-                </Button>
-              ))}
-            </div>
-            <p className="text-[11px] text-dim mt-2">
-              Templates are suggestions from the domain you picked. They fill
-              the form; nothing is added until you press Add task.
-            </p>
-          </Disclose>
-        </div>
+        <details className="mt-3 text-xs">
+          <summary className="cursor-pointer text-accent">
+            Start from this domain&apos;s templates ({templates.length})
+          </summary>
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            {templates.map((t) => (
+              <Button
+                key={t.name}
+                variant="outline"
+                size="xs"
+                onClick={() => {
+                  setName(t.name);
+                  setEffort(t.effort);
+                  setDivisible(t.divisible !== false);
+                }}
+              >
+                {t.name} · {days(t.effort)}
+              </Button>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-dim">
+            Templates are suggestions from the domain you picked. They fill the
+            form; nothing is added until you press Add task.
+          </p>
+        </details>
       )}
-    </Card>
+    </section>
   );
 }
 
@@ -469,118 +500,313 @@ function TaskRow({
   const [effort, setEffort] = useState(String(task.effort));
   const mandatory = constraints.includes("MANDATORY_TASK");
   const locked = constraints.includes("NON_DIVISIBLE_TASK");
+  const unassigned = workflow.resources.filter(
+    (r) => !task.assignees.some((a) => a.key === r.key),
+  );
 
   return (
-    <tr className="border-t border-line/60 align-top">
-      <td className="py-1.5 px-1 font-mono text-xs text-dim">{task.key}</td>
-      <td className="py-1.5 px-1">
-        <Input
-          value={name}
-          disabled={busy}
-          onChange={(e) => setName(e.target.value)}
-          onBlur={() => name !== task.name && onPatch(task.key, { name })}
-        />
-        {constraints.length > 0 && (
-          <div className="flex gap-1 mt-1">
-            {mandatory && (
-              <Badge tone="violet" title="Cannot be removed">
-                mandatory
-              </Badge>
-            )}
-            {locked && (
-              <Badge tone="violet" title="Cannot be split">
-                indivisible
-              </Badge>
-            )}
-          </div>
-        )}
-      </td>
-      <td className="py-1.5 px-1">
+    <TableRow className="border-line/60">
+      <TableCell className="px-1.5 py-1 font-mono text-xs text-dim">
+        {task.key}
+      </TableCell>
+      <TableCell className="px-1.5 py-1">
+        <div className="flex items-center gap-1.5">
+          <Input
+            value={name}
+            disabled={busy}
+            aria-label={`Name of ${task.key}`}
+            className={CELL}
+            onChange={(e) => setName(e.target.value)}
+            onBlur={() => name !== task.name && onPatch(task.key, { name })}
+          />
+          {mandatory && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="shrink-0 font-mono text-[10px] text-dim">
+                  mandatory
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Cannot be removed</TooltipContent>
+            </Tooltip>
+          )}
+          {locked && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="shrink-0 font-mono text-[10px] text-dim">
+                  indivisible
+                </span>
+              </TooltipTrigger>
+              <TooltipContent>Cannot be split</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+      </TableCell>
+      <TableCell className="px-1.5 py-1">
         <Input
           type="number"
           min={0}
           step={0.5}
           value={effort}
           disabled={busy}
+          aria-label={`Effort of ${task.key}`}
+          className={CELL}
           onChange={(e) => setEffort(e.target.value)}
           onBlur={() =>
             Number(effort) !== task.effort &&
             onPatch(task.key, { effort: Number(effort) })
           }
         />
-      </td>
-      <td className="py-1.5 px-1">
+      </TableCell>
+      <TableCell className="px-1.5 py-1">
         <Select
           value={task.divisible ? "yes" : "no"}
           disabled={busy || locked}
-          title={locked ? "A constraint fixes this task as indivisible" : undefined}
-          onChange={(e) =>
-            onPatch(task.key, { divisible: e.target.value === "yes" })
-          }
+          onValueChange={(v) => onPatch(task.key, { divisible: v === "yes" })}
         >
-          <option value="yes">Yes</option>
-          <option value="no">No</option>
+          <SelectTrigger
+            size="sm"
+            aria-label={`Divisible: ${task.key}`}
+            title={
+              locked ? "A constraint fixes this task as indivisible" : undefined
+            }
+            className={CELL_TRIGGER}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              <SelectItem value="yes">Yes</SelectItem>
+              <SelectItem value="no">No</SelectItem>
+            </SelectGroup>
+          </SelectContent>
         </Select>
-      </td>
-      <td className="py-1.5 px-1">
+      </TableCell>
+      <TableCell className="px-1.5 py-1">
         <Select
           value={task.status}
           disabled={busy}
-          onChange={(e) => onPatch(task.key, { status: e.target.value })}
+          onValueChange={(v) => onPatch(task.key, { status: v })}
         >
-          {STATUSES.map((s) => (
-            <option key={s} value={s}>
-              {STATUS_LABEL[s]}
-            </option>
-          ))}
+          <SelectTrigger
+            size="sm"
+            aria-label={`Status of ${task.key}`}
+            className={CELL_TRIGGER}
+          >
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectGroup>
+              {STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {STATUS_LABEL[s]}
+                </SelectItem>
+              ))}
+            </SelectGroup>
+          </SelectContent>
         </Select>
-      </td>
-      <td className="py-1.5 px-1">
-        <div className="flex flex-wrap gap-1 mb-1">
+      </TableCell>
+      <TableCell className="px-1.5 py-1">
+        <div className="flex flex-wrap items-center gap-1">
           {task.assignees.map((a) => (
             <span
               key={a.key}
-              className="inline-flex items-center gap-1 bg-panel2 border border-line rounded px-1.5 py-0.5 text-[11px]"
+              className="inline-flex items-center gap-1 text-xs text-foreground"
             >
               {a.label}
-              <button
+              <Remove
                 onClick={() => onUnassign(task.key, a.key)}
                 disabled={busy}
-                className="text-dim hover:text-red"
-              >
-                ×
-              </button>
+                label={`Unassign ${a.label} from ${task.key}`}
+              />
             </span>
           ))}
+          <Select
+            value={NONE}
+            disabled={busy || unassigned.length === 0}
+            onValueChange={(v) => v !== NONE && onAssign(task.key, v)}
+          >
+            <SelectTrigger
+              size="sm"
+              aria-label={`Assign someone to ${task.key}`}
+              className={cn(CELL_TRIGGER, "w-auto text-dim")}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value={NONE}>
+                  {workflow.resources.length ? "add…" : "add a resource first"}
+                </SelectItem>
+                {unassigned.map((r) => (
+                  <SelectItem key={r.key} value={r.key}>
+                    {r.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
         </div>
-        <Select
-          value=""
-          disabled={busy || workflow.resources.length === 0}
-          onChange={(e) => e.target.value && onAssign(task.key, e.target.value)}
-        >
-          <option value="">
-            {workflow.resources.length ? "add…" : "add a resource first"}
-          </option>
-          {workflow.resources
-            .filter((r) => !task.assignees.some((a) => a.key === r.key))
-            .map((r) => (
-              <option key={r.key} value={r.key}>
-                {r.name}
-              </option>
-            ))}
-        </Select>
-      </td>
-      <td className="py-1.5 px-1">
-        <button
+      </TableCell>
+      <TableCell className="px-1.5 py-1">
+        <Remove
           onClick={() => onDelete(task.key)}
           disabled={busy}
+          label={`Delete ${task.key}`}
           title={mandatory ? "This task is mandatory" : "Delete task"}
-          className="text-dim hover:text-red"
-        >
-          ×
-        </button>
-      </td>
-    </tr>
+        />
+      </TableCell>
+    </TableRow>
+  );
+}
+
+/* ------------------------------------------------------------- resources */
+
+function ResourcePanel({
+  workflow,
+  busy,
+  onCreate,
+  onDelete,
+}: {
+  workflow: Workflow;
+  busy: boolean;
+  onCreate: (body: {
+    key: string;
+    name: string;
+    kind: string;
+    capacity: number;
+    parent_key: string | null;
+  }) => void;
+  onDelete: (key: string) => void;
+}) {
+  const [name, setName] = useState("");
+  const [kind, setKind] = useState("person");
+  const [capacity, setCapacity] = useState(1);
+  const [parent, setParent] = useState("");
+
+  const teams = workflow.resources.filter((r) => r.kind !== "person");
+
+  function submit() {
+    if (!name.trim()) return;
+    const key = name
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .slice(0, 30);
+    onCreate({
+      key,
+      name: name.trim(),
+      kind,
+      capacity,
+      parent_key: parent || null,
+    });
+    setName("");
+    setParent("");
+  }
+
+  return (
+    <section>
+      <Head
+        title="Who and what does the work"
+        count={workflow.resources.length}
+      />
+
+      {workflow.resources.length === 0 ? (
+        <p className="max-w-2xl text-sm text-dim">
+          Nothing is assignable yet. A resource is a person, a team, a machine
+          or a budget line — the engine only ever sees a name, a kind and a
+          capacity, which is what keeps it domain-agnostic.
+        </p>
+      ) : (
+        <ul className="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
+          {workflow.resources.map((r) => (
+            <li
+              key={r.key}
+              className="flex items-baseline gap-2 border-b border-line/50 py-1 text-sm"
+            >
+              <span className="truncate">{r.name}</span>
+              <span className="flex-1 truncate font-mono text-[11px] text-dim">
+                {r.kind} · cap {r.capacity}
+                {r.parent_key
+                  ? ` · in ${
+                      workflow.resources.find((p) => p.key === r.parent_key)
+                        ?.name
+                    }`
+                  : ""}
+              </span>
+              <Remove
+                onClick={() => onDelete(r.key)}
+                disabled={busy}
+                label={`Remove ${r.name}`}
+                title="Remove"
+              />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="mt-4 grid grid-cols-1 items-end gap-2 sm:grid-cols-5">
+        <Lbl label="Name" className="sm:col-span-2">
+          <Input
+            value={name}
+            placeholder="Priya, Marketing, Test rig…"
+            onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+          />
+        </Lbl>
+        <Lbl label="Kind">
+          <Select value={kind} onValueChange={setKind}>
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value="person">person</SelectItem>
+                <SelectItem value="team">team</SelectItem>
+                <SelectItem value="equipment">equipment</SelectItem>
+                <SelectItem value="budget">budget</SelectItem>
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Lbl>
+        <Lbl label="Capacity" hint="How many at once">
+          <Input
+            type="number"
+            min={0}
+            value={capacity}
+            onChange={(e) => setCapacity(Number(e.target.value))}
+          />
+        </Lbl>
+        <div className="flex items-end gap-2">
+          <Lbl label="Belongs to" className="flex-1">
+            <Select
+              value={parent || NONE}
+              onValueChange={(v) => setParent(v === NONE ? "" : v)}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value={NONE}>—</SelectItem>
+                  {teams.map((t) => (
+                    <SelectItem key={t.key} value={t.key}>
+                      {t.name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Lbl>
+          <Button onClick={submit} disabled={busy || !name.trim()}>
+            Add resource
+          </Button>
+        </div>
+      </div>
+      <p className="mt-2 text-[11px] text-dim">
+        A team&apos;s capacity can be lower than its headcount — that gap is
+        how a bottleneck gets found.
+      </p>
+    </section>
   );
 }
 
@@ -618,27 +844,35 @@ function DependencyPanel({
   const nameOf = (key: string) =>
     workflow.tasks.find((t) => t.key === key)?.name ?? key;
 
+  const artifacts = workflow.dependencies.filter((d) => d.consumes).length;
+
   return (
-    <Card>
-      <CardTitle
-        right={<span className="text-xs text-dim">{workflow.dependencies.length}</span>}
-      >
-        What waits on what
-      </CardTitle>
+    <section>
+      <Head
+        title="What waits on what"
+        count={workflow.dependencies.length}
+        note={
+          workflow.dependencies.length
+            ? `${artifacts} carry an artifact, ${
+                workflow.dependencies.length - artifacts
+              } are ordering only`
+            : undefined
+        }
+      />
 
       {workflow.tasks.length < 2 ? (
-        <p className="text-dim text-sm">
+        <p className="text-sm text-dim">
           Add at least two tasks and you can draw the order between them.
         </p>
       ) : (
         <>
           {workflow.dependencies.length === 0 ? (
-            <p className="text-dim text-sm mb-3">
+            <p className="max-w-2xl text-sm text-dim">
               Nothing depends on anything yet, so every task starts on day one.
               That is rarely the real plan.
             </p>
           ) : (
-            <ul className="space-y-1 mb-3 max-h-64 overflow-y-auto">
+            <ul className="max-h-72 overflow-y-auto">
               {workflow.dependencies.map((d) => {
                 const isProtected = protectedEdges.has(
                   `${d.from_task}->${d.to_task}`,
@@ -646,40 +880,49 @@ function DependencyPanel({
                 return (
                   <li
                     key={`${d.from_task}-${d.to_task}`}
-                    className="flex items-center gap-2 text-sm bg-panel2/50 border border-line/60 rounded px-2 py-1"
+                    className="flex items-center gap-2 border-b border-line/50 py-1 text-sm hover:bg-muted/40"
                   >
-                    <span className="font-mono text-xs text-dim w-12">
-                      {d.from_task}
-                    </span>
-                    <span className="text-dim">→</span>
-                    <span className="font-mono text-xs text-dim w-12">
-                      {d.to_task}
+                    <span className="w-24 shrink-0 font-mono text-xs text-dim">
+                      {d.from_task} → {d.to_task}
                     </span>
                     <span className="flex-1 truncate text-xs">
                       {nameOf(d.from_task)} before {nameOf(d.to_task)}
                     </span>
-                    <Badge
-                      tone={d.consumes ? "accent" : "neutral"}
-                      title={
-                        d.consumes
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span
+                          className={cn(
+                            "shrink-0 font-mono text-[11px]",
+                            d.consumes ? "text-foreground" : "text-dim",
+                          )}
+                        >
+                          {d.consumes ? "artifact" : "ordering"}
+                        </span>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {d.consumes
                           ? "Artifact: the successor consumes what this produces, so a requirement change invalidates it"
-                          : "Ordering only: no artifact passes between them"
-                      }
-                    >
-                      {d.consumes ? "artifact" : "ordering"}
-                    </Badge>
+                          : "Ordering only: no artifact passes between them"}
+                      </TooltipContent>
+                    </Tooltip>
                     {isProtected ? (
-                      <Badge tone="violet" title="Protected by a constraint">
-                        locked
-                      </Badge>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span className="flex shrink-0 items-center gap-1 text-[11px] text-dim">
+                            <Lock className="size-3" />
+                            locked
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          Protected by a constraint
+                        </TooltipContent>
+                      </Tooltip>
                     ) : (
-                      <button
+                      <Remove
                         onClick={() => onDelete(d.from_task, d.to_task)}
                         disabled={busy}
-                        className="text-dim hover:text-red"
-                      >
-                        ×
-                      </button>
+                        label={`Remove ${d.from_task} to ${d.to_task}`}
+                      />
                     )}
                   </li>
                 );
@@ -687,41 +930,67 @@ function DependencyPanel({
             </ul>
           )}
 
-          <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end pt-3 border-t border-line">
-            <Field label="This must finish">
-              <Select value={from} onChange={(e) => setFrom(e.target.value)}>
-                <option value="">choose…</option>
-                {workflow.tasks.map((t) => (
-                  <option key={t.key} value={t.key}>
-                    {t.key} · {t.name}
-                  </option>
-                ))}
+          <div className="mt-4 grid grid-cols-1 items-end gap-2 sm:grid-cols-4">
+            <Lbl label="This must finish">
+              <Select
+                value={from || NONE}
+                onValueChange={(v) => setFrom(v === NONE ? "" : v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value={NONE}>choose…</SelectItem>
+                    {workflow.tasks.map((t) => (
+                      <SelectItem key={t.key} value={t.key}>
+                        {t.key} · {t.name}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
               </Select>
-            </Field>
-            <Field label="before this starts">
-              <Select value={to} onChange={(e) => setTo(e.target.value)}>
-                <option value="">choose…</option>
-                {workflow.tasks
-                  .filter((t) => t.key !== from)
-                  .map((t) => (
-                    <option key={t.key} value={t.key}>
-                      {t.key} · {t.name}
-                    </option>
-                  ))}
+            </Lbl>
+            <Lbl label="before this starts">
+              <Select
+                value={to || NONE}
+                onValueChange={(v) => setTo(v === NONE ? "" : v)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value={NONE}>choose…</SelectItem>
+                    {workflow.tasks
+                      .filter((t) => t.key !== from)
+                      .map((t) => (
+                        <SelectItem key={t.key} value={t.key}>
+                          {t.key} · {t.name}
+                        </SelectItem>
+                      ))}
+                  </SelectGroup>
+                </SelectContent>
               </Select>
-            </Field>
-            <Field
-              label="Kind"
-              hint="artifact edges carry requirement changes"
-            >
+            </Lbl>
+            <Lbl label="Kind" hint="artifact edges carry requirement changes">
               <Select
                 value={consumes ? "artifact" : "ordering"}
-                onChange={(e) => setConsumes(e.target.value === "artifact")}
+                onValueChange={(v) => setConsumes(v === "artifact")}
               >
-                <option value="artifact">Artifact — it uses the output</option>
-                <option value="ordering">Ordering only</option>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="artifact">
+                      Artifact — it uses the output
+                    </SelectItem>
+                    <SelectItem value="ordering">Ordering only</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
               </Select>
-            </Field>
+            </Lbl>
             <Button
               onClick={() => {
                 if (from && to) {
@@ -737,6 +1006,6 @@ function DependencyPanel({
           </div>
         </>
       )}
-    </Card>
+    </section>
   );
 }

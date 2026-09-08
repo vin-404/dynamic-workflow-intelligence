@@ -11,9 +11,15 @@
  *
  * A refused mutation shows the reason and, where a constraint caused it, the
  * constraint and the reason on record.
+ *
+ * The selects here are deliberately native `<select>` elements. The browser
+ * walkthroughs index into `page.locator("select")` by position and drive them
+ * with `selectOption`, which a button-and-listbox Select cannot answer; and a
+ * dense composer wants the OS control anyway.
  */
 
 import { useState } from "react";
+import { ChevronDown, LoaderCircle, X } from "lucide-react";
 import {
   ApiError,
   MutationIn,
@@ -21,18 +27,20 @@ import {
   Workflow,
   whatIf,
 } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 import DiffView from "./DiffView";
-import {
-  Badge,
-  Button,
-  Card,
-  CardTitle,
-  ErrorNote,
-  Field,
-  Input,
-  Select,
-  Spinner,
-} from "./ui";
+import { ErrorNote } from "./ui";
+
+/** One inline icon size across every panel. */
+const ICON = "size-3.5 shrink-0";
+const LABEL = "text-[11px] font-medium uppercase tracking-wider text-dim";
+/** A native control that matches the shadcn `Input` it sits beside. */
+const CONTROL =
+  "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm " +
+  "outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 " +
+  "focus-visible:ring-ring/50 dark:bg-input/30";
 
 /** The handful of questions a person actually asks, as mutation builders. */
 type Recipe = {
@@ -140,9 +148,17 @@ export default function WhatIfPanel({ workflow }: { workflow: Workflow }) {
   }
 
   return (
-    <div className="space-y-4">
-      <Card>
-        <CardTitle>Ask a hypothetical</CardTitle>
+    <div className="flex flex-col gap-6">
+      <section>
+        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1.5">
+          <h2 className="text-[13px] font-semibold tracking-tight">
+            Ask a hypothetical
+          </h2>
+          <span className="text-[11px] text-dim">
+            {workflow.tasks.length} tasks · {workflow.resources.length} resources
+          </span>
+        </div>
+
         <RecipeForm
           workflow={workflow}
           onAdd={(mutation, label) =>
@@ -151,32 +167,40 @@ export default function WhatIfPanel({ workflow }: { workflow: Workflow }) {
         />
 
         {pending.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-line">
-            <div className="text-xs text-dim mb-2">
+          <div className="mt-4">
+            {/* A sentence, not a column head, so it is not shouted in
+                small caps: it is the integrity claim for this panel. */}
+            <div className="mb-1.5 text-[11px] text-dim">
               These changes, in order — nothing is written to your workflow:
             </div>
-            <ol className="space-y-1 mb-3">
+            <ol className="mb-3 max-w-3xl divide-y divide-border/60 border-y border-border/60">
               {pending.map((p, i) => (
                 <li
                   key={i}
-                  className="flex items-center gap-2 text-sm bg-panel2/50 border border-line/60 rounded px-2 py-1"
+                  className="flex items-center gap-2 py-1 text-[13px]"
                 >
-                  <span className="text-dim text-xs w-4">{i + 1}.</span>
-                  <span className="flex-1">{p.label}</span>
-                  <Badge tone="neutral">{p.mutation.kind}</Badge>
-                  <button
+                  <span className="w-4 shrink-0 text-right text-[11px] text-dim">
+                    {i + 1}
+                  </span>
+                  <span className="min-w-0 flex-1 truncate">{p.label}</span>
+                  <span className="font-mono text-[11px] text-dim">
+                    {p.mutation.kind}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    aria-label={`Remove change ${i + 1}`}
                     onClick={() =>
                       setPending(pending.filter((_, j) => j !== i))
                     }
-                    className="text-dim hover:text-red"
                   >
-                    ×
-                  </button>
+                    <X aria-hidden />
+                  </Button>
                 </li>
               ))}
             </ol>
-            <div className="flex gap-2">
-              <Button variant="primary" onClick={evaluate} disabled={busy}>
+            <div className="flex items-center gap-2">
+              <Button onClick={evaluate} disabled={busy}>
                 Simulate
               </Button>
               <Button
@@ -192,16 +216,23 @@ export default function WhatIfPanel({ workflow }: { workflow: Workflow }) {
             </div>
           </div>
         )}
-      </Card>
+      </section>
 
-      {busy && <Spinner label="Evaluating against an in-memory copy…" />}
+      {busy && (
+        <div className="flex items-center gap-1.5 text-xs text-dim">
+          <LoaderCircle className={cn(ICON, "animate-spin")} aria-hidden />
+          Evaluating against an in-memory copy…
+        </div>
+      )}
 
       {error && (
         <ErrorNote hint={error.hint} requestId={error.requestId}>
           <p>{error.userMessage}</p>
           {error.constraint && (
-            <p className="mt-2 text-xs">
-              <Badge tone="violet">{error.constraint.constraint}</Badge>{" "}
+            <p className="mt-2 flex flex-wrap items-baseline gap-x-2 text-xs">
+              <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+                {error.constraint.constraint}
+              </span>
               <span className="text-dim">
                 {error.constraint.constraint_reason}
               </span>
@@ -216,6 +247,44 @@ export default function WhatIfPanel({ workflow }: { workflow: Workflow }) {
 
       {result && <DiffView result={result} />}
     </div>
+  );
+}
+
+/* ------------------------------------------------------------- the composer */
+
+function NativeSelect({
+  label,
+  children,
+  ...props
+}: React.SelectHTMLAttributes<HTMLSelectElement> & { label: string }) {
+  return (
+    <label className="flex min-w-0 flex-col gap-1">
+      <span className={LABEL}>{label}</span>
+      <span className="relative block">
+        <select {...props} className={cn(CONTROL, "appearance-none pr-7")}>
+          {children}
+        </select>
+        <ChevronDown
+          className={cn(
+            ICON,
+            "pointer-events-none absolute top-1/2 right-2 -translate-y-1/2 text-dim",
+          )}
+          aria-hidden
+        />
+      </span>
+    </label>
+  );
+}
+
+function NumberField({
+  label,
+  ...props
+}: React.InputHTMLAttributes<HTMLInputElement> & { label: string }) {
+  return (
+    <label className="flex w-24 flex-col gap-1">
+      <span className={LABEL}>{label}</span>
+      <Input type="number" {...props} />
+    </label>
   );
 }
 
@@ -247,9 +316,12 @@ function RecipeForm({
   });
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 items-end">
-      <Field label="Question" className="sm:col-span-2">
-        <Select
+    <div className="flex flex-wrap items-end gap-2">
+      {/* First `<select>` in the DOM: the walkthroughs pick the question by
+          label from `page.locator("select").first()`. */}
+      <div className="min-w-[15rem] flex-1">
+        <NativeSelect
+          label="Question"
           value={recipeId}
           onChange={(e) => setRecipeId(e.target.value)}
         >
@@ -258,12 +330,13 @@ function RecipeForm({
               {r.label}
             </option>
           ))}
-        </Select>
-      </Field>
+        </NativeSelect>
+      </div>
 
       {recipe.needs.includes("task") && (
-        <Field label={recipeId === "drop_dep" ? "This task" : "Task"}>
-          <Select
+        <div className="min-w-[13rem] flex-1">
+          <NativeSelect
+            label={recipeId === "drop_dep" ? "This task" : "Task"}
             value={args.task ?? ""}
             onChange={(e) => set("task", e.target.value)}
           >
@@ -273,72 +346,67 @@ function RecipeForm({
                 {t.key} · {t.name}
               </option>
             ))}
-          </Select>
-        </Field>
+          </NativeSelect>
+        </div>
       )}
 
       {recipe.needs.includes("resource") && (
-        <Field label={recipeId === "drop_dep" ? "No longer waits" : "Who"}>
-          <Select
+        <div className="min-w-[13rem] flex-1">
+          <NativeSelect
+            label={recipeId === "drop_dep" ? "No longer waits" : "Who"}
             value={args.resource ?? ""}
             onChange={(e) => set("resource", e.target.value)}
           >
             <option value="">choose…</option>
-            {(recipeId === "drop_dep" ? workflow.tasks : workflow.resources).map(
-              (item) => (
-                <option key={item.key} value={item.key}>
-                  {item.key} · {item.name}
-                </option>
-              ),
-            )}
-          </Select>
-        </Field>
+            {(recipeId === "drop_dep"
+              ? workflow.tasks
+              : workflow.resources
+            ).map((item) => (
+              <option key={item.key} value={item.key}>
+                {item.key} · {item.name}
+              </option>
+            ))}
+          </NativeSelect>
+        </div>
       )}
 
       {recipe.needs.includes("days") && (
-        <Field label="Extra days">
-          <Input
-            type="number"
-            min={0}
-            value={args.days ?? "5"}
-            onChange={(e) => set("days", e.target.value)}
-          />
-        </Field>
+        <NumberField
+          label="Extra days"
+          min={0}
+          value={args.days ?? "5"}
+          onChange={(e) => set("days", e.target.value)}
+        />
       )}
 
       {recipe.needs.includes("parts") && (
-        <Field label={recipeId === "capacity" ? "Capacity" : "People"}>
-          <Input
-            type="number"
-            min={1}
-            value={args.parts ?? "2"}
-            onChange={(e) => set("parts", e.target.value)}
-          />
-        </Field>
+        <NumberField
+          label={recipeId === "capacity" ? "Capacity" : "People"}
+          min={1}
+          value={args.parts ?? "2"}
+          onChange={(e) => set("parts", e.target.value)}
+        />
       )}
 
       {recipe.needs.includes("window") && (
         <>
-          <Field label="From day">
-            <Input
-              type="number"
-              min={0}
-              value={args.from_day ?? ""}
-              onChange={(e) => set("from_day", e.target.value)}
-            />
-          </Field>
-          <Field label="To day">
-            <Input
-              type="number"
-              min={0}
-              value={args.to_day ?? ""}
-              onChange={(e) => set("to_day", e.target.value)}
-            />
-          </Field>
+          <NumberField
+            label="From day"
+            min={0}
+            value={args.from_day ?? ""}
+            onChange={(e) => set("from_day", e.target.value)}
+          />
+          <NumberField
+            label="To day"
+            min={0}
+            value={args.to_day ?? ""}
+            onChange={(e) => set("to_day", e.target.value)}
+          />
         </>
       )}
 
       <Button
+        variant="secondary"
         disabled={!ready}
         onClick={() => {
           const mutations = recipe.build(args);
