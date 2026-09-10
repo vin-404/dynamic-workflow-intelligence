@@ -1,4 +1,4 @@
-# Migration Plan — Dynamic Workflow Intelligence v2
+# Migration Plan — FlowTrace v2
 
 Written in Phase 0 from a first-hand inspection of the repository on branch
 `refactor/workflow-intelligence-v2` at commit `4b0beec`. This plan is the

@@ -87,7 +87,7 @@ function FlowLogo() {
         </div>
 
         <div className="text-[8px] uppercase tracking-[0.2em] text-[#68677A]">
-          Workflow Intelligence
+          FlowTrace
         </div>
       </div>
     </div>

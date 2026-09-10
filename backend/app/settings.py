@@ -18,7 +18,7 @@ from pydantic_settings import BaseSettings, NoDecode
 
 
 class Settings(BaseSettings):
-    PROJECT_NAME: str = "Dynamic Workflow Intelligence"
+    PROJECT_NAME: str = "FlowTrace"
     VERSION: str = "1.0.0"
     #: "development" or "production". Only affects how much detail an
     #: unexpected 500 puts in the response body.

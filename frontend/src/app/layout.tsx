@@ -18,8 +18,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Workflow Intelligence",
-  description: "Dynamic Workflow Intelligence Platform — understand how work changes",
+  title: "FlowTrace",
+  description: "FlowTrace — understand how work changes",
 };
 
 /*

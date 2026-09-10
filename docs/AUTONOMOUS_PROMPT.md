@@ -1,4 +1,4 @@
-# Autonomous Claude Code Prompt — Dynamic Workflow Intelligence Platform
+# Autonomous Claude Code Prompt — FlowTrace
 
 ## How to run it
 

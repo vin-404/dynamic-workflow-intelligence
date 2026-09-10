@@ -61,7 +61,7 @@ export default async function LoginPage({
             </div>
             <div>
               <div className="text-[17px] font-semibold tracking-[-0.03em]">Flow<span className="text-[#4164FA]">Trace</span></div>
-              <div className="text-[8px] uppercase tracking-[0.18em] text-[#68677A] dark:text-white/40">Workflow Intelligence</div>
+              <div className="text-[8px] uppercase tracking-[0.18em] text-[#68677A] dark:text-white/40">FlowTrace</div>
             </div>
           </a>
         </div>

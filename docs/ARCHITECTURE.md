@@ -1,4 +1,4 @@
-# Dynamic Workflow Intelligence Platform — Architecture Reset
+# FlowTrace — Architecture Reset
 
 Status: architecture proposal, pre-implementation.
 Scope note: this analysis is grounded on the deterministic prototype engine

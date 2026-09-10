@@ -1,4 +1,4 @@
-# Setup — Dynamic Workflow Intelligence Platform
+# Setup — FlowTrace
 
 If you are joining this project on a new machine, follow this exactly. It takes
 about 5 minutes. Every step here has bitten someone already.

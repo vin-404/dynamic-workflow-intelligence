@@ -1,5 +1,5 @@
 """
-Workflow Intelligence - core engine.
+FlowTrace - core engine.
 
 Pure. Imports no web framework, no ORM, no AI client, and performs no I/O.
 Enforced by `backend/tests/test_core_purity.py`, which parses every module

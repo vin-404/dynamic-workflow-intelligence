@@ -1,6 +1,10 @@
-# Dynamic Workflow Intelligence Platform
+# FlowTrace
 
 **We don't just track work. We understand how work changes.**
+
+> Formerly *Dynamic Workflow Intelligence Platform*. The repository, the
+> deployed URL and the Docker image still carry the old slug; only the
+> product name changed.
 
 A deterministic workflow intelligence platform that answers the questions project managers actually ask:
 

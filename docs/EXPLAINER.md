@@ -1,4 +1,4 @@
-# Dynamic Workflow Intelligence Platform — the whole thing, explained plainly
+# FlowTrace — the whole thing, explained plainly
 
 Read this end to end and you will be able to answer any question a judge asks.
 It assumes you can program but knows nothing about scheduling theory or this

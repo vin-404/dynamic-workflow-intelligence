@@ -1,5 +1,5 @@
 """
-Dynamic Workflow Intelligence Platform - FastAPI application.
+FlowTrace - FastAPI application.
 
 A modular monolith: one process, one database, one frontend app. The only
 boundaries that earn their complexity are `core/` (purity) and `ai/`
