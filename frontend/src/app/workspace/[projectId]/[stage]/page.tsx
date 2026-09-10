@@ -29,7 +29,6 @@ import RequirementChange from "@/components/RequirementChange";
 import { MemberList } from "@/components/SetupPanel";
 import { Button, EmptyState, ErrorNote, Section, Spinner } from "@/components/ui";
 import WorkspaceShell, { WorkspaceStage } from "@/components/WorkspaceShell";
-import { DEMO_ANALYSIS, DEMO_DOMAIN, DEMO_FORECAST, DEMO_PROJECT, DEMO_WORKFLOW } from "@/lib/demo";
 
 const VALID_STAGES: WorkspaceStage[] = [
   "build",
@@ -60,14 +59,6 @@ export default function WorkspaceStagePage() {
     setBusy(true);
     setError(null);
 
-    if (projectId === DEMO_PROJECT.id) {
-      setProject(DEMO_PROJECT);
-      setWorkflow(DEMO_WORKFLOW);
-      setDomains([DEMO_DOMAIN]);
-      setBusy(false);
-      return;
-    }
-
     try {
       const [projects, domainList] = await Promise.all([listProjects(), listDomains()]);
       const found = projects.find((item) => item.id === projectId);
@@ -91,11 +82,7 @@ export default function WorkspaceStagePage() {
     setError(null);
 
     try {
-      if (project.id === DEMO_PROJECT.id) {
-        setAnalysis(DEMO_ANALYSIS);
-      } else {
-        setAnalysis(await analyze(project.id));
-      }
+      setAnalysis(await analyze(project.id));
     } catch (e) {
       setError(e instanceof ApiError ? e : String(e));
     } finally {
@@ -169,7 +156,7 @@ export default function WorkspaceStagePage() {
                   setAnalysis(null);
                 }}
               />
-              {project.id !== DEMO_PROJECT.id && <MemberList projectId={project.id} />}
+              <MemberList projectId={project.id} />
             </div>
           </ErrorBoundary>
         </Section>
@@ -247,7 +234,6 @@ export default function WorkspaceStagePage() {
                 analysis={analysis}
                 busy={busy}
                 onReweight={async (weights) => {
-                  if (project.id !== DEMO_PROJECT.id) return;
                   const nextTasks = analysis.risk.tasks.map((task) => {
                     const factors = task.factors.map((factor) => ({
                       ...factor,
@@ -259,7 +245,12 @@ export default function WorkspaceStagePage() {
                       ...task,
                       factors,
                       score,
-                      band: score >= 0.6 ? "high" : score >= 0.35 ? "moderate" : "low",
+                      // These cuts mirror `_band()` in
+                      // backend/app/core/engine/risk.py. They must stay in
+                      // step with it: a score of 0.57 banded "moderate" here
+                      // and "high" by the engine is the kind of quiet
+                      // disagreement the honesty layer exists to prevent.
+                      band: score >= 0.55 ? "high" : score >= 0.30 ? "moderate" : "low",
                     };
                   });
                   setAnalysis({
@@ -286,10 +277,7 @@ export default function WorkspaceStagePage() {
           )}
           <div className="mt-6">
             <ErrorBoundary what="The forecast" resetKey={stage}>
-              <ForecastPanel
-                projectId={project.id}
-                demoData={project.id === DEMO_PROJECT.id ? DEMO_FORECAST : undefined}
-              />
+              <ForecastPanel projectId={project.id} />
             </ErrorBoundary>
           </div>
         </Section>
@@ -356,7 +344,10 @@ export default function WorkspaceStagePage() {
               projectId={project.id}
               currentVersionId={workflow?.version.id ?? null}
               onView={async (versionId) => {
-                const next = await getWorkflow(project.id, versionId);
+                // VersionHistory hands back `string | null`; getWorkflow's
+                // second parameter is optional, so null has to become
+                // undefined or it reads as "version null".
+                const next = await getWorkflow(project.id, versionId ?? undefined);
                 setWorkflow(next);
                 router.push(`/workspace/${project.id}/build`);
               }}

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { LandingPage } from "@/components/LandingPage";
+import { listProjects } from "@/lib/api";
 
 export default function Home() {
   const router = useRouter();
@@ -37,9 +38,21 @@ export default function Home() {
         darkMode={darkMode}
         onOpenWorkspace={() => router.push("/workspace")}
         onHowItWorks={() => document.getElementById("how-it-works")?.scrollIntoView({ behavior: "smooth" })}
-        onQuestion={(stage) => {
+        onQuestion={async (stage) => {
           const route = stage === "analyze" ? "bottlenecks" : stage;
-          router.push(`/workspace/demo-product-launch/${route}`);
+          // Open a real workflow, so the answer on the other side of this
+          // click is one the engine computed. If there is nothing to open,
+          // send them to the list rather than to invented numbers.
+          try {
+            const projects = await listProjects();
+            if (projects.length > 0) {
+              router.push(`/workspace/${projects[0].id}/${route}`);
+              return;
+            }
+          } catch {
+            // fall through to the workspace list, which reports the failure
+          }
+          router.push("/workspace");
         }}
       />
     </main>

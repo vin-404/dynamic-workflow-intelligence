@@ -7,29 +7,64 @@
  *      unless this is a public read-only demo, see below.
  *   2. Turn a session cookie into the two headers FastAPI trusts, and rewrite
  *      `/api/*` upstream carrying them.
- *   3. With `PUBLIC_DEMO_VIEWER=1`, allow the frontend demo to load without
- *      requiring Google OAuth. Backend API requests remain protected.
+ *   3. With `PUBLIC_DEMO_VIEWER=1`, serve pages to a visitor with no session,
+ *      and forward their API calls as the **public read-only guest**.
  *
- * PUBLIC READ-ONLY MODE.
+ * PUBLIC READ-ONLY MODE. A Google OAuth app in Testing mode admits only the
+ * addresses on its test-user list, so a hard sign-in wall on a public link
+ * shows everyone else a Google error page. `PUBLIC_DEMO_VIEWER=1` makes a
+ * sessionless visitor a real backend user - upserted through the same
+ * `POST /api/users` a Google user goes through - whom `api/deps.py` holds to
+ * a read-only bar. Reads, analysis, risk, optimisation and what-ifs all work;
+ * every mutation comes back as the backend's own 403.
  *
- * The frontend demo is allowed to render publicly so the UI can be viewed
- * without waiting for Google OAuth/backend authentication. API requests are
- * still handled separately and continue to require an authenticated backend
- * identity.
+ * Note what that does and does not mean for `/api/*`. Those requests are
+ * still gated - but the guest identity is precisely how a signed-out visitor
+ * passes that gate, so it is wrong to say they "require an authenticated
+ * identity" in the sign-in sense. What is true is that a request with no
+ * identity at all, guest included, is refused: if the guest upsert cannot
+ * reach the backend there is no id to inject, and the API branch below fails
+ * closed with a 401 rather than forwarding an anonymous request.
  *
- * A session always wins: when a real session exists, its backend user id is
- * used exactly as before.
+ * Pages are the looser half, deliberately. Under `PUBLIC_DEMO_VIEWER` a page
+ * request is served even when no guest id resolved, so the shell renders and
+ * the failure surfaces where it can be explained - in the panel that could
+ * not load - instead of as a bounce to `/login` that tells the visitor
+ * nothing.
  *
- * Why here and not `rewrites()` in `next.config.ts`:
- * `rewrites()` is static configuration. It cannot inspect the session cookie
- * and therefore cannot perform the identity handling required by the backend.
+ * Two properties worth keeping true. **The refusal is the backend's**, not
+ * this file hiding buttons - a guest who calls the API directly is refused by
+ * the same code that refuses a viewer, so the read-only claim is enforced
+ * where it can be checked. And **a session always wins**: the guest is only
+ * reached when there is no session at all, so signing in on a public build
+ * behaves exactly as it does on a private one.
  *
- * FILE NAME AND LOCATION:
- * Next 16 uses `proxy.ts` instead of the older `middleware.ts` convention.
- * This file lives beside `app` inside `src`.
+ * Why here and not `rewrites()` in `next.config.ts`: `rewrites()` is static
+ * configuration. It runs per request but has no access to the request's
+ * cookies, so it cannot know who is asking. The identity injection has to
+ * happen somewhere a session is available, and Next 16 gives two such places -
+ * this file, or a catch-all Route Handler under `app/api`. This file wins
+ * because it is the one that already has to run (page protection needs it
+ * anyway), because `NextResponse.rewrite` hands the request to Next's own
+ * streaming proxy - method, body, response status and headers pass through
+ * untouched, for free - and because a Route Handler would leave `/api/*`
+ * reachable by anything that slipped past a narrowed matcher. Here, there is
+ * one door.
  *
- * RUNTIME:
- * Proxy defaults to the Node.js runtime in Next 16.
+ * FILE NAME AND LOCATION: Next 16 deprecated `middleware.ts` and renamed the
+ * convention to `proxy.ts` with an exported `proxy` function
+ * (node_modules/next/dist/docs/01-app/03-api-reference/03-file-conventions/proxy.md).
+ * `middleware.ts` still works but warns, and having *both* files is a hard
+ * build error (E900) - so this is `proxy.ts`, and there is no `middleware.ts`.
+ * It lives in `src/`, not the repo root, because Next only looks for it beside
+ * `app` (build/index.js: `rootDir = path.join(appDir, "..")`). A `proxy.ts` at
+ * the project root with a `src/app` layout is silently ignored: it builds
+ * clean, the manifest comes out empty, and nothing is protected.
+ *
+ * RUNTIME: Proxy defaults to the Node.js runtime in 16, and the `runtime`
+ * segment option is not merely unnecessary here, it throws. That is why there
+ * is no split `auth.config.ts`: the Edge-safe-config dance that Auth.js v5
+ * needs for Edge middleware does not apply.
  */
 
 import type { NextAuthRequest } from "next-auth";
@@ -49,7 +84,8 @@ import {
 /** Auth.js's own routes. Never proxied upstream, never require a session. */
 const AUTH_PREFIX = "/api/auth";
 
-/** The sign-in page. */
+/** The sign-in page, and the only page a signed-out visitor may see
+ * when public read-only mode is off. */
 const LOGIN_PATH = "/login";
 
 /**
@@ -96,7 +132,8 @@ export const proxy = auth(async function proxy(request: NextAuthRequest) {
   /*
    * API REQUESTS
    *
-   * These remain protected.
+   * These remain protected. "Protected" means an identity is required, not
+   * that a sign-in is - the public guest is an identity.
    *
    * If a real session exists, use its backend identity.
    *

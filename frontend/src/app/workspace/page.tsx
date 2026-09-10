@@ -6,19 +6,6 @@ import { useRouter } from "next/navigation";
 import { listProjects, ApiError } from "@/lib/api";
 import type { Project } from "@/lib/api";
 
-const DEMO_PROJECT: Project = {
-  id: "demo-product-launch",
-  name: "Product Launch",
-  description:
-    "Demo workflow showing how FlowTrace connects work, dependencies, bottlenecks and downstream impact.",
-  goal: "Launch the new product on schedule.",
-  domain_id: "demo-product",
-  start_date: "2026-09-01",
-  deadline: "2026-09-30",
-  today_day: 10,
-  current_version_id: "demo-version-1",
-};
-
 export default function WorkspacePage() {
   const router = useRouter();
 
@@ -35,16 +22,19 @@ export default function WorkspacePage() {
 
         if (cancelled) return;
 
-        setProjects(data.length > 0 ? data : [DEMO_PROJECT]);
+        setProjects(data);
         setError(null);
       } catch (e) {
         if (cancelled) return;
 
-        setProjects([DEMO_PROJECT]);
+        // No substitute data. If the engine cannot be reached there is
+        // nothing true to show, and inventing something here would make an
+        // outage indistinguishable from a healthy system.
+        setProjects([]);
         setError(
           e instanceof ApiError
             ? e.message
-            : null,
+            : "The API could not be reached.",
         );
       } finally {
         if (!cancelled) {
@@ -169,6 +159,35 @@ export default function WorkspacePage() {
             <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-8 text-sm text-white/50">
               Loading workflows…
             </div>
+          ) : error ? (
+            <div className="rounded-2xl border border-red-400/20 bg-red-400/[0.06] p-8">
+              <p className="text-sm font-medium text-red-200">
+                Could not reach the API
+              </p>
+              <p className="mt-2 text-sm leading-6 text-white/50">{error}</p>
+              <p className="mt-3 text-xs text-white/35">
+                Nothing is shown rather than something invented. Every number in
+                FlowTrace comes from the engine, so there is nothing to display
+                until the engine can be reached.
+              </p>
+            </div>
+          ) : projects.length === 0 ? (
+            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-8">
+              <p className="text-sm font-medium text-white/80">
+                No workflows yet
+              </p>
+              <p className="mt-2 max-w-xl text-sm leading-6 text-white/50">
+                Create one to get started. FlowTrace will schedule it, find the
+                bottlenecks, and explain every number it shows you.
+              </p>
+              <button
+                type="button"
+                onClick={() => router.push("/workspace/new")}
+                className="mt-5 rounded-xl bg-white px-5 py-3 text-sm font-semibold text-[#071019] transition hover:bg-white/90"
+              >
+                + New workflow
+              </button>
+            </div>
           ) : (
             <div className="grid gap-4">
               {projects.map((project) => (
@@ -184,12 +203,6 @@ export default function WorkspacePage() {
                         <h3 className="truncate text-lg font-semibold">
                           {project.name}
                         </h3>
-
-                        {project.id === DEMO_PROJECT.id && (
-                          <span className="rounded-full border border-cyan-300/20 bg-cyan-300/10 px-2.5 py-1 text-[11px] font-medium text-cyan-200">
-                            Demo
-                          </span>
-                        )}
                       </div>
 
                       <p className="mt-2 max-w-2xl text-sm leading-6 text-white/50">
@@ -206,12 +219,6 @@ export default function WorkspacePage() {
                 </button>
               ))}
             </div>
-          )}
-
-          {error && projects.length > 0 && (
-            <p className="mt-4 text-xs text-white/35">
-              Showing the frontend demo workflow while the API is unavailable.
-            </p>
           )}
         </section>
       </div>
