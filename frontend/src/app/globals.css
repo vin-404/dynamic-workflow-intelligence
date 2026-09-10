@@ -520,7 +520,7 @@ h4,
 /* Readable light-theme secondary copy. */
 :root:not(.dark) .flowtrace-site [class*="text-[#68677A]"],
 :root:not(.dark) .flowtrace-site [class*="text-[#8FA8FF]"],
-:root:not(.dark) .flowtrace-site [class*="text-[#8A98A8"],
+:root:not(.dark) .flowtrace-site [class*="text-[#8A98A8]"],
 :root:not(.dark) .flowtrace-site [class*="text-muted-foreground"],
 :root:not(.dark) .flowtrace-site [class*="text-dim"] {
   color: #536174 !important;

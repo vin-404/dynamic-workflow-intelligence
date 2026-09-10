@@ -209,7 +209,13 @@ function StatLine({
   );
 }
 
-export default function ForecastPanel({ projectId }: { projectId: string }) {
+export default function ForecastPanel({
+  projectId,
+  demoData,
+}: {
+  projectId: string;
+  demoData?: ForecastResponse;
+}) {
   const [attempt, setAttempt] = useState(0);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
 
@@ -226,6 +232,8 @@ export default function ForecastPanel({ projectId }: { projectId: string }) {
    * instead of flashing the whole panel back to a skeleton.
    */
   useEffect(() => {
+    if (demoData) return;
+
     let live = true;
     getForecast(projectId)
       .then((r) => {
@@ -239,13 +247,15 @@ export default function ForecastPanel({ projectId }: { projectId: string }) {
     return () => {
       live = false;
     };
-  }, [projectId, attempt]);
+  }, [projectId, attempt, demoData]);
 
   const forProject = loaded?.projectId === projectId ? loaded : null;
-  const busy = forProject === null || forProject.attempt !== attempt;
-  const data = forProject?.data ?? null;
-  const error = forProject?.error ?? null;
-  const run = () => setAttempt((n) => n + 1);
+  const busy = demoData ? false : forProject === null || forProject.attempt !== attempt;
+  const data = demoData ?? forProject?.data ?? null;
+  const error = demoData ? null : forProject?.error ?? null;
+  const run = () => {
+    if (!demoData) setAttempt((n) => n + 1);
+  };
 
   if (error) {
     return (
