@@ -17,7 +17,7 @@ about are named explicitly further down.
 | | |
 |---|---|
 | Branch | `feat/capability-completion` |
-| Head | `0c0bbac` |
+| Head | `0c0bbac` is the last code commit; the report commit sits on top of it (see `git log`) |
 | Commits this run | 6, tagged `capability-1` … `capability-6` |
 | Backend tests | 1071 passed (baseline 1067; +4 new, none weakened, none skipped) |
 | `npx tsc --noEmit` | clean |
