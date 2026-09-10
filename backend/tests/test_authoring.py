@@ -332,6 +332,88 @@ class TestConstraintsProtectTheWorkflow:
         )
 
 
+class TestDeclaringConstraints:
+    """A constraint is the user's declaration. It can be made through the API,
+    it appears on the workflow with its reason, and it can be withdrawn - by
+    the `(kind, target)` the engine identifies it by."""
+
+    async def test_declare_then_withdraw_a_constraint(self, client, project):
+        pid = project["id"]
+        r = await client.post(
+            f"/api/projects/{pid}/tasks",
+            json={"key": "E01", "name": "Record pilot", "effort": 3},
+        )
+        assert r.status_code in (200, 201), r.text
+
+        r = await client.post(
+            f"/api/projects/{pid}/constraints",
+            json={
+                "kind": "MANDATORY_TASK",
+                "target": "E01",
+                "reason": "No pilot, no season.",
+            },
+        )
+        assert r.status_code == 201, r.text
+        declared = [c for c in r.json()["constraints"] if c["target"] == "E01"]
+        assert declared == [{
+            "kind": "MANDATORY_TASK",
+            "target": "E01",
+            "reason": "No pilot, no season.",
+            "value": None,
+        }]
+
+        # While it stands, the authoring API honours it.
+        r = await client.delete(f"/api/projects/{pid}/tasks/E01")
+        assert r.status_code == 422
+        assert "No pilot, no season." in r.text
+
+        r = await client.delete(
+            f"/api/projects/{pid}/constraints/MANDATORY_TASK/E01"
+        )
+        assert r.status_code == 200, r.text
+        assert not [
+            c for c in r.json()["constraints"] if c["target"] == "E01"
+        ]
+
+        # Withdrawn means gone: a second withdrawal is a 404, not a no-op.
+        r = await client.delete(
+            f"/api/projects/{pid}/constraints/MANDATORY_TASK/E01"
+        )
+        assert r.status_code == 404
+
+    async def test_a_dependency_target_survives_the_path(self, client, project):
+        """`FROM->TO` has to round-trip through a URL path segment."""
+        pid = project["id"]
+        for key in ("E01", "E02"):
+            r = await client.post(
+                f"/api/projects/{pid}/tasks",
+                json={"key": key, "name": key, "effort": 1},
+            )
+            assert r.status_code in (200, 201), r.text
+        r = await client.post(
+            f"/api/projects/{pid}/dependencies",
+            json={"from_task": "E01", "to_task": "E02", "consumes": False},
+        )
+        assert r.status_code in (200, 201), r.text
+        r = await client.post(
+            f"/api/projects/{pid}/constraints",
+            json={
+                "kind": "IMMUTABLE_DEPENDENCY",
+                "target": "E01->E02",
+                "reason": "You cannot edit what is not recorded.",
+            },
+        )
+        assert r.status_code == 201, r.text
+        r = await client.delete(
+            f"/api/projects/{pid}/constraints/IMMUTABLE_DEPENDENCY/E01-%3EE02"
+        )
+        assert r.status_code == 200, r.text
+        assert not [
+            c for c in r.json()["constraints"]
+            if c["kind"] == "IMMUTABLE_DEPENDENCY"
+        ]
+
+
 class TestVersionImmutability:
     """Editing a sealed version clones it; it never edits history in place."""
 

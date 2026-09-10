@@ -773,6 +773,12 @@ export const createConstraint = (
   body: { kind: string; target: string; reason?: string; value?: number },
 ) => post<Workflow>(`/api/projects/${id}/constraints`, body);
 
+/** Withdraw a constraint by the `(kind, target)` the engine identifies it by. */
+export const deleteConstraint = (id: string, kind: string, target: string) =>
+  del<Workflow>(
+    `/api/projects/${id}/constraints/${encodeURIComponent(kind)}/${encodeURIComponent(target)}`,
+  );
+
 /* ---------------------------------------------------------- analysis */
 
 export const analyze = (id: string, versionId?: string) =>
@@ -905,18 +911,24 @@ export const deleteScenario = (scenarioId: string) =>
 
 /* ---------------------------------------------------------- optimize */
 
+/**
+ * The criteria the optimizer scores on and the default weight of each - the
+ * ranking's inputs, published so a ranking can be read rather than trusted.
+ */
+export interface OptimizeObjectives {
+  weights: Record<string, number>;
+  weights_total: number;
+  criteria: {
+    name: string;
+    better: string;
+    unit: string;
+    describes: string;
+  }[];
+  note: string;
+}
+
 export const optimizeObjectives = (id: string) =>
-  call<{
-    weights: Record<string, number>;
-    weights_total: number;
-    criteria: {
-      name: string;
-      better: string;
-      unit: string;
-      describes: string;
-    }[];
-    note: string;
-  }>(`/api/projects/${id}/optimize/objectives`);
+  call<OptimizeObjectives>(`/api/projects/${id}/optimize/objectives`);
 
 export const optimize = (
   id: string,

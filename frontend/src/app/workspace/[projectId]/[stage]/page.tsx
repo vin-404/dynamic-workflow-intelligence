@@ -28,6 +28,7 @@ import ForecastPanel from "@/components/ForecastPanel";
 import LiveFeed from "@/components/LiveFeed";
 import RequirementChange from "@/components/RequirementChange";
 import ScenarioList from "@/components/ScenarioList";
+import ConstraintPanel from "@/components/ConstraintPanel";
 import { MemberList } from "@/components/SetupPanel";
 import { Button, EmptyState, ErrorNote, Section, Spinner } from "@/components/ui";
 import WorkspaceShell, { WorkspaceStage } from "@/components/WorkspaceShell";
@@ -209,6 +210,17 @@ export default function WorkspaceStagePage() {
               <MemberList projectId={project.id} />
             </div>
           </ErrorBoundary>
+          <div className="mt-6 border-t border-line pt-6">
+            <ErrorBoundary what="The constraints panel" resetKey={stage}>
+              <ConstraintPanel
+                workflow={workflow}
+                onChange={(next) => {
+                  setWorkflow(next);
+                  setAnalysis(null);
+                }}
+              />
+            </ErrorBoundary>
+          </div>
         </Section>
       )}
 

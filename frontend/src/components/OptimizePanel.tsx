@@ -22,6 +22,13 @@
  * only by accident of deployment. Now it reads the live status before a
  * search and the response's `llm_proposals` after one, and each rationale is
  * labelled with what wrote it.
+ *
+ * The objectives are on screen before the first search, not only after it.
+ * `GET /optimize/objectives` publishes the six criteria, what each measures,
+ * which direction is better, its unit and its default weight; the panel reads
+ * that on mount, so a reader can see - and change - what a ranking will be
+ * scored on before asking for one. After a search the weights the response
+ * echoes take over, since those are the ones that actually produced it.
  */
 
 import { useEffect, useState } from "react";
@@ -29,9 +36,11 @@ import { Ban, LoaderCircle } from "lucide-react";
 import {
   ApiError,
   OptimizeCandidate,
+  OptimizeObjectives,
   OptimizeResponse,
   applyScenario,
   optimize,
+  optimizeObjectives,
 } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,6 +56,7 @@ import {
 import { bandClasses, bandText } from "@/lib/severity";
 import { cn } from "@/lib/utils";
 import { MethodLabel, RoleAvailability } from "./AiMethod";
+import MutationVocabulary from "./MutationVocabulary";
 import { ErrorNote, Worked, days } from "./ui";
 
 /** One inline icon size across every panel. */
@@ -163,6 +173,25 @@ export default function OptimizePanel({
   const [maxSeconds, setMaxSeconds] = useState(5);
   const [weights, setWeights] = useState<Record<string, number> | null>(null);
   const [applying, setApplying] = useState<string | null>(null);
+  const [objectives, setObjectives] = useState<OptimizeObjectives | null>(null);
+  const [objectivesError, setObjectivesError] = useState<ApiError | null>(null);
+
+  // The criteria and default weights, read once so the ranking's inputs are
+  // visible before the first search. A failure is shown, not papered over:
+  // the search still runs and echoes whatever weights it used.
+  useEffect(() => {
+    let live = true;
+    optimizeObjectives(projectId)
+      .then((o) => {
+        if (live) setObjectives(o);
+      })
+      .catch((e) => {
+        if (live && e instanceof ApiError) setObjectivesError(e);
+      });
+    return () => {
+      live = false;
+    };
+  }, [projectId]);
 
   // Advance the label while a search is in flight. The reset lives in `run`
   // rather than in this effect's `!busy` branch: setting state synchronously
@@ -339,6 +368,17 @@ export default function OptimizePanel({
         </ErrorNote>
       )}
 
+      {/* -------------------------------------- what it scores on, up front */}
+      {!result && (
+        <ObjectivesSection
+          objectives={objectives}
+          objectivesError={objectivesError}
+          weights={weights}
+          onWeights={setWeights}
+          onReset={() => setWeights(null)}
+        />
+      )}
+
       {result && (
         <>
           {/* --------------------------------------------------- refusals */}
@@ -450,44 +490,16 @@ export default function OptimizePanel({
           )}
 
           {/* ------------------------------------------------- the weights */}
-          <section>
-            <Head>The weights that produced this ranking</Head>
-            <div className="flex flex-wrap items-end gap-x-4 gap-y-2">
-              {Object.entries(weights ?? result.weights).map(
-                ([name, value]) => (
-                  <label key={name} className="flex w-40 flex-col gap-1">
-                    <span className={LABEL}>{name.replace(/_/g, " ")}</span>
-                    <Input
-                      type="number"
-                      min={0}
-                      max={1}
-                      step={0.01}
-                      value={value}
-                      onChange={(e) =>
-                        setWeights({
-                          ...(weights ?? result.weights),
-                          [name]: Number(e.target.value),
-                        })
-                      }
-                    />
-                  </label>
-                ),
-              )}
-            </div>
-            <div className="mt-3 flex gap-2">
-              <Button
-                variant="secondary"
-                onClick={() => run()}
-                disabled={busy}
-              >
-                Re-rank with these weights
-              </Button>
-              <Button variant="ghost" onClick={() => setWeights(result.weights)}>
-                Reset
-              </Button>
-            </div>
-            <p className="mt-2 max-w-3xl text-[11px] text-dim">{result.note}</p>
-          </section>
+          <ObjectivesSection
+            objectives={objectives}
+            objectivesError={objectivesError}
+            weights={weights ?? result.weights}
+            usedNote={result.note}
+            onWeights={setWeights}
+            onReset={() => setWeights(objectives?.weights ?? result.weights)}
+            onRerank={() => run()}
+            busy={busy}
+          />
         </>
       )}
     </div>
@@ -569,6 +581,10 @@ function CandidateBody({
             ))}
           </ol>
         </div>
+        <MutationVocabulary
+          className="mt-1.5"
+          highlight={candidate.mutations.map((m) => m.kind)}
+        />
       </div>
 
       {candidate.scores && (
@@ -659,6 +675,126 @@ function CandidateBody({
         </span>
       </div>
     </div>
+  );
+}
+
+/* ---------------------------------------------------------- objectives */
+
+/**
+ * The criteria and their weights - before a search, the defaults the
+ * optimizer publishes; after one, the weights the response echoed.
+ *
+ * Every row says what the criterion measures, which way is better and in
+ * what unit, so "expected_completion 0.35" reads as a sentence rather than a
+ * bare number. The weights are editable in both states.
+ */
+function ObjectivesSection({
+  objectives,
+  objectivesError,
+  weights,
+  usedNote,
+  onWeights,
+  onReset,
+  onRerank,
+  busy,
+}: {
+  objectives: OptimizeObjectives | null;
+  objectivesError: ApiError | null;
+  /** The weights on screen; null means "the published defaults". */
+  weights: Record<string, number> | null;
+  /** The response's own note about its weights, after a search. */
+  usedNote?: string;
+  onWeights: (next: Record<string, number>) => void;
+  onReset: () => void;
+  onRerank?: () => void;
+  busy?: boolean;
+}) {
+  const shown = weights ?? objectives?.weights ?? null;
+  const total = shown
+    ? Object.values(shown).reduce((a, b) => a + b, 0)
+    : null;
+  const describe = (name: string) =>
+    objectives?.criteria.find((c) => c.name === name);
+
+  return (
+    <section>
+      <Head right={total !== null ? `weights total ${total.toFixed(2)}` : undefined}>
+        {usedNote ? "The weights that produced this ranking" : "What a ranking will be scored on"}
+      </Head>
+
+      {objectivesError && (
+        <div className="mb-2">
+          <ErrorNote hint={objectivesError.hint} requestId={objectivesError.requestId}>
+            The optimizer&apos;s criteria could not be read. {objectivesError.userMessage}{" "}
+            A search still echoes the weights it used, so the ranking is
+            readable after the fact.
+          </ErrorNote>
+        </div>
+      )}
+      {!objectives && !objectivesError && !shown && (
+        <p className="text-xs text-dim">Reading the optimizer&apos;s criteria…</p>
+      )}
+
+      {shown && (
+        <div className="flex flex-col divide-y divide-border/60 border-y border-border/60">
+          {Object.entries(shown).map(([name, value]) => {
+            const c = describe(name);
+            return (
+              <div
+                key={name}
+                className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1.5"
+              >
+                <label className="flex w-24 shrink-0 flex-col gap-0.5">
+                  <span className="sr-only">{name.replace(/_/g, " ")} weight</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={value}
+                    className="h-7"
+                    onChange={(e) =>
+                      onWeights({ ...shown, [name]: Number(e.target.value) })
+                    }
+                  />
+                </label>
+                <span className="w-44 shrink-0 text-[13px] font-medium">
+                  {name.replace(/_/g, " ")}
+                </span>
+                {c ? (
+                  <span className="min-w-0 flex-1 text-xs text-dim">
+                    {c.describes} · {c.better} is better · {c.unit}
+                  </span>
+                ) : (
+                  <span className="min-w-0 flex-1 text-xs text-dim">
+                    not described by the objectives endpoint
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {onRerank && (
+          <Button variant="secondary" onClick={onRerank} disabled={busy}>
+            Re-rank with these weights
+          </Button>
+        )}
+        <Button variant="ghost" onClick={onReset} disabled={busy}>
+          Reset to the published defaults
+        </Button>
+        {!onRerank && shown && (
+          <span className="text-xs text-dim">
+            Edited weights are sent with the next search.
+          </span>
+        )}
+      </div>
+      <p className="mt-2 max-w-3xl text-[11px] text-dim">
+        {usedNote ?? objectives?.note}
+      </p>
+    </section>
   );
 }
 

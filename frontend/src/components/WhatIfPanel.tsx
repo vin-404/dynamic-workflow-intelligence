@@ -36,6 +36,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import DiffView from "./DiffView";
+import MutationVocabulary from "./MutationVocabulary";
 import { ErrorNote } from "./ui";
 
 /** One inline icon size across every panel. */
@@ -184,6 +185,14 @@ export default function WhatIfPanel({
           onAdd={(mutation, label) =>
             setPending([...pending, { mutation, label }])
           }
+        />
+
+        {/* Each question above is one kind from a closed, published set.
+            Naming the set here is what makes "validated before it runs" a
+            claim the reader can check. */}
+        <MutationVocabulary
+          className="mt-2"
+          highlight={pending.map((p) => p.mutation.kind)}
         />
 
         {pending.length > 0 && (

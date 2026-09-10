@@ -32,6 +32,7 @@ import {
   interpret,
 } from "@/lib/api";
 import { MethodLabel, useAiStatus } from "./AiMethod";
+import MutationVocabulary from "./MutationVocabulary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -236,7 +237,7 @@ export default function AskPanel({
               <div className="mb-1.5 text-[11px] text-dim">
                 As typed changes from the closed set:
               </div>
-              <ol className="mb-3 flex flex-col items-start gap-1">
+              <ol className="mb-1.5 flex flex-col items-start gap-1">
                 {result.mutations.map((m, i) => (
                   <li
                     key={i}
@@ -249,6 +250,10 @@ export default function AskPanel({
                   </li>
                 ))}
               </ol>
+              <MutationVocabulary
+                className="mb-3"
+                highlight={result.mutations.map((m) => m.kind)}
+              />
             </>
           ) : (
             <p className="mb-3 max-w-3xl text-sm">

@@ -569,6 +569,43 @@ async def create_constraint(
     return await intelligence.get_workflow(db, project_id)
 
 
+@router.delete("/constraints/{kind}/{target:path}")
+async def delete_constraint(
+    project_id: uuid.UUID,
+    kind: str,
+    target: str,
+    db: AsyncSession = Depends(get_db),
+):
+    """Withdraw a declaration.
+
+    A constraint has no key of its own; it is identified the way the engine
+    reads it, by `(kind, target)` on the draft - the same shape a dependency
+    is deleted by. `target` is a path segment because a dependency target is
+    written `FROM->TO` and an assignment `TASK:RESOURCE`. Like every
+    authoring write this is guarded at the router: a viewer is refused.
+    """
+    version = await _draft(db, project_id)
+    row = (
+        await db.execute(
+            select(Constraint).where(
+                Constraint.version_id == version.id,
+                Constraint.kind == kind,
+                Constraint.target == target,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"No {kind} constraint on {target} in the draft version.",
+        )
+    await db.delete(row)
+    await db.flush()
+    await V.refresh_hash(db, version)
+    await db.commit()
+    return await intelligence.get_workflow(db, project_id)
+
+
 @router.post("/versions/seal")
 async def seal_current_version(
     project_id: uuid.UUID, note: str = "", db: AsyncSession = Depends(get_db)
