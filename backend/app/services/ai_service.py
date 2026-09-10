@@ -90,6 +90,17 @@ async def status(db: AsyncSession) -> dict:
         "model": ai.DEFAULT_MODEL if p.available else None,
         "roles": list(ai.ROLES),
         "cached_responses": len(_CACHE),
+        # What would turn `available` on. Published so the UI can say what a
+        # missing model *needs* rather than only that it is missing; None
+        # when there is nothing to do because a model is already answering.
+        "needs": (
+            None
+            if p.available
+            else (
+                "An ANTHROPIC_API_KEY in the API server's environment, with "
+                "AI_PROVIDER left unset or set to anthropic."
+            )
+        ),
         "degraded_behaviour": {
             "interpreter": (
                 "A labelled pattern matcher over the same shapes the what-if "

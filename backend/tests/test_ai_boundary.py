@@ -666,6 +666,14 @@ class TestAiApi:
         }
         assert any("no write path" in g for g in body["guarantees"])
 
+    async def test_status_says_what_a_missing_model_needs(self, client):
+        """`available: false` on its own is a shrug. The UI's capability
+        panel shows `needs` beside it, so the payload has to name the thing
+        that would turn the model on rather than leave the reader guessing."""
+        body = (await client.get("/api/ai/status")).json()
+        assert body["available"] is False
+        assert "ANTHROPIC_API_KEY" in body["needs"]
+
     async def test_interpret_creates_a_pending_scenario_not_a_version(
         self, client
     ):

@@ -6,8 +6,10 @@
  * Presentation only, and labelled as such. Two things are deliberately on
  * screen rather than hidden:
  *
- * - **The method.** "Rephrased by model" or "engine wording" - the user knows
- *   which they are reading.
+ * - **The method.** "From model" or "deterministic fallback - no model
+ *   configured" - the user knows which they are reading, and the label's
+ *   tooltip says what the fallback is and what a model would need. It reads
+ *   the `method` on *this* narration, not a global flag.
  * - **A discarded narration.** If the model wrote a number the engine did not
  *   produce, the backend throws the prose away and returns the engine's own
  *   wording with the reason. Showing that is the point: it is the guarantee
@@ -33,8 +35,8 @@
 
 import { useState } from "react";
 import { ApiError, Narration, explain } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { MethodLabel } from "./AiMethod";
 import { ErrorNote } from "./ui";
 
 export default function Explainer({ projectId }: { projectId: string }) {
@@ -54,8 +56,6 @@ export default function Explainer({ projectId }: { projectId: string }) {
       setBusy(false);
     }
   }
-
-  const byModel = narration?.method === "model";
 
   return (
     <div className="flex flex-col gap-2">
@@ -83,12 +83,11 @@ export default function Explainer({ projectId }: { projectId: string }) {
             <h3 className="text-sm font-semibold">
               {narration.headline || "In plain language"}
             </h3>
-            <Badge
-              variant={byModel ? "secondary" : "outline"}
+            <MethodLabel
+              role="narrator"
+              method={narration.method}
               className="ml-auto"
-            >
-              {byModel ? "rephrased by model" : "engine wording"}
-            </Badge>
+            />
             <Button size="xs" variant="ghost" onClick={run} disabled={busy}>
               {busy ? "…" : "Again"}
             </Button>

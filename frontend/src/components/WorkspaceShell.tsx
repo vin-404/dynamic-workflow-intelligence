@@ -5,6 +5,7 @@ import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Project } from "@/lib/api";
 import { IdentityBadge, useIdentity } from "@/components/Identity";
+import { CapabilityDialog } from "@/components/CapabilityPanel";
 
 export type WorkspaceStage =
   | "build"
@@ -104,7 +105,7 @@ export default function WorkspaceShell({
   children: ReactNode;
 }) {
   const router = useRouter();
-  const { person } = useIdentity();
+  const { person, isGuest } = useIdentity();
   const [darkMode, setDarkMode] = useState(false);
 
   useEffect(() => {
@@ -280,6 +281,14 @@ export default function WorkspaceShell({
             </div>
 
             <div className="flex items-center gap-3">
+              {/* The honesty surface, one click from every stage: what this
+                  build can and cannot do, read live from the API. */}
+              <CapabilityDialog
+                projectId={project.id}
+                person={person}
+                isGuest={isGuest}
+              />
+
               {person && <IdentityBadge person={person} />}
 
               <button

@@ -14,6 +14,14 @@
  * improvement. The constraint id and the human-written reason are quoted in a
  * ruled block, verbatim, in neutral ink: a constraint on record is a fact,
  * not a severity, so it does not get a colour of its own.
+ *
+ * Where the candidates came from is on screen too. The search has three
+ * sources - the deterministic generators and, when a model is configured, the
+ * language-model Proposer - and every candidate carries its `origin`. The
+ * panel used to say "nothing here involves a language model", which was true
+ * only by accident of deployment. Now it reads the live status before a
+ * search and the response's `llm_proposals` after one, and each rationale is
+ * labelled with what wrote it.
  */
 
 import { useEffect, useState } from "react";
@@ -38,6 +46,7 @@ import {
 } from "@/components/ui/table";
 import { bandClasses, bandText } from "@/lib/severity";
 import { cn } from "@/lib/utils";
+import { MethodLabel, RoleAvailability } from "./AiMethod";
 import { ErrorNote, Worked, days } from "./ui";
 
 /** One inline icon size across every panel. */
@@ -234,10 +243,27 @@ export default function OptimizePanel({
         >
           Search for a better workflow
         </Head>
-        <p className="mb-3 max-w-3xl text-sm text-dim">
+        <p className="mb-1.5 max-w-3xl text-sm text-dim">
           Every candidate is a real list of typed changes, scored by the same
-          engine that produced the numbers you have already seen. Nothing here
-          involves a language model.
+          engine that produced the numbers you have already seen. Candidates
+          come from the deterministic generators and, when a model is
+          configured, from a language-model proposer whose suggestions pass
+          the same validation, constraint gates and scoring.
+        </p>
+        <p className="mb-3 max-w-3xl">
+          {result?.llm_proposals ? (
+            <span className="text-xs text-dim">
+              This search:{" "}
+              {result.llm_proposals.available
+                ? `${result.llm_proposals.count} candidate${
+                    result.llm_proposals.count === 1 ? "" : "s"
+                  } proposed by the model, the rest by the generators.`
+                : "every candidate came from the deterministic generators; the model proposer did not take part."}{" "}
+              {result.llm_proposals.note}
+            </span>
+          ) : (
+            <RoleAvailability role="proposer" />
+          )}
         </p>
 
         <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
@@ -484,7 +510,12 @@ function CandidateBody({
   );
   return (
     <div>
-      <p className="mb-3 max-w-3xl text-sm">{candidate.rationale}</p>
+      <div className="mb-3 flex max-w-3xl flex-wrap items-baseline gap-x-2 gap-y-1">
+        <p className="text-sm">{candidate.rationale}</p>
+        {/* Who wrote this rationale: the generator's template or a model.
+            `origin` is the backend's provenance field on the candidate. */}
+        <MethodLabel role="proposer" method={candidate.origin} />
+      </div>
 
       <div className="mb-3 flex flex-wrap items-start gap-x-8 gap-y-3 border-y border-border py-2.5">
         <Metric

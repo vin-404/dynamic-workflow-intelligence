@@ -21,18 +21,17 @@
  * to advertise, and neither is one being read by a model.
  */
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ChevronRight, LoaderCircle } from "lucide-react";
 import {
-  AiStatus,
   ApiError,
   Interpretation,
   SimulationResponse,
   Workflow,
-  aiStatus,
   evaluateScenario,
   interpret,
 } from "@/lib/api";
+import { MethodLabel, useAiStatus } from "./AiMethod";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -55,17 +54,6 @@ const EXAMPLES = [
   "split T14 across 3 people",
 ];
 
-/**
- * Which machinery produced the answer. Both readings are neutral on purpose:
- * a model is not a badge of quality here, and the pattern matcher is not an
- * apology.
- */
-function methodLabel(method: string): string {
-  return method === "model"
-    ? "interpreted by model"
-    : "matched by pattern (no model configured)";
-}
-
 function Head({
   children,
   right,
@@ -83,16 +71,13 @@ function Head({
 
 export default function AskPanel({ workflow }: { workflow: Workflow }) {
   const [utterance, setUtterance] = useState("");
-  const [status, setStatus] = useState<AiStatus | null>(null);
+  // Shared with every other AI-touched panel on the page: one request.
+  const { status, failed: statusFailed } = useAiStatus();
   const [result, setResult] = useState<Interpretation | null>(null);
   const [simulation, setSimulation] = useState<SimulationResponse | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [simulating, setSimulating] = useState(false);
-
-  useEffect(() => {
-    aiStatus().then(setStatus).catch(() => setStatus(null));
-  }, []);
 
   async function ask(text: string) {
     const trimmed = text.trim();
@@ -129,18 +114,22 @@ export default function AskPanel({ workflow }: { workflow: Workflow }) {
       <section>
         <Head
           right={
-            status && (
+            status ? (
               <span
                 className={cn(TOKEN, "text-dim")}
                 title={
                   status.available
                     ? `Model: ${status.model}`
-                    : "Every capability works without a model; this box uses a pattern matcher."
+                    : `Every capability works without a model; this box uses a pattern matcher. ${status.degraded_behaviour.interpreter}${status.needs ? ` A model would need: ${status.needs}` : ""}`
                 }
               >
                 {status.available ? status.model : "no model configured"}
               </span>
-            )
+            ) : statusFailed ? (
+              <span className="text-[11px] text-severity-medium">
+                AI status unreadable
+              </span>
+            ) : null
           }
         >
           Ask in your own words
@@ -208,9 +197,7 @@ export default function AskPanel({ workflow }: { workflow: Workflow }) {
           <Head
             right={
               <span className="flex flex-wrap items-center gap-1.5">
-                <span className={cn(TOKEN, "text-dim")}>
-                  {methodLabel(result.method)}
-                </span>
+                <MethodLabel role="interpreter" method={result.method} />
                 <Badge
                   variant="outline"
                   className={cn(

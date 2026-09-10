@@ -328,7 +328,8 @@ export function Disclose({
 
 /* ----------------------------------------------- product-bearing components */
 
-const TIER_NAMES = ["structural", "stateful", "historical", "cross-project"];
+/** The four evidence tiers by the names the engine uses, indexed by tier. */
+export const TIER_NAMES = ["structural", "stateful", "historical", "cross-project"];
 
 export function TierBanner({
   tier,

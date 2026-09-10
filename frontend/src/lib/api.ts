@@ -606,6 +606,14 @@ export interface OptimizeResponse {
   project_id: string;
   base_version_id: string;
   elapsed_seconds: number;
+  /**
+   * What the language-model Proposer contributed to this search. With no
+   * model configured `available` is false and `count` is 0, and the note
+   * says so; the ranking above then came entirely from the deterministic
+   * generators. Optional only because a backend older than this field may
+   * still answer.
+   */
+  llm_proposals?: { available: boolean; count: number; note: string };
 }
 
 export interface Accuracy {
@@ -885,6 +893,8 @@ export type AiStatus = {
   model: string | null;
   roles: string[];
   cached_responses: number;
+  /** What would turn `available` on; null when a model is already answering. */
+  needs: string | null;
   degraded_behaviour: Record<string, string>;
   capabilities_without_model: Record<string, string>;
   guarantees: string[];
@@ -952,12 +962,21 @@ export const createUser = (name: string, email?: string) =>
 
 export const getUser = (id: string) => call<Person>(`/api/users/${id}`);
 
+export interface UserProjects {
+  user_id: string;
+  projects: { id: string; name: string; role: string }[];
+  /**
+   * Whether `role` is binding. False means the API server has no
+   * `PROXY_SHARED_SECRET` and enforces nothing - the honest thing to show
+   * is then "advisory", never a padlock.
+   */
+  roles_enforced: boolean;
+  /** The server's own sentence about the above, shown verbatim. */
+  note: string;
+}
+
 export const userProjects = (id: string) =>
-  call<{
-    user_id: string;
-    projects: { id: string; name: string; role: string }[];
-    note: string;
-  }>(`/api/users/${id}/projects`);
+  call<UserProjects>(`/api/users/${id}/projects`);
 
 /* ==================================================================
  * Phase 11 — replay, forecast, requirement change, import.
@@ -1387,8 +1406,25 @@ export const getForecast = (
   body?: { iterations?: number; seed?: number; version_id?: string },
 ) => post<ForecastResponse>(`/api/projects/${id}/forecast`, body ?? {});
 
+/**
+ * The forecast model's own account of itself, without running it. Kept as a
+ * loose bag on purpose (see the Phase 11 note above): a new caveat the backend
+ * adds should reach the screen without a type change. The few keys the
+ * capability panel reads by name are declared here so a typo is a compile
+ * error rather than an `undefined` on screen.
+ */
+export interface ForecastAssumptions extends AssumptionsBlock {
+  kind?: string;
+  distribution_name?: string;
+  default_iterations?: number;
+  is_calibrated?: boolean;
+  disclaimer?: string;
+  what_would_calibrate_it?: string;
+  not_modelled?: { what: string; why_it_matters: string }[];
+}
+
 export const getForecastAssumptions = (id: string) =>
-  call<AssumptionsBlock>(`/api/projects/${id}/forecast/assumptions`);
+  call<ForecastAssumptions>(`/api/projects/${id}/forecast/assumptions`);
 
 /* ----------------------------------------------------- requirements */
 
