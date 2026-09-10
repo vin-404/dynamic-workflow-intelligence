@@ -28,13 +28,16 @@
  */
 
 import { ReactNode, useState } from "react";
-import { CircleCheck, TriangleAlert } from "lucide-react";
+import { CircleCheck, LoaderCircle, TriangleAlert } from "lucide-react";
 import {
   AffectedTask,
+  ApiError,
   ImpactReport as Report,
   MutationIn,
   RequirementApplyResult,
+  SimulationResponse,
   assumptionSentences,
+  evaluateScenario,
   humanizeKey,
   unavailableEntries,
 } from "@/lib/api";
@@ -50,7 +53,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Worked, days } from "./ui";
+import DiffView from "./DiffView";
+import ErrorBoundary from "./ErrorBoundary";
+import { ErrorNote, Worked, days } from "./ui";
 
 /* ------------------------------------------------------------------ bits */
 
@@ -789,6 +794,32 @@ function Replan({
   const [confirming, setConfirming] = useState(false);
   const replan = report.replan;
 
+  /*
+   * The replan is a stored scenario, so it has the same before/after diff a
+   * what-if has - the schedule, the critical path, the findings that appear
+   * and clear. `POST /api/scenarios/{id}/evaluate` is a read: it writes an
+   * analysis run and nothing else, and the guest may call it. Fetched on
+   * demand rather than with the report, because the report already says
+   * what a change costs; this is for the reader who wants to see the shape
+   * of the workflow after it.
+   */
+  const [diff, setDiff] = useState<SimulationResponse | null>(null);
+  const [diffError, setDiffError] = useState<ApiError | null>(null);
+  const [diffBusy, setDiffBusy] = useState(false);
+
+  async function showDiff() {
+    if (!replan.scenario_id) return;
+    setDiffBusy(true);
+    setDiffError(null);
+    try {
+      setDiff(await evaluateScenario(replan.scenario_id));
+    } catch (e) {
+      setDiffError(e as ApiError);
+    } finally {
+      setDiffBusy(false);
+    }
+  }
+
   return (
     <section>
       <Heading
@@ -830,6 +861,42 @@ function Replan({
         <p className="mb-2 text-xs text-muted-foreground">
           {replan.kept_note}
         </p>
+      )}
+
+      {replan.kept && replan.scenario_id && !applied && (
+        <div className="mb-3">
+          {!diff && (
+            <Button
+              size="sm"
+              variant="ghost"
+              disabled={diffBusy}
+              onClick={showDiff}
+            >
+              {diffBusy && (
+                <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+              )}
+              {diffBusy
+                ? "Evaluating the replan…"
+                : "Show the workflow before and after this replan"}
+            </Button>
+          )}
+          {diffError && (
+            <ErrorNote
+              hint={diffError.hint}
+              requestId={diffError.requestId}
+              onRetry={showDiff}
+            >
+              The replan could not be evaluated. {diffError.userMessage}
+            </ErrorNote>
+          )}
+          {diff && (
+            <div className="mt-2 border-t border-border pt-3">
+              <ErrorBoundary what="The before/after diff">
+                <DiffView result={diff} />
+              </ErrorBoundary>
+            </div>
+          )}
+        </div>
       )}
 
       {applied ? (

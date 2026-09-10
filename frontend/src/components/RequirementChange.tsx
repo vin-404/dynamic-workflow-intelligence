@@ -4,8 +4,11 @@
  * The requirement stage: pick a requirement, propose a new wording, read what
  * it would cost before committing to it.
  *
- * This component owns the whole stage and mounts `ImpactReport` and
- * `RequirementHistory` itself, so `page.tsx` has one mount point.
+ * This component owns the whole stage and mounts `ImpactReport`,
+ * `RequirementStaleness` and `RequirementHistory` itself, so `page.tsx` has
+ * one mount point. Each of those sits in its own `ErrorBoundary`: a bug in
+ * the history table must cost the reader the history table, not the composer
+ * they were in the middle of using.
  *
  * **Shape.** A narrow rail lists the requirements with what each one is
  * already worth — consumers, finished days at risk, blast radius — because
@@ -59,8 +62,10 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import ErrorBoundary from "./ErrorBoundary";
 import ImpactReport from "./ImpactReport";
 import RequirementHistory from "./RequirementHistory";
+import RequirementStaleness from "./RequirementStaleness";
 import { ErrorNote, Textarea, days } from "./ui";
 
 /* --------------------------------------------------------------- shapes */
@@ -715,29 +720,49 @@ export default function RequirementChange({
               </ErrorNote>
             )}
 
+            {/* ------------------------------------- staleness, up front */}
+            {/* Before a wording exists there is still an answer: what changing
+                this requirement at all would invalidate, redo and recheck kept
+                apart. It steps aside once a costed report or comparison is on
+                screen, which carries the same lists with the arithmetic. */}
+            {!report && !comparison && !busy && (
+              <ErrorBoundary
+                what="The staleness preview"
+                resetKey={current.key}
+              >
+                <RequirementStaleness
+                  key={current.key}
+                  projectId={projectId}
+                  requirementKey={current.key}
+                />
+              </ErrorBoundary>
+            )}
+
             {/* ------------------------------------------------ result */}
             {report && (
-              <ImpactReport
-                report={report}
-                applying={applying}
-                applied={applied}
-                applyError={
-                  applyError && (
-                    <ErrorNote
-                      hint={applyError.hint}
-                      requestId={applyError.requestId}
-                    >
-                      Nothing was applied. {applyError.userMessage}
-                    </ErrorNote>
-                  )
-                }
-                onApply={() =>
-                  apply(
-                    report.proposed_text,
-                    report.scoped ? report.seeds_used : undefined,
-                  )
-                }
-              />
+              <ErrorBoundary what="The impact report" resetKey={current.key}>
+                <ImpactReport
+                  report={report}
+                  applying={applying}
+                  applied={applied}
+                  applyError={
+                    applyError && (
+                      <ErrorNote
+                        hint={applyError.hint}
+                        requestId={applyError.requestId}
+                      >
+                        Nothing was applied. {applyError.userMessage}
+                      </ErrorNote>
+                    )
+                  }
+                  onApply={() =>
+                    apply(
+                      report.proposed_text,
+                      report.scoped ? report.seeds_used : undefined,
+                    )
+                  }
+                />
+              </ErrorBoundary>
             )}
 
             {comparison && (
@@ -752,29 +777,34 @@ export default function RequirementChange({
                     <p className="mb-3 text-[11px] font-medium tracking-wider text-dim uppercase">
                       {openedOption.label} in full
                     </p>
-                    <ImpactReport
-                      report={openedOption.impact}
-                      applying={applying}
-                      applied={applied}
-                      applyError={
-                        applyError && (
-                          <ErrorNote
-                            hint={applyError.hint}
-                            requestId={applyError.requestId}
-                          >
-                            Nothing was applied. {applyError.userMessage}
-                          </ErrorNote>
-                        )
-                      }
-                      onApply={() =>
-                        apply(
-                          openedOption.text,
-                          openedOption.scoped
-                            ? openedOption.invalidates
-                            : undefined,
-                        )
-                      }
-                    />
+                    <ErrorBoundary
+                      what="The impact report"
+                      resetKey={`${current.key}:${openedOption.index}`}
+                    >
+                      <ImpactReport
+                        report={openedOption.impact}
+                        applying={applying}
+                        applied={applied}
+                        applyError={
+                          applyError && (
+                            <ErrorNote
+                              hint={applyError.hint}
+                              requestId={applyError.requestId}
+                            >
+                              Nothing was applied. {applyError.userMessage}
+                            </ErrorNote>
+                          )
+                        }
+                        onApply={() =>
+                          apply(
+                            openedOption.text,
+                            openedOption.scoped
+                              ? openedOption.invalidates
+                              : undefined,
+                          )
+                        }
+                      />
+                    </ErrorBoundary>
                   </div>
                 )}
                 {/* The comparison carries its own assumptions block; it is the
@@ -813,12 +843,17 @@ export default function RequirementChange({
 
             {/* --------------------------------------------- provenance */}
             <section className="border-t border-line pt-4">
-              <RequirementHistory
-                key={current.key}
-                projectId={projectId}
-                requirementKey={current.key}
-                refreshKey={historyKey}
-              />
+              <ErrorBoundary
+                what="The requirement history"
+                resetKey={current.key}
+              >
+                <RequirementHistory
+                  key={current.key}
+                  projectId={projectId}
+                  requirementKey={current.key}
+                  refreshKey={historyKey}
+                />
+              </ErrorBoundary>
             </section>
           </>
         )}

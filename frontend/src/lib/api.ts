@@ -784,18 +784,28 @@ export const getRisk = (id: string, weights?: Record<string, number>) =>
     weights ? { weights } : {},
   );
 
+/**
+ * Staleness propagation for a requirement, with no proposed wording: which
+ * work consumed it (`must_redo`) and which merely follows it in time
+ * (`must_recheck`). The two lists are the product; a UI must not merge them.
+ */
+export interface RequirementImpactPreview {
+  project_id: string;
+  version_id: string;
+  requirement_key: string;
+  text: string;
+  from_version: number;
+  to_version: number;
+  directly_consumed_by: string[];
+  must_redo: { key: string; name: string; status: string; assignees: string[] }[];
+  must_recheck: { key: string; name: string; status: string; assignees: string[] }[];
+  resources_hit: string[];
+  /** Effort already spent on work in `must_redo` that is finished. */
+  wasted_days: number;
+}
+
 export const requirementImpact = (id: string, requirementKey: string) =>
-  post<{
-    requirement_key: string;
-    text: string;
-    from_version: number;
-    to_version: number;
-    directly_consumed_by: string[];
-    must_redo: { key: string; name: string; status: string; assignees: string[] }[];
-    must_recheck: { key: string; name: string; status: string; assignees: string[] }[];
-    resources_hit: string[];
-    wasted_days: number;
-  }>(`/api/projects/${id}/requirement-impact`, {
+  post<RequirementImpactPreview>(`/api/projects/${id}/requirement-impact`, {
     requirement_key: requirementKey,
   });
 
