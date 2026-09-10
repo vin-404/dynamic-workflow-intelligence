@@ -861,6 +861,25 @@ export const getScenario = (scenarioId: string) =>
 export const evaluateScenario = (scenarioId: string) =>
   post<SimulationResponse>(`/api/scenarios/${scenarioId}/evaluate`);
 
+/**
+ * `GET /api/scenarios/{id}/diff`: the scenario re-simulated against its base
+ * and compared, as a pure read - unlike `evaluate`, it records no analysis
+ * run. The scenario list uses it for each row's headline effect.
+ */
+export interface ScenarioDiff {
+  scenario_id: string;
+  against_version_id: string;
+  validation: { valid: boolean; rejections: unknown[] };
+  comparison: Comparison;
+  summary: string;
+  base_unchanged: boolean;
+  base_version_hash: string;
+  scenario_hash: string;
+}
+
+export const scenarioDiff = (scenarioId: string) =>
+  call<ScenarioDiff>(`/api/scenarios/${scenarioId}/diff`);
+
 export const applyScenario = (scenarioId: string, note?: string) =>
   post<{
     scenario_id: string;

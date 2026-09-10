@@ -69,7 +69,14 @@ function Head({
   );
 }
 
-export default function AskPanel({ workflow }: { workflow: Workflow }) {
+export default function AskPanel({
+  workflow,
+  onScenarioCreated,
+}: {
+  workflow: Workflow;
+  /** Fired when an interpretation was kept as a pending scenario. */
+  onScenarioCreated?: () => void;
+}) {
   const [utterance, setUtterance] = useState("");
   // Shared with every other AI-touched panel on the page: one request.
   const { status, failed: statusFailed } = useAiStatus();
@@ -87,7 +94,15 @@ export default function AskPanel({ workflow }: { workflow: Workflow }) {
     setResult(null);
     setSimulation(null);
     try {
-      setResult(await interpret(workflow.project_id, trimmed));
+      const interpretation = await interpret(workflow.project_id, trimmed);
+      setResult(interpretation);
+      if (interpretation.scenario_id) {
+        try {
+          onScenarioCreated?.();
+        } catch {
+          /* The list's refresh is not this panel's correctness. */
+        }
+      }
     } catch (e) {
       if (e instanceof ApiError) setError(e);
       else throw e;

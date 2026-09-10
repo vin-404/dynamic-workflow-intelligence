@@ -32,7 +32,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ErrorNote } from "./ui";
+import { ErrorNote, instantUTC } from "./ui";
 
 /* --------------------------------------------------------------- shapes */
 
@@ -47,27 +47,6 @@ interface CurrentWording {
   text?: string;
   consumed_by?: string[];
   recorded_in_history?: boolean;
-}
-
-/**
- * The real instant, to the second, labelled UTC — never a relative form.
- *
- * SQLite returns the value with no offset even though the column is
- * timezone-aware, and the default is `datetime.now(timezone.utc)`, so a
- * suffix-less string is UTC. Reading it as local time would shift every row by
- * the reader's own offset, silently and differently per reader (D-127).
- */
-function instantUTC(iso: string | null | undefined): string | null {
-  if (!iso) return null;
-  const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(iso);
-  const t = Date.parse(zoned ? iso : `${iso}Z`);
-  if (Number.isNaN(t)) return null;
-  const d = new Date(t);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}` +
-    ` ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
-  );
 }
 
 /* ----------------------------------------------------------------- main */

@@ -12,6 +12,11 @@
  * A refused mutation shows the reason and, where a constraint caused it, the
  * constraint and the reason on record.
  *
+ * By default a simulation is discarded once read (`keep: false`), exactly as
+ * before. "Keep it as a saved scenario" is an opt-in that stores the scenario
+ * so it appears in the list on this stage; the host is told through `onKept`
+ * so that list can refresh. Nothing about evaluation changes either way.
+ *
  * The selects here are deliberately native `<select>` elements. The browser
  * walkthroughs index into `page.locator("select")` by position and drive them
  * with `selectOption`, which a button-and-listbox Select cannot answer; and a
@@ -119,13 +124,21 @@ const RECIPES: Recipe[] = [
   },
 ];
 
-export default function WhatIfPanel({ workflow }: { workflow: Workflow }) {
+export default function WhatIfPanel({
+  workflow,
+  onKept,
+}: {
+  workflow: Workflow;
+  /** Fired after a simulation that was asked to be kept has been stored. */
+  onKept?: () => void;
+}) {
   const [pending, setPending] = useState<
     { mutation: MutationIn; label: string }[]
   >([]);
   const [result, setResult] = useState<SimulationResponse | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
+  const [keep, setKeep] = useState(false);
 
   async function evaluate() {
     setBusy(true);
@@ -136,9 +149,16 @@ export default function WhatIfPanel({ workflow }: { workflow: Workflow }) {
         await whatIf(
           workflow.project_id,
           pending.map((p) => p.mutation),
-          { name: pending.map((p) => p.label).join("; "), keep: false },
+          { name: pending.map((p) => p.label).join("; "), keep },
         ),
       );
+      if (keep) {
+        try {
+          onKept?.();
+        } catch {
+          /* The list's refresh is not this panel's correctness. */
+        }
+      }
     } catch (e) {
       if (e instanceof ApiError) setError(e);
       else throw e;
@@ -199,7 +219,7 @@ export default function WhatIfPanel({ workflow }: { workflow: Workflow }) {
                 </li>
               ))}
             </ol>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Button onClick={evaluate} disabled={busy}>
                 Simulate
               </Button>
@@ -213,6 +233,15 @@ export default function WhatIfPanel({ workflow }: { workflow: Workflow }) {
               >
                 Clear
               </Button>
+              <label className="ml-1 flex items-center gap-1.5 text-xs text-dim">
+                <input
+                  type="checkbox"
+                  checked={keep}
+                  onChange={(e) => setKeep(e.target.checked)}
+                  className="accent-primary"
+                />
+                keep it as a saved scenario
+              </label>
             </div>
           </div>
         )}

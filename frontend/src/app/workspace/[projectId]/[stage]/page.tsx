@@ -27,6 +27,7 @@ import WorkflowBuilder from "@/components/WorkflowBuilder";
 import ForecastPanel from "@/components/ForecastPanel";
 import LiveFeed from "@/components/LiveFeed";
 import RequirementChange from "@/components/RequirementChange";
+import ScenarioList from "@/components/ScenarioList";
 import { MemberList } from "@/components/SetupPanel";
 import { Button, EmptyState, ErrorNote, Section, Spinner } from "@/components/ui";
 import WorkspaceShell, { WorkspaceStage } from "@/components/WorkspaceShell";
@@ -60,6 +61,9 @@ export default function WorkspaceStagePage() {
   // show its own failure where the weights are - not in the page header.
   const [reweighting, setReweighting] = useState(false);
   const [reweightError, setReweightError] = useState<ApiError | null>(null);
+  // Bumped whenever a panel on the what-if stage saves a scenario, so the
+  // list below it re-reads without the panels knowing about each other.
+  const [scenarioRefresh, setScenarioRefresh] = useState(0);
 
   const loadProject = useCallback(async () => {
     setBusy(true);
@@ -318,10 +322,23 @@ export default function WorkspaceStagePage() {
         >
           <div className="space-y-6">
             <ErrorBoundary what="The sentence box" resetKey={stage}>
-              <AskPanel workflow={workflow} />
+              <AskPanel
+                workflow={workflow}
+                onScenarioCreated={() => setScenarioRefresh((n) => n + 1)}
+              />
             </ErrorBoundary>
             <ErrorBoundary what="The what-if panel" resetKey={stage}>
-              <WhatIfPanel workflow={workflow} />
+              <WhatIfPanel
+                workflow={workflow}
+                onKept={() => setScenarioRefresh((n) => n + 1)}
+              />
+            </ErrorBoundary>
+            <ErrorBoundary what="The saved scenarios" resetKey={stage}>
+              <ScenarioList
+                projectId={project.id}
+                currentVersionId={workflow.version.id}
+                refreshKey={scenarioRefresh}
+              />
             </ErrorBoundary>
           </div>
         </Section>
