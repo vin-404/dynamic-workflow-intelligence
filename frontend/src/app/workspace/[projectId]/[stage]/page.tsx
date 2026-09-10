@@ -180,7 +180,7 @@ export default function WorkspaceStagePage() {
   }
 
   return (
-    <WorkspaceShell project={project} stage={stage}>
+    <WorkspaceShell project={project} stage={stage} version={workflow?.version}>
       {renderError()}
 
       {busy && !workflow && <Spinner label="Loading workflow…" />}

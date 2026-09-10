@@ -12,6 +12,7 @@ backend that predated the AI routes.
 | `journey.mjs` | The whole six-stage journey, twice: over a seeded project, and building a new workflow from empty in a domain you define on the spot |
 | `ai.mjs` | The natural-language box and the plain-language summary, including that the model's typed changes are shown before anything runs |
 | `hardening.mjs` | The sign-in gate, a signed-out API call refused with a hint, the session across a reload, two browsers as two people, structured errors |
+| `capabilities.mjs` | Every workspace stage as the public read-only guest, plus the capability surfaces (the honesty dialog, model labels, staleness preview, scenario list, constraints, objectives). Takes a base URL; `--branch` for the new surfaces, `--skip-writes` against production, `--import-signed-in` to drive an import to a commit through the e2e provider |
 
 ## Running them
 

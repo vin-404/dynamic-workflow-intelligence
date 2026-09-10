@@ -3,7 +3,7 @@
 
 import { ReactNode, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Project } from "@/lib/api";
+import { Project, Workflow } from "@/lib/api";
 import { IdentityBadge, useIdentity } from "@/components/Identity";
 import { CapabilityDialog } from "@/components/CapabilityPanel";
 
@@ -98,10 +98,19 @@ function FlowLogo() {
 export default function WorkspaceShell({
   project,
   stage,
+  version,
   children,
 }: {
   project: Project;
   stage: WorkspaceStage;
+  /**
+   * The workflow version on screen, from the API. The header used to print
+   * "v1 draft" as a literal for every project - a number the frontend
+   * invented, and wrong for the seeded project, whose version is sealed.
+   * When the workflow has not loaded yet nothing is shown rather than a
+   * guess.
+   */
+  version?: Workflow["version"] | null;
   children: ReactNode;
 }) {
   const router = useRouter();
@@ -270,13 +279,18 @@ export default function WorkspaceShell({
                   {project.name}
                 </h1>
 
-                <span className="rounded-xl border border-[#2B3045] bg-[#101620] px-3 py-2 text-xs text-white/50">
-                  {project.name}
-                </span>
-
-                <span className="rounded-xl border border-[#2B3045] bg-[#101620] px-3 py-2 text-xs text-white/50">
-                  v1 draft
-                </span>
+                {version && (
+                  <span
+                    className="rounded-xl border border-[#DAD9E7] bg-[#F1F0FA] px-3 py-2 font-mono text-xs text-[#68677A] dark:border-[#2B3045] dark:bg-[#101620] dark:text-white/50"
+                    title={
+                      version.note
+                        ? `${version.note} · hash ${version.content_hash.slice(0, 12)}…`
+                        : `hash ${version.content_hash.slice(0, 12)}…`
+                    }
+                  >
+                    v{version.version_no} · {version.is_draft ? "draft" : "sealed"}
+                  </span>
+                )}
               </div>
             </div>
 

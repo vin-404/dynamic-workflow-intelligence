@@ -25,6 +25,12 @@
  * Opening a scenario evaluates it (`POST .../evaluate`, a read that writes
  * one analysis run) and renders the same `DiffView` the what-if panel uses,
  * because it is the same comparison from the same engine.
+ *
+ * Optimizer candidates are the exception to "list everything": one search
+ * persists up to forty of them, so after two searches they would bury every
+ * what-if and replan. They are counted in the header and collapsed behind a
+ * disclosure that says how many there are - hidden from the eye, never from
+ * the count - and their diffs are computed only once they are shown.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -63,6 +69,9 @@ const ORIGIN_LABEL: Record<string, string> = {
   llm_proposal: "model proposal",
 };
 
+/** Origins the optimizer writes in bulk; collapsed by default. */
+const OPTIMIZER_ORIGINS = new Set(["heuristic_proposal", "llm_proposal"]);
+
 /** Status, in the three tones `severity.ts` owns. Applied is the good end. */
 function statusTone(status: string): string {
   if (status === "applied" || status === "validated") return "low";
@@ -90,6 +99,11 @@ export default function ScenarioList({
   const [listError, setListError] = useState<ApiError | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [effects, setEffects] = useState<Record<string, Effect>>({});
+  const [showCandidates, setShowCandidates] = useState(false);
+
+  const authored = (scenarios ?? []).filter((s) => !OPTIMIZER_ORIGINS.has(s.origin));
+  const candidates = (scenarios ?? []).filter((s) => OPTIMIZER_ORIGINS.has(s.origin));
+  const visible = showCandidates ? scenarios ?? [] : authored;
 
   // Fetch only. Resets live in the handlers (D-103).
   useEffect(() => {
@@ -112,12 +126,14 @@ export default function ScenarioList({
     };
   }, [projectId, refreshKey, attempt]);
 
-  // The headline effect for every row that can have one, a few at a time.
-  // Rejected scenarios are skipped: they have no valid after-state to diff.
+  // The headline effect for every *visible* row that can have one, a few at
+  // a time. Rejected scenarios are skipped: they have no valid after-state to
+  // diff. Rows already computed are not asked again.
   useEffect(() => {
     if (!scenarios) return;
     let live = true;
-    const queue = scenarios.filter((s) => s.status !== "rejected");
+    const wanted = showCandidates ? scenarios : scenarios.filter((s) => !OPTIMIZER_ORIGINS.has(s.origin));
+    const queue = wanted.filter((s) => s.status !== "rejected" && !effects[s.id]);
     let next = 0;
     async function worker() {
       while (live && next < queue.length) {
@@ -147,7 +163,10 @@ export default function ScenarioList({
     return () => {
       live = false;
     };
-  }, [scenarios]);
+    // `effects` is deliberately not a dependency: it is what this effect
+    // writes, and re-running on every write would re-queue the in-flight rows.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scenarios, showCandidates]);
 
   const reload = useCallback(() => {
     setListError(null);
@@ -186,7 +205,7 @@ export default function ScenarioList({
         <span className="text-[11px] text-dim">
           {scenarios.length === 0
             ? "none"
-            : `${scenarios.length} · newest first · effects computed on the engine`}
+            : `${scenarios.length} · ${authored.length} authored, ${candidates.length} optimizer candidate${candidates.length === 1 ? "" : "s"} · newest first · effects computed on the engine`}
         </span>
       </div>
 
@@ -202,20 +221,44 @@ export default function ScenarioList({
           </p>
         </div>
       ) : (
-        <ul className="divide-y divide-border/60">
-          {scenarios.map((s) => (
-            <ScenarioRow
-              key={s.id}
-              scenario={s}
-              effect={effects[s.id] ?? { state: "pending" }}
-              olderBase={
-                currentVersionId !== null &&
-                s.base_version_id !== currentVersionId
-              }
-              onDeleted={reload}
-            />
-          ))}
-        </ul>
+        <>
+          {visible.length === 0 && (
+            <p className="py-2 text-sm text-dim">
+              Nothing authored by hand yet; every saved scenario here is an
+              optimizer candidate.
+            </p>
+          )}
+          <ul className="divide-y divide-border/60">
+            {visible.map((s) => (
+              <ScenarioRow
+                key={s.id}
+                scenario={s}
+                effect={effects[s.id] ?? { state: "pending" }}
+                olderBase={
+                  currentVersionId !== null &&
+                  s.base_version_id !== currentVersionId
+                }
+                onDeleted={reload}
+              />
+            ))}
+          </ul>
+          {candidates.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setShowCandidates((v) => !v)}
+              aria-expanded={showCandidates}
+              className="mt-2 inline-flex items-center gap-1 text-[11px] text-dim hover:text-foreground"
+            >
+              <ChevronRight
+                className={cn(ICON, "transition-transform", showCandidates && "rotate-90")}
+                aria-hidden
+              />
+              {showCandidates
+                ? `Hide the ${candidates.length} optimizer candidate${candidates.length === 1 ? "" : "s"}`
+                : `Show the ${candidates.length} optimizer candidate${candidates.length === 1 ? "" : "s"} the searches saved`}
+            </button>
+          )}
+        </>
       )}
     </section>
   );
