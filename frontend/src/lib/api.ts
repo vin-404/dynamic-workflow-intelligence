@@ -778,11 +778,33 @@ export const createConstraint = (
 export const analyze = (id: string, versionId?: string) =>
   post<Analysis>(`/api/projects/${id}/analyze`, { version_id: versionId });
 
-export const getRisk = (id: string, weights?: Record<string, number>) =>
-  post<RiskBlock & { tier_reached: number; feasibility: Feasibility }>(
-    `/api/projects/${id}/risk`,
-    weights ? { weights } : {},
-  );
+/**
+ * Per-task risk from the engine, optionally with the reader's own weights.
+ *
+ * This is the only place a re-weighted ranking may come from. The risk stage
+ * used to recompute scores and bands in the browser with a copy of the
+ * engine's thresholds, and the copy drifted; the engine is the authority for
+ * every figure on that stage, including which band a score falls in.
+ * `versionId` pins the request to the snapshot the analysis was read from.
+ */
+export const getRisk = (
+  id: string,
+  weights?: Record<string, number>,
+  versionId?: string,
+) =>
+  post<
+    RiskBlock & {
+      project_id: string;
+      version_id: string;
+      engine_version: string;
+      input_hash: string;
+      tier_reached: number;
+      feasibility: Feasibility;
+    }
+  >(`/api/projects/${id}/risk`, {
+    ...(weights ? { weights } : {}),
+    ...(versionId ? { version_id: versionId } : {}),
+  });
 
 /**
  * Staleness propagation for a requirement, with no proposed wording: which

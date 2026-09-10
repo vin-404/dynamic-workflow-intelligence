@@ -9,6 +9,7 @@ import {
   Project,
   Workflow,
   analyze,
+  getRisk,
   getWorkflow,
   listDomains,
   listProjects,
@@ -54,6 +55,11 @@ export default function WorkspaceStagePage() {
   const [domains, setDomains] = useState<Domain[]>([]);
   const [error, setError] = useState<ApiError | string | null>(null);
   const [busy, setBusy] = useState(false);
+  // The risk re-weight has its own in-flight and error state, separate from
+  // the page's, so the panel can say "recomputing" over its own numbers and
+  // show its own failure where the weights are - not in the page header.
+  const [reweighting, setReweighting] = useState(false);
+  const [reweightError, setReweightError] = useState<ApiError | null>(null);
 
   const loadProject = useCallback(async () => {
     setBusy(true);
@@ -80,6 +86,7 @@ export default function WorkspaceStagePage() {
     if (!project) return;
     setBusy(true);
     setError(null);
+    setReweightError(null);
 
     try {
       setAnalysis(await analyze(project.id));
@@ -89,6 +96,45 @@ export default function WorkspaceStagePage() {
       setBusy(false);
     }
   }, [project]);
+
+  /**
+   * Re-score the risk with the reader's weights - on the engine.
+   *
+   * `POST /api/projects/{id}/risk` recomputes every factor contribution,
+   * score and band and echoes the weights it used. Nothing is multiplied,
+   * summed or banded here: the browser used to do that with its own copy of
+   * the band thresholds, and the copy had drifted from `_band()` in the
+   * engine, so one score could show two bands. The response replaces the
+   * analysis's risk block wholesale, and on failure the previous ranking is
+   * left on screen *with* the error beside it - never silently kept as if it
+   * were the answer to the new weights.
+   */
+  const reweightRisk = useCallback(
+    async (weights: Record<string, number>) => {
+      if (!project || !analysis) return;
+      setReweighting(true);
+      setReweightError(null);
+      try {
+        const risk = await getRisk(project.id, weights, analysis.version_id);
+        setAnalysis({
+          ...analysis,
+          risk: {
+            tasks: risk.tasks,
+            top: risk.top,
+            band_counts: risk.band_counts,
+            assumptions: risk.assumptions,
+          },
+        });
+      } catch (e) {
+        setReweightError(
+          e instanceof ApiError ? e : new ApiError(0, String(e), String(e)),
+        );
+      } finally {
+        setReweighting(false);
+      }
+    },
+    [project, analysis],
+  );
 
   useEffect(() => {
     void loadProject();
@@ -232,46 +278,10 @@ export default function WorkspaceStagePage() {
             <ErrorBoundary what="The risk panel" resetKey={stage}>
               <RiskPanel
                 analysis={analysis}
-                busy={busy}
-                onReweight={async (weights) => {
-                  const nextTasks = analysis.risk.tasks.map((task) => {
-                    const factors = task.factors.map((factor) => ({
-                      ...factor,
-                      weight: weights[factor.name] ?? factor.weight,
-                      contribution: factor.value * (weights[factor.name] ?? factor.weight),
-                    }));
-                    const score = factors.reduce((sum, factor) => sum + factor.contribution, 0);
-                    return {
-                      ...task,
-                      factors,
-                      score,
-                      // These cuts mirror `_band()` in
-                      // backend/app/core/engine/risk.py. They must stay in
-                      // step with it: a score of 0.57 banded "moderate" here
-                      // and "high" by the engine is the kind of quiet
-                      // disagreement the honesty layer exists to prevent.
-                      band: score >= 0.55 ? "high" : score >= 0.30 ? "moderate" : "low",
-                    };
-                  });
-                  setAnalysis({
-                    ...analysis,
-                    risk: {
-                      ...analysis.risk,
-                      tasks: nextTasks,
-                      top: [...nextTasks].sort((a, b) => b.score - a.score),
-                      band_counts: {
-                        high: nextTasks.filter((t) => t.band === "high").length,
-                        moderate: nextTasks.filter((t) => t.band === "moderate").length,
-                        low: nextTasks.filter((t) => t.band === "low").length,
-                      },
-                      assumptions: {
-                        ...analysis.risk.assumptions,
-                        weights,
-                        weights_total: Object.values(weights).reduce((a, b) => a + b, 0),
-                      },
-                    },
-                  });
-                }}
+                busy={busy || reweighting}
+                reweighting={reweighting}
+                reweightError={reweightError}
+                onReweight={reweightRisk}
               />
             </ErrorBoundary>
           )}

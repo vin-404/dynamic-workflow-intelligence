@@ -491,6 +491,36 @@ class TestRiskApi:
         assert echoed["downstream_fan_out"] == 0.9
         assert echoed["slack_ratio"] == 0.1
 
+    async def test_bands_come_from_the_engine_under_custom_weights(self, client):
+        """The band on every task is `_band(score)` from the engine.
+
+        The risk stage used to re-band in the browser with its own copy of
+        the thresholds, and the copy drifted (0.6 / 0.35 against the engine's
+        0.55 / 0.30), so a score of 0.57 read "moderate" there and "high"
+        here. The UI now asks this endpoint instead; this pins the contract
+        it relies on, at the scores the drifted copy would have got wrong.
+        """
+        from backend.app.core.engine.risk import _band
+
+        assert _band(0.57) == "high"
+        assert _band(0.32) == "moderate"
+        assert _band(0.29) == "low"
+
+        r = await client.post(
+            f"/api/projects/{EVENT_PROJECT_ID}/risk",
+            json={"weights": {"slack_ratio": 0.9}},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        for task in body["tasks"]:
+            assert task["band"] == _band(task["score"]), task["task_key"]
+        counted = {
+            band: sum(1 for t in body["tasks"] if t["band"] == band)
+            for band in ("high", "moderate", "low")
+        }
+        assert body["band_counts"] == counted
+        assert body["assumptions"]["weights"]["slack_ratio"] == 0.9
+
     async def test_risk_travels_with_the_analysis_payload_too(self, client):
         r = await client.post(f"/api/projects/{EVENT_PROJECT_ID}/analyze")
         assert r.json()["risk"]["tasks"]

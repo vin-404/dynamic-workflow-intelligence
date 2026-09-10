@@ -25,10 +25,19 @@
  * stage and the score is a single small figure beside its task's name. The
  * table is never collapsed - picking a row in the exposure list re-points it,
  * so all nine factors are on screen without any interaction at all.
+ *
+ * Moving a weight asks the engine. This panel does no arithmetic of its own:
+ * `onReweight` hands the weights to the host, which posts them to `/risk`
+ * and replaces the whole risk block with what comes back - scores, bands and
+ * the echoed weights. While that request is out, the numbers on screen are
+ * the *old* weights' answer, so the exposure section is dimmed and labelled
+ * "recomputing" rather than left looking current. If it fails, the failure
+ * is shown beside the weights and the old ranking stays visibly old.
  */
 
 import { useState } from "react";
-import { Analysis, RiskFactor, TaskRisk } from "@/lib/api";
+import { LoaderCircle } from "lucide-react";
+import { Analysis, ApiError, RiskFactor, TaskRisk } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { bandClasses, bandText, severityFill } from "@/lib/severity";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +52,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Assumptions, Worked, days } from "./ui";
+import { Assumptions, ErrorNote, Worked, days } from "./ui";
 
 /**
  * Read a documented-but-untyped string off a payload block.
@@ -77,13 +86,25 @@ export default function RiskPanel({
   analysis,
   onReweight,
   busy,
+  reweighting = false,
+  reweightError = null,
 }: {
   analysis: Analysis;
+  /** Hands the weights to the engine. The host owns the request. */
   onReweight: (weights: Record<string, number>) => void;
   busy: boolean;
+  /** True while the engine is re-scoring with new weights. */
+  reweighting?: boolean;
+  /** The engine's refusal or failure to re-score, shown by the weights. */
+  reweightError?: ApiError | null;
 }) {
   const risk = analysis.risk;
   const [weights, setWeights] = useState(risk.assumptions.weights);
+  // The engine's defaults are whatever it echoed on first mount, before the
+  // reader moved anything. Kept so "Reset" means "back to the engine's
+  // weights" and not "back to the last thing I typed", which after one
+  // re-rank is what `risk.assumptions.weights` becomes.
+  const [defaults] = useState(risk.assumptions.weights);
   const [selected, setSelected] = useState<string | null>(
     risk.top[0]?.task_key ?? null,
   );
@@ -197,11 +218,24 @@ export default function RiskPanel({
       </section>
 
       {/* -------------------------------------------------- per-task exposure */}
-      <section className="flex flex-col gap-3">
+      <section
+        className={cn(
+          "flex flex-col gap-3 transition-opacity",
+          reweighting && "pointer-events-none opacity-50",
+        )}
+        aria-busy={reweighting || undefined}
+      >
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
           <h3 className="text-[13px] font-semibold uppercase tracking-wider text-muted-foreground">
             Per-task exposure
           </h3>
+          {reweighting && (
+            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+              <LoaderCircle className="size-3.5 animate-spin" aria-hidden />
+              recomputing on the engine with your weights — the figures below
+              are the previous weights&apos; answer
+            </span>
+          )}
           <span className="ml-auto text-xs text-muted-foreground">
             {risk.band_counts.high} high · {risk.band_counts.moderate} moderate
             · {risk.band_counts.low} low
@@ -317,6 +351,8 @@ export default function RiskPanel({
         <p className="max-w-4xl text-xs text-muted-foreground">
           These are inputs, not findings. Change one and the ranking changes —
           which is the point of showing them instead of blending them away.
+          The re-scoring happens on the engine, which returns every score and
+          band; nothing is recomputed in this page.
         </p>
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
           {Object.entries(weights).map(([name, value]) => (
@@ -346,14 +382,26 @@ export default function RiskPanel({
             size="sm"
             variant="ghost"
             disabled={busy}
-            onClick={() => setWeights(risk.assumptions.weights)}
+            onClick={() => setWeights(defaults)}
           >
             Reset
           </Button>
           <span className="text-xs text-muted-foreground">
             total {weightsTotal.toFixed(2)}
+            {reweighting && " · recomputing…"}
           </span>
         </div>
+        {reweightError && (
+          <ErrorNote
+            hint={reweightError.hint}
+            requestId={reweightError.requestId}
+            onRetry={() => onReweight(weights)}
+          >
+            The engine did not re-score with these weights.{" "}
+            {reweightError.userMessage} The ranking above is still the
+            previous weights&apos; answer.
+          </ErrorNote>
+        )}
       </section>
     </div>
   );
