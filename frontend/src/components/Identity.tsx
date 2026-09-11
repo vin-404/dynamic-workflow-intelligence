@@ -121,17 +121,37 @@ export function useIdentity(): {
  * again. This cannot be dismissed and cannot be missed if you look at who
  * you are.
  */
-export function IdentityBadge({ person }: { person: Person }) {
+export function IdentityBadge({
+  person,
+  stacked = false,
+}: {
+  person: Person;
+  /** Two lines that wrap - for the sidebar footer, where nothing may clip. */
+  stacked?: boolean;
+}) {
   const guest = useContext(GuestContext);
   const isGuest = guest !== null && guest.id === person.id;
 
   if (isGuest) {
+    if (stacked) {
+      return (
+        <div className="flex flex-col gap-1.5 text-[12px] text-dim">
+          <span>Viewing as a read-only guest</span>
+          <a
+            href="/login"
+            className="self-start rounded-md border border-line px-2 py-0.5 text-foreground hover:border-dim"
+          >
+            Sign in
+          </a>
+        </div>
+      );
+    }
     return (
-      <span className="inline-flex shrink-0 items-baseline gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
+      <span className="inline-flex shrink-0 items-baseline gap-1.5 text-[12px] whitespace-nowrap text-muted-foreground">
         <span>viewing as a read-only guest</span>
         <a
           href="/login"
-          className="rounded border border-line px-1.5 py-0.5 whitespace-nowrap text-foreground hover:border-dim"
+          className="rounded-md border border-line px-1.5 py-0.5 whitespace-nowrap text-foreground hover:border-dim"
         >
           Sign in
         </a>
@@ -139,11 +159,28 @@ export function IdentityBadge({ person }: { person: Person }) {
     );
   }
 
+  if (stacked) {
+    return (
+      <div className="flex flex-col gap-1.5 text-[12px] text-dim">
+        <span className="truncate text-foreground" title={person.email}>
+          {person.name}
+        </span>
+        <button
+          onClick={() => void signOut({ callbackUrl: "/login" })}
+          title={`Signed in as ${person.email} — sign out`}
+          className="self-start rounded-md border border-line px-2 py-0.5 hover:text-foreground"
+        >
+          Sign out
+        </button>
+      </div>
+    );
+  }
+
   return (
     <button
       onClick={() => void signOut({ callbackUrl: "/login" })}
       title={`Signed in as ${person.email} — sign out`}
-      className="text-xs text-dim hover:text-foreground border border-line rounded px-1.5 py-0.5"
+      className="text-[12px] text-dim hover:text-foreground border border-line rounded-md px-1.5 py-0.5 whitespace-nowrap"
     >
       {person.name}
       <span className="opacity-60"> · sign out</span>

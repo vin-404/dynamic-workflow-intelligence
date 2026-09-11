@@ -42,7 +42,7 @@
   --accent: #4164fa;
   --accent-foreground: #ffffff;
 
-  --severity-high: #cf222e;
+  --severity-high: #c2410c;
   --severity-medium: #8a6300;
   --severity-low: #1a7f37;
 
@@ -79,78 +79,78 @@
   :root:not(.light) {
     color-scheme: dark;
 
-    --background: #0e1116;
-    --panel: #161b22;
-    --panel2: #1c232c;
-    --line: #2a323d;
+    --background: #0b0e1b;
+    --panel: #0f1220;
+    --panel2: #151a2c;
+    --line: #2b3045;
 
-    --elevated: #1c232c;
+    --elevated: #151a2c;
 
-    --foreground: #e6edf3;
-    --dim: #8b98a5;
+    --foreground: #eef0f8;
+    --dim: #9aa0b8;
 
-    --accent: #4c9aff;
-    --accent-foreground: #0e1116;
+    --accent: #6b82ff;
+    --accent-foreground: #0b0e1b;
 
-    --severity-high: #f85149;
+    --severity-high: #fb923c;
     --severity-medium: #e3b341;
     --severity-low: #3fb950;
 
-    --violet: #a371f7;
+    --violet: #a58bff;
 
     --critical: #fb923c;
-    --on-critical: #0e1116;
-    --edge: #4d5560;
-    --grid: #232a35;
+    --on-critical: #0b0e1b;
+    --edge: #4a5170;
+    --grid: #1b2033;
 
-    --primary: #e6edf3;
-    --primary-foreground: #0e1116;
+    --primary: #eef0f8;
+    --primary-foreground: #0b0e1b;
 
-    --on-severity: #0e1116;
+    --on-severity: #0b0e1b;
 
-    --chart-2: #8b98a5;
+    --chart-2: #9aa0b8;
     --chart-3: #6e7781;
     --chart-4: #4d5560;
-    --chart-5: #2a323d;
+    --chart-5: #2b3045;
   }
 }
 
 :root.dark {
   color-scheme: dark;
 
-  --background: #0e1116;
-  --panel: #161b22;
-  --panel2: #1c232c;
-  --line: #2a323d;
+  --background: #0b0e1b;
+  --panel: #0f1220;
+  --panel2: #151a2c;
+  --line: #2b3045;
 
-  --elevated: #1c232c;
+  --elevated: #151a2c;
 
-  --foreground: #e6edf3;
-  --dim: #8b98a5;
+  --foreground: #eef0f8;
+  --dim: #9aa0b8;
 
-  --accent: #4c9aff;
-  --accent-foreground: #0e1116;
+  --accent: #6b82ff;
+  --accent-foreground: #0b0e1b;
 
-  --severity-high: #f85149;
+  --severity-high: #fb923c;
   --severity-medium: #e3b341;
   --severity-low: #3fb950;
 
-  --violet: #a371f7;
+  --violet: #a58bff;
 
   --critical: #fb923c;
-  --on-critical: #0e1116;
-  --edge: #4d5560;
-  --grid: #232a35;
+  --on-critical: #0b0e1b;
+  --edge: #4a5170;
+  --grid: #1b2033;
 
-  --primary: #e6edf3;
-  --primary-foreground: #0e1116;
+  --primary: #eef0f8;
+  --primary-foreground: #0b0e1b;
 
-  --on-severity: #0e1116;
+  --on-severity: #0b0e1b;
 
-  --chart-2: #8b98a5;
+  --chart-2: #9aa0b8;
   --chart-3: #6e7781;
   --chart-4: #4d5560;
-  --chart-5: #2a323d;
+  --chart-5: #2b3045;
 }
 
 /* ============================================================
@@ -288,13 +288,14 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
-  --radius-sm: calc(var(--radius) * 0.6);
-  --radius-md: calc(var(--radius) * 0.8);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) * 1.4);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  /* One surface radius: 12px for cards, 8px for controls, 6px for chips. */
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-2xl: 12px;
+  --radius-3xl: 16px;
+  --radius-4xl: 16px;
 }
 
 /* ============================================================
@@ -361,99 +362,45 @@
 }
 
 /* ============================================================
-   FLOWTRACE GRAPH — FORCED LIGHT THEME
-
-   This is the important part.
-
-   The rest of the application can respect system dark mode,
-   but the workflow timeline stays visually consistent with
-   the FlowTrace light workspace.
+   FLOWTRACE GRAPH
+   The timeline reads the same tokens as everything else, so dark
+   mode is the same chart with different values (design brief §6).
    ============================================================ */
 
 .react-flow.flowtrace-light {
-  --background: #f7f7fc;
-  --panel: #ffffff;
-  --panel2: #f1f0fa;
-  --line: #e2e1ec;
-
-  --foreground: #17172a;
-  --dim: #68677a;
-
-  --accent: #4164fa;
-  --accent-foreground: #ffffff;
-
-  --severity-high: #cf222e;
-  --severity-medium: #8a6300;
-  --severity-low: #1a7f37;
-
-  --violet: #795cf7;
-
-  --critical: #c2410c;
-  --on-critical: #ffffff;
-  --edge: #a9a8ba;
-  --grid: #ecebf3;
-
-  color: #17172a !important;
-  background: #f7f7fc !important;
+  color: var(--foreground);
+  background: var(--background);
 }
 
-.react-flow.flowtrace-light .react-flow__renderer {
-  background: #f7f7fc !important;
-}
-
-.react-flow.flowtrace-light .react-flow__background {
-  background: #f7f7fc !important;
-}
-
-.react-flow.flowtrace-light
-  .react-flow__background-pattern {
-  background: #f7f7fc !important;
+.react-flow.flowtrace-light .react-flow__renderer,
+.react-flow.flowtrace-light .react-flow__background,
+.react-flow.flowtrace-light .react-flow__background-pattern {
+  background: var(--background) !important;
 }
 
 .react-flow.flowtrace-light .react-flow__controls {
   box-shadow: none !important;
 }
 
-.react-flow.flowtrace-light
-  .react-flow__controls-button {
-  background: #ffffff !important;
-  border-color: #e2e1ec !important;
-  color: #68677a !important;
-  fill: #68677a !important;
+.react-flow.flowtrace-light .react-flow__controls-button {
+  background: var(--panel) !important;
+  border-color: var(--line) !important;
+  color: var(--dim) !important;
+  fill: var(--dim) !important;
 }
 
-.react-flow.flowtrace-light
-  .react-flow__controls-button:hover {
-  background: #f1f0fa !important;
+.react-flow.flowtrace-light .react-flow__controls-button:hover {
+  background: var(--panel2) !important;
 }
 
-.react-flow.flowtrace-light
-  .react-flow__minimap {
-  background: #ffffff !important;
-  border: 1px solid #e2e1ec !important;
+.react-flow.flowtrace-light .react-flow__minimap {
+  background: var(--panel) !important;
+  border: 1px solid var(--line) !important;
 }
-
-.react-flow.flowtrace-light
-  .react-flow__attribution {
-  background: transparent !important;
-  color: #68677a !important;
-}
-
-/* ============================================================
-   FLOWTRACE GRAPH CONTAINER
-   ============================================================ */
 
 .flowtrace-graph {
-  background: #f7f7fc !important;
-  color: #17172a !important;
-}
-
-/* Prevent the browser/system dark scheme from affecting native
-   elements inside the workflow chart. */
-
-.flowtrace-graph,
-.flowtrace-graph * {
-  color-scheme: light;
+  background: var(--background);
+  color: var(--foreground);
 }
 
 /* ============================================================
@@ -484,25 +431,23 @@
    quieter surfaces. This layer intentionally stays frontend-only.
    ============================================================ */
 
-:root {
-  --ft-bg: #f6f7fb;
-  --ft-surface: #ffffff;
-  --ft-surface-soft: #f8f9fd;
-  --ft-border: #d9dce7;
-  --ft-border-strong: #c8ccd9;
-  --ft-ink: #171a2b;
-  --ft-ink-soft: #4f5b6d;
-  --ft-muted: #687589;
-  --ft-blue: #4164fa;
-  --ft-violet: #795cf7;
+:root,
+.light,
+.dark {
+  --ft-bg: var(--background);
+  --ft-surface: var(--panel);
+  --ft-surface-soft: var(--panel2);
+  --ft-border: var(--line);
+  --ft-border-strong: var(--dim);
+  --ft-ink: var(--foreground);
+  --ft-ink-soft: var(--foreground);
+  --ft-muted: var(--dim);
+  --ft-blue: var(--accent);
+  --ft-violet: var(--violet);
   --ft-shadow: 0 16px 45px rgba(28, 32, 60, 0.07);
 }
 
-html,
-body {
-  font-family: "Avenir Next", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-}
-
+/* One type family throughout: the Geist webfont the layout loads. */
 body {
   letter-spacing: -0.008em;
 }
@@ -512,8 +457,7 @@ h2,
 h3,
 h4,
 .font-heading {
-  font-family: "Avenir Next", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  letter-spacing: -0.035em;
+  letter-spacing: -0.02em;
 }
 
 .flowtrace-site {
@@ -521,62 +465,49 @@ h4,
 }
 
 :root:not(.dark) .flowtrace-site main > section {
-  background: var(--ft-surface);
-  border: 1px solid var(--ft-border);
-  border-radius: 24px;
-  padding: 30px;
-  margin-bottom: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 28px;
+  margin-bottom: 20px;
   box-shadow: var(--ft-shadow);
 }
 
 :root:not(.dark) .flowtrace-site main > section > div:first-child h1 {
-  font-size: 26px;
+  font-size: 20px;
   line-height: 1.15;
   font-weight: 700;
-  color: var(--ft-ink);
+  color: var(--foreground);
 }
 
 :root:not(.dark) .flowtrace-site main > section > div:first-child p {
-  color: var(--ft-ink-soft) !important;
+  color: var(--dim) !important;
   font-size: 14px;
   line-height: 1.65;
 }
 
 /* Readable light-theme secondary copy. */
-:root:not(.dark) .flowtrace-site [class*="text-[#68677A]"],
-:root:not(.dark) .flowtrace-site [class*="text-[#8FA8FF]"],
-:root:not(.dark) .flowtrace-site [class*="text-[#8A98A8]"],
-:root:not(.dark) .flowtrace-site [class*="text-muted-foreground"],
-:root:not(.dark) .flowtrace-site [class*="text-dim"] {
-  color: #536174 !important;
-}
-
-:root:not(.dark) .flowtrace-site [class*="text-[#17172A]"],
-:root:not(.dark) .flowtrace-site [class*="text-foreground"] {
-  color: #171a2b !important;
-}
 
 /* Make every editable control look editable, not disabled. */
-:root:not(.dark) .flowtrace-site input,
-:root:not(.dark) .flowtrace-site select,
-:root:not(.dark) .flowtrace-site textarea {
-  background: #ffffff !important;
-  color: #171a2b !important;
-  border-color: #cbd0dc !important;
-  box-shadow: 0 1px 2px rgba(20, 24, 40, 0.03);
+.flowtrace-site input,
+.flowtrace-site select,
+.flowtrace-site textarea {
+  background: var(--panel) !important;
+  color: var(--foreground) !important;
+  border-color: var(--line) !important;
 }
 
-:root:not(.dark) .flowtrace-site input::placeholder,
-:root:not(.dark) .flowtrace-site textarea::placeholder {
-  color: #7b8798 !important;
+.flowtrace-site input::placeholder,
+.flowtrace-site textarea::placeholder {
+  color: var(--dim) !important;
   opacity: 1;
 }
 
-:root:not(.dark) .flowtrace-site input:focus,
-:root:not(.dark) .flowtrace-site select:focus,
-:root:not(.dark) .flowtrace-site textarea:focus {
-  border-color: #4164fa !important;
-  box-shadow: 0 0 0 3px rgba(65, 100, 250, 0.10) !important;
+.flowtrace-site input:focus,
+.flowtrace-site select:focus,
+.flowtrace-site textarea:focus {
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 12%, transparent) !important;
 }
 
 :root:not(.dark) .flowtrace-site button {
@@ -593,23 +524,8 @@ h4,
   background-color: #ffffff;
 }
 
-:root:not(.dark) .flowtrace-site [class*="border-[#E2E1EC]"],
-:root:not(.dark) .flowtrace-site [class*="border-[#DAD9E7]"],
-:root:not(.dark) .flowtrace-site [class*="border-line"] {
-  border-color: #d9dce7 !important;
-}
-
-:root:not(.dark) .flowtrace-site [class*="bg-[#F7F7FC]"],
-:root:not(.dark) .flowtrace-site [class*="bg-[#F9F9FD]"],
-:root:not(.dark) .flowtrace-site [class*="bg-[#F5F5FB]"],
-:root:not(.dark) .flowtrace-site [class*="bg-[#F1F0FA]"] {
-  background-color: #f7f8fc !important;
-}
 
 /* Sidebar: stronger active state and cleaner rhythm. */
-:root:not(.dark) .flowtrace-site aside {
-  background: #fbfbfd !important;
-}
 
 :root:not(.dark) .flowtrace-site aside nav button:not(:disabled):hover {
   transform: translateX(2px);
@@ -627,35 +543,10 @@ h4,
 }
 
 /* Cards/tables inside stages get depth without becoming glossy. */
-:root:not(.dark) .flowtrace-site .rounded-lg.border,
-:root:not(.dark) .flowtrace-site .rounded-xl.border,
-:root:not(.dark) .flowtrace-site .rounded-2xl.border,
-:root:not(.dark) .flowtrace-site .rounded-3xl.border {
-  border-color: #d9dce7;
-}
-
-:root:not(.dark) .flowtrace-site table {
-  color: #202438;
-}
-
-:root:not(.dark) .flowtrace-site th {
-  color: #667387 !important;
+.flowtrace-site th {
+  color: var(--dim) !important;
   font-weight: 700;
   letter-spacing: 0.08em;
-}
-
-:root:not(.dark) .flowtrace-site td {
-  color: #202438;
-}
-
-:root:not(.dark) .flowtrace-site tr {
-  border-color: #e0e3ea !important;
-}
-
-/* Technical metadata stays technical, but readable. */
-:root:not(.dark) .flowtrace-site code,
-:root:not(.dark) .flowtrace-site .font-mono {
-  color: #526074;
 }
 
 /* Premium primary buttons. */
@@ -673,45 +564,26 @@ h4,
 
 /* Dark mode keeps the same hierarchy, with stronger readable text. */
 :root.dark .flowtrace-site main > section {
-  background: #111525;
-  border: 1px solid #2b3045;
-  border-radius: 24px;
-  padding: 30px;
-  margin-bottom: 22px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 28px;
+  margin-bottom: 20px;
   box-shadow: 0 18px 50px rgba(0, 0, 0, 0.20);
 }
 
 :root.dark .flowtrace-site main > section > div:first-child h1 {
-  font-size: 26px;
+  font-size: 20px;
   line-height: 1.15;
   font-weight: 700;
 }
 
 :root.dark .flowtrace-site main > section > div:first-child p {
-  color: #b9c0d0 !important;
+  color: var(--dim) !important;
   font-size: 14px;
   line-height: 1.65;
 }
 
-:root.dark .flowtrace-site input,
-:root.dark .flowtrace-site select,
-:root.dark .flowtrace-site textarea {
-  background: #151a2c !important;
-  color: #f5f5ff !important;
-  border-color: #343a52 !important;
-}
-
-:root.dark .flowtrace-site input::placeholder,
-:root.dark .flowtrace-site textarea::placeholder {
-  color: #858da3 !important;
-}
-
-:root.dark .flowtrace-site input:focus,
-:root.dark .flowtrace-site select:focus,
-:root.dark .flowtrace-site textarea:focus {
-  border-color: #6b82ff !important;
-  box-shadow: 0 0 0 3px rgba(65, 100, 250, 0.16) !important;
-}
 
 @media (max-width: 768px) {
   :root:not(.dark) .flowtrace-site main > section,

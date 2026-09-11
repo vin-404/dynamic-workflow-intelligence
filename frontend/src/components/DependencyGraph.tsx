@@ -189,7 +189,7 @@ function labelLayout(
 
 function shellTone(data: BarData): string {
   if (data.critical) {
-    return "border-critical bg-critical text-white";
+    return "border-critical bg-critical text-on-critical";
   }
   if (data.status === "blocked") {
     return "border-foreground border-dashed bg-panel text-foreground";
@@ -274,7 +274,7 @@ function TaskBar({ data }: NodeProps) {
                 <span
                   className={cn(
                     "shrink-0 font-mono text-[12px] font-semibold",
-                    task.critical ? "text-white/85" : "text-dim",
+                    task.critical ? "text-on-critical/85" : "text-dim",
                   )}
                 >
                   {task.status === "done" ? "✓ " : ""}

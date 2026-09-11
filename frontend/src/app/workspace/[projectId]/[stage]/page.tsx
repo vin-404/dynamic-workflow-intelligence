@@ -175,7 +175,7 @@ export default function WorkspaceStagePage() {
 
   if (!project) {
     return (
-      <div className="min-h-screen bg-[#F7F7FC] px-8 py-12">
+      <div className="min-h-screen bg-background px-8 py-12">
         <div className="max-w-3xl mx-auto">
           {busy && <Spinner label="Loading workflow…" />}
           {!busy && renderError()}

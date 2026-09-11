@@ -20,6 +20,8 @@ for (const [w, h] of SIZES) {
     const url = stage === "landing" ? `${BASE}/` : stage === "workspace" ? `${BASE}/workspace` : `${BASE}/workspace/${P}/${stage}`;
     try {
       await page.goto(url, { waitUntil: "networkidle", timeout: 120000 });
+      // The Next dev indicator is not part of the product; keep it out of the frame.
+      await page.addStyleTag({ content: "nextjs-portal{display:none!important}" }).catch(() => {});
       await page.waitForTimeout(stage === "bottlenecks" || stage === "risk" ? 2500 : 1200);
       await page.screenshot({ path: `${outDir}/${stage}-${w}.png`, fullPage: false });
       if (FULL) await page.screenshot({ path: `${outDir}/${stage}-${w}-full.png`, fullPage: true });
