@@ -93,7 +93,7 @@ async function main() {
     // sampled forecast, which is. The label names both because a stage that
     // named only one would misrepresent what is on it.
     await page.getByRole("button", { name: /Risk & forecast/ }).click();
-    ok("risk is labelled a structural estimate", await waitText(page, "structural estimate"));
+    ok("risk is labelled a structural estimate", await waitText(page, "Structural exposure"));
     ok("the three-point range is shown", await waitText(page, "pessimistic"));
     ok("no percentage is claimed", await waitText(page, "not a probability"));
     ok("weights are on screen", await waitText(page, "weights are yours to move"));

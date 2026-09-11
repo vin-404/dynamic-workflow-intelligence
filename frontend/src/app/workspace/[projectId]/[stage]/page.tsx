@@ -321,14 +321,24 @@ export default function WorkspaceStagePage() {
                 reweighting={reweighting}
                 reweightError={reweightError}
                 onReweight={reweightRisk}
+                forecast={
+                  /* The sampled forecast sits between the three-point range
+                     and the exposure list, with its own band and label, so
+                     the two kinds of number are never adjacent unnamed. */
+                  <ErrorBoundary what="The forecast" resetKey={stage}>
+                    <ForecastPanel projectId={project.id} />
+                  </ErrorBoundary>
+                }
               />
             </ErrorBoundary>
           )}
-          <div className="mt-6">
-            <ErrorBoundary what="The forecast" resetKey={stage}>
-              <ForecastPanel projectId={project.id} />
-            </ErrorBoundary>
-          </div>
+          {!analysis && !busy && (
+            <div className="mt-6">
+              <ErrorBoundary what="The forecast" resetKey={stage}>
+                <ForecastPanel projectId={project.id} />
+              </ErrorBoundary>
+            </div>
+          )}
         </Section>
       )}
 

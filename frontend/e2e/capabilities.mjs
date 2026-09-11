@@ -277,7 +277,7 @@ try {
   /* ======================================================================== risk */
   console.log("\n=== risk ===");
   await open("risk");
-  ok("the structural disclaimer survives verbatim", await waitText(page, /structural estimate/i, 40000) && await waitText(page, /not a probability/i));
+  ok("the structural disclaimer survives verbatim", await waitText(page, /Structural exposure/i, 40000) && await waitText(page, /not a probability/i));
   ok("the factor decomposition renders", await waitText(page, "Factor decomposition"));
   ok("the forecast panel renders below it", await waitText(page, /iterations|seed/i));
   const weightInputs = page.locator('section:has-text("The weights are yours to move") input[type=number]');

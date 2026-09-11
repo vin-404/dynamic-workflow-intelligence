@@ -52,6 +52,7 @@ import { cn } from "@/lib/utils";
 import { bandClasses, bandText } from "@/lib/severity";
 import {
   bandLabel,
+  calendarDate,
   distributionLabel,
   humanize,
   provenanceLabel,
@@ -193,28 +194,6 @@ type Loaded = {
   error: ApiError | null;
 };
 
-function StatLine({
-  label,
-  value,
-  detail,
-}: {
-  label: string;
-  value: ReactNode;
-  detail?: ReactNode;
-}) {
-  return (
-    <div className="bg-panel px-4 py-3">
-      <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-        {label}
-      </div>
-      <div className="mt-1 flex items-baseline gap-2">
-        <span className="text-lg font-semibold tracking-tight">{value}</span>
-        {detail && <span className="text-[12px] text-muted-foreground">{detail}</span>}
-      </div>
-    </div>
-  );
-}
-
 export default function ForecastPanel({
   projectId,
   demoData,
@@ -265,7 +244,7 @@ export default function ForecastPanel({
 
   if (error) {
     return (
-      <section className="mt-7 border-t border-border pt-4">
+      <section>
         <h3 className={HEAD}>Forecast</h3>
         <div className="mt-2">
           <ErrorNote
@@ -282,7 +261,7 @@ export default function ForecastPanel({
 
   if (!data) {
     return (
-      <section className="mt-7 flex flex-col gap-2 border-t border-border pt-4">
+      <section className="flex flex-col gap-2">
         <h3 className={HEAD}>Forecast</h3>
         <Skeleton className="h-4 w-72" />
         <Skeleton className="h-10 w-56" />
@@ -296,70 +275,50 @@ export default function ForecastPanel({
   const isProbability = data.answer_kind === "monte_carlo_probability";
   const deadlineProbability = f.deadline?.probability_of_meeting_deadline ?? null;
 
+  const markers = f.completion
+    ? [
+        { label: "P50", day: f.completion.p50_day },
+        { label: "P80", day: f.completion.p80_day },
+        { label: "P90", day: f.completion.p90_day },
+      ]
+    : [];
+
   return (
-    <section className="mt-7 flex flex-col gap-7 border-t border-border pt-4">
-      {isProbability && f.available && (
-        <div className="grid grid-cols-1 gap-px overflow-hidden rounded-lg border border-border bg-border sm:grid-cols-3">
-          <StatLine
-            label="Deadline probability"
-            value={deadlineProbability === null ? "—" : pct(deadlineProbability)}
-            detail="simulated runs"
-          />
-          <StatLine
-            label="P50 completion"
-            value={f.completion?.p50_date ?? "—"}
-            detail={f.completion ? `day ${day(f.completion.p50_day)}` : undefined}
-          />
-          <StatLine
-            label="P90 completion"
-            value={f.completion?.p90_date ?? "—"}
-            detail={f.completion ? `day ${day(f.completion.p90_day)}` : undefined}
-          />
-        </div>
-      )}
-
-      {/* ------------------------------------------------------------ head */}
-      <div className="flex flex-col gap-1">
-        <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
-          <h3 className={HEAD}>Forecast</h3>
-          <span className="text-xs text-muted-foreground">
-            {runs(f.iterations)} runs · seed{" "}
-            <span className="font-mono">{f.seed}</span> ·{" "}
-            {distributionLabel(f.distribution)} · v{data.version_no} ·
-            input <span className="font-mono">{data.input_hash.slice(0, 8)}</span>
-          </span>
-          <Button
-            size="xs"
-            variant="ghost"
-            className="ml-auto"
-            disabled={busy}
-            onClick={() => run()}
-          >
-            {busy ? "Running…" : "Run again"}
-          </Button>
-        </div>
-        {str(a, "reproducible") && (
-          <p className="max-w-4xl text-xs text-muted-foreground">
-            {str(a, "reproducible")}
-          </p>
-        )}
+    <section className="flex flex-col gap-4" data-panel="forecast">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h3 className="text-[18px] font-semibold">Simulated forecast</h3>
+        <span className="text-[12px] text-dim">
+          {runs(f.iterations)} runs · seed <span className="font-mono">{f.seed}</span> ·{" "}
+          {distributionLabel(f.distribution)} · v{data.version_no} · input{" "}
+          <span className="font-mono">{data.input_hash.slice(0, 8)}</span>
+        </span>
+        <Button size="xs" variant="ghost" className="ml-auto" disabled={busy} onClick={() => run()}>
+          {busy ? "Running…" : "Run again"}
+        </Button>
       </div>
-
-      {/* --------------------------------------------- which of two numbers */}
-      <WhichNumber data={data} />
 
       {isProbability && f.available ? (
         <>
-          <Probability data={data} />
-          <Completion data={data} />
+          <ForecastBand data={data} markers={markers} />
+          <ForecastCaveats data={data} />
           <Criticality data={data} />
         </>
       ) : (
-        <Structural data={data} />
+        <>
+          <Structural data={data} />
+          <details className="group text-[14px]">
+            <summary className="flex cursor-pointer list-none items-center gap-1 text-accent marker:content-none hover:underline [&::-webkit-details-marker]:hidden">
+              <span className="inline-block w-3 group-open:hidden">▸</span>
+              <span className="hidden w-3 group-open:inline-block">▾</span>
+              Assumptions
+            </summary>
+            <div className="mt-3 flex flex-col gap-5 border-l border-line pl-3">
+              <WhichNumber data={data} />
+              <RestsOn data={data} />
+            </div>
+          </details>
+        </>
       )}
-
-      {/* --------------------------------------------------- everything else */}
-      <RestsOn data={data} />
     </section>
   );
 }
@@ -472,10 +431,6 @@ function WhichNumber({ data }: { data: ForecastResponse }) {
   );
 }
 
-/* ==========================================================================
- * 2a. The probability
- * ======================================================================== */
-
 /**
  * The deadline's bands are `on_track` / `at_risk` / `unlikely`; a risk band is
  * `low` / `moderate` / `high`. Same three states in the same good-end-first
@@ -513,157 +468,182 @@ function BandLabel({ band, value }: { band: string; value: string }) {
   );
 }
 
-function Probability({ data }: { data: ForecastResponse }) {
+/* ==========================================================================
+ * 2a. The band: the probability, and the distribution it came from
+ * ======================================================================== */
+
+/**
+ * The one number this panel exists for, at headline size, then the sampled
+ * distribution as a band with P50/P80/P90 marked along it and the deadline
+ * through it. Visually distinct from the three-point range above it - bars,
+ * not a flat strip - and labelled on the line beneath as what it is.
+ */
+function ForecastBand({
+  data,
+  markers,
+}: {
+  data: ForecastResponse;
+  markers: { label: string; day: number }[];
+}) {
   const f = data.forecast;
   const d = f.deadline;
-  const a = f.assumptions;
+  const c = f.completion;
   const p = d?.probability_of_meeting_deadline ?? null;
   const hasDeadline = d?.deadline_day !== null && d?.deadline_day !== undefined;
+  const bins = f.histogram?.bins ?? [];
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex flex-col gap-1.5">
-        {p === null || !hasDeadline ? (
-          <p className="max-w-4xl text-sm">
-            No deadline is set on this project, so there is no probability of
-            meeting one. The completion distribution below is still sampled and
-            still says when the work is likely to finish.
+    <div className="flex flex-col gap-3 rounded-xl border border-line bg-panel p-5">
+      {p === null || !hasDeadline ? (
+        <p className="max-w-4xl text-[14px]">
+          No deadline is set on this project, so there is no probability of meeting one. The
+          completion distribution below is still sampled and still says when the work is
+          likely to finish.
+        </p>
+      ) : (
+        <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+          <span className="text-[36px] leading-none font-semibold tracking-[-0.02em] [font-variant-numeric:proportional-nums]">
+            {pct(p)}
+          </span>
+          <span className="text-[14px]">
+            of {runs(f.iterations)} simulated runs finished on or before the deadline
+            {" "}(day {day(d.deadline_day as number)}
+            {d.deadline_date ? ` · ${calendarDate(d.deadline_date) ?? d.deadline_date}` : ""})
+          </span>
+          {d.band && <BandLabel band={d.band} value={pct(p)} />}
+        </div>
+      )}
+
+      {bins.length > 0 && <Histogram data={data} bins={bins} markers={markers} />}
+
+      {c && (
+        <div className="flex flex-wrap items-baseline gap-x-8 gap-y-1 text-[14px]">
+          {(
+            [
+              ["P50", c.p50_day, c.p50_date],
+              ["P80", c.p80_day, c.p80_date],
+              ["P90", c.p90_day, c.p90_date],
+            ] as const
+          ).map(([label, dayValue, date]) => (
+            <span key={label} className="flex items-baseline gap-2">
+              <span className="text-[12px] font-medium text-dim">{label}</span>
+              <span className="font-semibold">{calendarDate(date) ?? date}</span>
+              <span className="text-[12px] text-dim">day {day(dayValue)}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * One line, in the product's voice, then everything the engine says about
+ * the model behind the number - verbatim, one click away. Nothing that used
+ * to be on screen was dropped: the disclaimer, the two kinds, the lifted
+ * notes, the band note and the full assumptions bag are all in here.
+ */
+function ForecastCaveats({ data }: { data: ForecastResponse }) {
+  const f = data.forecast;
+  const a = f.assumptions;
+  const d = f.deadline;
+  const c = f.completion;
+
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[14px]">
+      <span className="font-medium">
+        Simulated — an uncalibrated probability under stated assumptions: durations are
+        sampled independently and resource contention is not modelled.
+      </span>
+      <details className="group">
+        <summary className="flex cursor-pointer list-none items-center gap-1 text-accent marker:content-none hover:underline [&::-webkit-details-marker]:hidden">
+          <span className="inline-block w-3 group-open:hidden">▸</span>
+          <span className="hidden w-3 group-open:inline-block">▾</span>
+          Assumptions
+        </summary>
+        <div className="mt-3 flex max-w-4xl flex-col gap-4 border-l border-line pl-3 text-[12px]">
+          <p className="border-l-2 border-severity-medium py-1 pl-3 text-[13px] leading-snug">
+            {f.disclaimer}
           </p>
-        ) : (
-          <>
-            {/*
-             * D-116's dense line, not a tile: the probability is the answer
-             * and carries the size; the denominator that produced it sits on
-             * the same baseline rather than in a box of its own.
-             */}
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="text-4xl leading-none font-semibold [font-variant-numeric:proportional-nums]">
-                {pct(p)}
-              </span>
-              <span className="text-sm">
-                of {runs(f.iterations)} simulated runs finished on or before the
-                deadline
-              </span>
-              {d.band && <BandLabel band={d.band} value={pct(p)} />}
+          {data.answer_kind_note && <p className="text-muted-foreground">{data.answer_kind_note}</p>}
+          {f.not_the_structural_estimate && (
+            <p className="text-muted-foreground">{f.not_the_structural_estimate}</p>
+          )}
+          {d?.band_note && <p className="text-muted-foreground">{d.band_note}</p>}
+
+          <dl className="flex flex-col gap-2">
+            <div className="flex flex-col gap-0.5">
+              <dt className="font-medium">Durations are sampled independently — which is optimistic</dt>
+              <dd className="text-muted-foreground">
+                {str(a, "independence_note") ??
+                  "Task durations are sampled independently of one another. Real delays correlate, so this is optimistic."}
+              </dd>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {runs(d.iterations_meeting_deadline)} of {runs(f.iterations)} runs
-              met day {day(d.deadline_day as number)}
-              {d.deadline_date ? ` (${d.deadline_date})` : ""}.{" "}
-              {runs(f.iterations - d.iterations_meeting_deadline)} did not.
-            </p>
-            {d.band_note && (
-              <p className="max-w-4xl text-xs text-muted-foreground">
-                {d.band_note}
-              </p>
+            <div className="flex flex-col gap-0.5">
+              <dt className="font-medium">Resource contention is not simulated</dt>
+              <dd className="text-muted-foreground">
+                {str(a, "resource_contention_note") ??
+                  "Every iteration runs the same resource-blind schedule the rest of the engine runs."}
+              </dd>
+            </div>
+            {str(a, "distribution_cost") && (
+              <div className="flex flex-col gap-0.5">
+                <dt className="font-medium">
+                  What {str(a, "distribution_name") ?? distributionLabel(f.distribution)} costs
+                </dt>
+                <dd className="text-muted-foreground">{str(a, "distribution_cost")}</dd>
+              </div>
             )}
-          </>
-        )}
-      </div>
+            {str(a, "reproducible") && (
+              <div className="flex flex-col gap-0.5">
+                <dt className="font-medium">Reproducible</dt>
+                <dd className="text-muted-foreground">{str(a, "reproducible")}</dd>
+              </div>
+            )}
+          </dl>
 
-      {/* The disclaimer is not a disclosure. It is the sentence the number is
-          only true inside of, so it sits under the number. */}
-      <p className="max-w-4xl border-l-2 border-severity-medium py-1 pl-3 text-[13px] leading-snug">
-        {f.disclaimer}
-      </p>
+          {d && c && (
+            <dl className="flex flex-wrap gap-x-5 gap-y-0.5">
+              <div className="flex gap-1.5">
+                <dt className="text-muted-foreground">runs meeting the deadline</dt>
+                <dd>
+                  {runs(d.iterations_meeting_deadline)} of {runs(f.iterations)} ·{" "}
+                  {runs(f.iterations - d.iterations_meeting_deadline)} did not
+                </dd>
+              </div>
+              <div className="flex gap-1.5">
+                <dt className="text-muted-foreground">mean</dt>
+                <dd>{calendarDate(c.mean_date) ?? c.mean_date} · day {day(c.mean_day)}</dd>
+              </div>
+              <div className="flex gap-1.5">
+                <dt className="text-muted-foreground">earliest run</dt>
+                <dd>{calendarDate(c.earliest_date) ?? c.earliest_date} · day {day(c.earliest_day)}</dd>
+              </div>
+              <div className="flex gap-1.5">
+                <dt className="text-muted-foreground">latest run</dt>
+                <dd>{calendarDate(c.latest_date) ?? c.latest_date} · day {day(c.latest_day)}</dd>
+              </div>
+              <div className="flex gap-1.5">
+                <dt className="text-muted-foreground">deterministic projection</dt>
+                <dd>
+                  {calendarDate(data.deterministic.projected_end_date) ?? data.deterministic.projected_end_date} · day{" "}
+                  {day(data.deterministic.projected_end_day)}
+                </dd>
+              </div>
+            </dl>
+          )}
 
-      {/* The two assumptions the brief names, lifted out of the bag to sit
-          beside the number rather than at the foot of the panel. */}
-      <dl className="flex max-w-4xl flex-col gap-2 border-l border-border pl-3 text-xs">
-        <div className="flex flex-col gap-0.5">
-          <dt className="font-medium">
-            Durations are sampled independently — which is optimistic
-          </dt>
-          <dd className="text-muted-foreground">
-            {str(a, "independence_note") ??
-              "Task durations are sampled independently of one another. Real delays correlate, so this is optimistic."}
-          </dd>
+          <WhichNumber data={data} />
+          <RestsOn data={data} />
         </div>
-        <div className="flex flex-col gap-0.5">
-          <dt className="font-medium">Resource contention is not simulated</dt>
-          <dd className="text-muted-foreground">
-            {str(a, "resource_contention_note") ??
-              "Every iteration runs the same resource-blind schedule the rest of the engine runs."}
-          </dd>
-        </div>
-        {str(a, "distribution_cost") && (
-          <div className="flex flex-col gap-0.5">
-            <dt className="font-medium">
-              What {str(a, "distribution_name") ?? distributionLabel(f.distribution)} costs
-            </dt>
-            <dd className="text-muted-foreground">{str(a, "distribution_cost")}</dd>
-          </div>
-        )}
-      </dl>
+      </details>
     </div>
   );
 }
 
 /* ==========================================================================
- * 2b. Completion dates and the histogram
+ * 2b. The histogram
  * ======================================================================== */
-
-function Completion({ data }: { data: ForecastResponse }) {
-  const f = data.forecast;
-  const c = f.completion;
-  const bins = f.histogram?.bins ?? [];
-
-  return (
-    <div className="flex flex-col gap-2">
-      <h4 className="text-sm font-semibold">Completion date</h4>
-
-      <div className="flex flex-wrap items-baseline gap-x-8 gap-y-2 border-y border-border py-2">
-        {(
-          [
-            ["P50", c.p50_day, c.p50_date],
-            ["P80", c.p80_day, c.p80_date],
-            ["P90", c.p90_day, c.p90_date],
-          ] as const
-        ).map(([label, dayValue, date]) => (
-          <div key={label} className="flex items-baseline gap-2">
-            <span className="text-[12px] font-medium tracking-wider text-muted-foreground">
-              {label}
-            </span>
-            <span className="text-lg leading-none font-semibold">{date}</span>
-            <span className="text-[12px] text-muted-foreground">
-              day {day(dayValue)}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <dl className="flex flex-wrap gap-x-5 gap-y-0.5 text-[12px]">
-        <div className="flex gap-1.5">
-          <dt className="text-muted-foreground">mean</dt>
-          <dd>
-            {c.mean_date} · day {day(c.mean_day)}
-          </dd>
-        </div>
-        <div className="flex gap-1.5">
-          <dt className="text-muted-foreground">earliest run</dt>
-          <dd>
-            {c.earliest_date} · day {day(c.earliest_day)}
-          </dd>
-        </div>
-        <div className="flex gap-1.5">
-          <dt className="text-muted-foreground">latest run</dt>
-          <dd>
-            {c.latest_date} · day {day(c.latest_day)}
-          </dd>
-        </div>
-        <div className="flex gap-1.5">
-          <dt className="text-muted-foreground">deterministic projection</dt>
-          <dd>
-            {data.deterministic.projected_end_date} · day{" "}
-            {day(data.deterministic.projected_end_day)}
-          </dd>
-        </div>
-      </dl>
-
-      {bins.length > 0 && <Histogram data={data} bins={bins} />}
-    </div>
-  );
-}
 
 /**
  * The distribution of finish dates, as a column chart.
@@ -682,9 +662,12 @@ function Completion({ data }: { data: ForecastResponse }) {
 function Histogram({
   data,
   bins,
+  markers = [],
 }: {
   data: ForecastResponse;
   bins: HistogramBin[];
+  /** P50/P80/P90, drawn as ticks on the day axis beneath the bars. */
+  markers?: { label: string; day: number }[];
 }) {
   const f = data.forecast;
   const deadlineDay = f.deadline?.deadline_day ?? null;
@@ -717,7 +700,7 @@ function Histogram({
         {deadlineDay !== null && (
           <span className="ml-auto">
             deadline day {day(deadlineDay)}
-            {f.deadline.deadline_date ? ` · ${f.deadline.deadline_date}` : ""}
+            {f.deadline.deadline_date ? ` · ${calendarDate(f.deadline.deadline_date) ?? f.deadline.deadline_date}` : ""}
           </span>
         )}
       </figcaption>
@@ -773,12 +756,29 @@ function Histogram({
         )}
       </div>
 
+      {markers.length > 0 && span > 0 && (
+        <div className="relative h-5" aria-hidden>
+          {markers
+            .filter((m) => m.day >= from && m.day <= to)
+            .map((m) => (
+              <span
+                key={m.label}
+                className="absolute top-0 flex -translate-x-1/2 flex-col items-center text-[12px] font-medium"
+                style={{ left: `${((m.day - from) / span) * 100}%` }}
+              >
+                <span className="h-1.5 w-px bg-foreground" />
+                <span>{m.label}</span>
+              </span>
+            ))}
+        </div>
+      )}
+
       <div className="flex items-baseline justify-between border-t border-border pt-1 text-[12px] text-muted-foreground">
         <span>
-          {bins[0].from_date} · day {day(from)}
+          {calendarDate(bins[0].from_date) ?? bins[0].from_date} · day {day(from)}
         </span>
         <span>
-          {bins[bins.length - 1].to_date} · day {day(to)}
+          {calendarDate(bins[bins.length - 1].to_date) ?? bins[bins.length - 1].to_date} · day {day(to)}
         </span>
       </div>
 
@@ -857,7 +857,7 @@ function Criticality({ data }: { data: ForecastResponse }) {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <h4 className="text-sm font-semibold">Criticality index</h4>
+        <h4 className="text-[18px] font-semibold">Criticality index</h4>
         <span className="text-xs text-muted-foreground">
           {tasks.length} task{tasks.length === 1 ? "" : "s"}
           {sampled !== null ? ` · ${sampled} sampled` : ""}
@@ -868,16 +868,22 @@ function Criticality({ data }: { data: ForecastResponse }) {
         </span>
       </div>
 
-      {means && (
-        <p className="max-w-4xl text-[13px] leading-snug text-foreground/90">
-          {means.charAt(0).toUpperCase() + means.slice(1)}.
-        </p>
-      )}
-      {str(a, "criticality_index_definition") && (
-        <p className="max-w-4xl text-xs text-muted-foreground">
-          {str(a, "criticality_index_definition")}
-        </p>
-      )}
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-[14px]">
+        {means && <span>{means.charAt(0).toUpperCase() + means.slice(1)}.</span>}
+        {(str(a, "criticality_index_definition") || str(a, "spread_provenance_note")) && (
+          <details className="group">
+            <summary className="flex cursor-pointer list-none items-center gap-1 text-accent marker:content-none hover:underline [&::-webkit-details-marker]:hidden">
+              <span className="inline-block w-3 group-open:hidden">▸</span>
+              <span className="hidden w-3 group-open:inline-block">▾</span>
+              How this is measured
+            </summary>
+            <div className="mt-2 flex max-w-4xl flex-col gap-2 border-l border-line pl-3 text-[12px] text-muted-foreground">
+              {str(a, "criticality_index_definition") && <p>{str(a, "criticality_index_definition")}</p>}
+              {str(a, "spread_provenance_note") && <p>{str(a, "spread_provenance_note")}</p>}
+            </div>
+          </details>
+        )}
+      </div>
 
       <Table className="text-xs">
         <TableHeader>
@@ -909,11 +915,6 @@ function Criticality({ data }: { data: ForecastResponse }) {
         </TableBody>
       </Table>
 
-      {str(a, "spread_provenance_note") && (
-        <p className="max-w-4xl text-[12px] text-muted-foreground">
-          {str(a, "spread_provenance_note")}
-        </p>
-      )}
     </div>
   );
 }
@@ -993,7 +994,7 @@ function Structural({ data }: { data: ForecastResponse }) {
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-1.5">
-        <h4 className="text-sm font-semibold text-severity-medium">
+        <h4 className="text-[18px] font-semibold text-severity-medium">
           No distribution to report
         </h4>
         {f.unavailable_reason && (
@@ -1013,8 +1014,8 @@ function Structural({ data }: { data: ForecastResponse }) {
 
       <div className="flex flex-col gap-1.5">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <h4 className="text-sm font-semibold">
-            Structural estimate · exposure rank
+          <h4 className="text-[14px] font-semibold">
+            Structural exposure · exposure rank
           </h4>
           <span className="text-xs text-muted-foreground">
             {s.band_counts.high ?? 0} high · {s.band_counts.moderate ?? 0}{" "}
