@@ -15,10 +15,11 @@
  * open rather than folded away. The only colour is the accent on the version
  * being viewed.
  *
- * The timestamp is the real instant, to the second, labelled UTC. No relative
- * form ("3 days ago") stands in for it: this is the provenance panel, and a
- * reader here needs the actual moment a version was written, not a rounded
- * impression of it.
+ * The timestamp reads "3 days ago · 8 Sep 2026, 05:12 UTC": the relative form
+ * for orientation and, because this is the provenance panel, the precise UTC
+ * instant inline as well, in words rather than as a raw ISO string (`When`
+ * with `precise`; the D-127 rule that a suffix-less value is UTC lives in
+ * `parseInstant`). Hover gives the instant to the second.
  *
  * **An author is still not on the row**, and not because it was dropped for
  * density. `WorkflowVersion` has no author column at all, so "who" needs a
@@ -32,6 +33,8 @@ import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Accuracy, Version, getAccuracy, listVersions } from "@/lib/api";
 import { severityText } from "@/lib/severity";
+import { findingKindLabel } from "@/lib/display";
+import When from "@/components/When";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -41,28 +44,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-
-/**
- * The instant a version was written, in UTC, to the second.
- *
- * The column is `DateTime(timezone=True)`, but SQLite has no timezone type,
- * so the value arrives with no `Z` and no offset. It is UTC either way - the
- * default is `datetime.now(timezone.utc)` - so a suffix-less string is read
- * as UTC rather than as the reader's local time, which would silently shift
- * every timestamp in the panel by the viewer's offset.
- */
-function instantUTC(iso: string | null | undefined): string | null {
-  if (!iso) return null;
-  const zoned = /(?:Z|[+-]\d{2}:?\d{2})$/.test(iso);
-  const t = Date.parse(zoned ? iso : `${iso}Z`);
-  if (Number.isNaN(t)) return null;
-  const d = new Date(t);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return (
-    `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}` +
-    ` ${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}`
-  );
-}
 
 export default function VersionHistory({
   projectId,
@@ -103,7 +84,7 @@ export default function VersionHistory({
           <h2 className="text-sm font-medium">
             Every version this workflow has had
           </h2>
-          <span className="font-mono text-[11px] text-dim">
+          <span className="font-mono text-[12px] text-dim">
             {versions.length}
           </span>
         </div>
@@ -119,7 +100,7 @@ export default function VersionHistory({
               <TableRow className="hover:bg-transparent">
                 {[
                   ["Version", "w-20"],
-                  ["When · UTC", "w-40"],
+                  ["When", "w-64"],
                   ["State", "w-24"],
                   ["Note", ""],
                   ["Deadline", "w-20"],
@@ -130,7 +111,7 @@ export default function VersionHistory({
                   <TableHead
                     key={i}
                     className={cn(
-                      "h-7 px-1.5 text-[11px] font-medium tracking-wider text-dim uppercase",
+                      "h-7 px-1.5 text-[12px] font-medium tracking-wider text-dim uppercase",
                       width,
                     )}
                   >
@@ -162,10 +143,10 @@ export default function VersionHistory({
                         v{v.version_no}
                       </span>
                     </TableCell>
-                    <TableCell className="px-1.5 py-1 font-mono text-[11px] text-dim">
-                      {instantUTC(v.created_at) ?? "—"}
+                    <TableCell className="px-1.5 py-1 text-[12px] text-dim">
+                      <When iso={v.created_at} precise />
                     </TableCell>
-                    <TableCell className="px-1.5 py-1 font-mono text-[11px] text-dim">
+                    <TableCell className="px-1.5 py-1 font-mono text-[12px] text-dim">
                       {v.is_draft ? "draft" : "sealed"}
                       {v.created_from_scenario_id ? " · applied" : ""}
                     </TableCell>
@@ -175,13 +156,13 @@ export default function VersionHistory({
                     {/* The deadline this version was authored against, in
                         the day offset the engine works in. It moves between
                         versions, so it is provenance, not decoration. */}
-                    <TableCell className="px-1.5 py-1 font-mono text-[11px] text-dim">
+                    <TableCell className="px-1.5 py-1 font-mono text-[12px] text-dim">
                       {v.deadline_day === null ? "none" : `d${v.deadline_day}`}
                     </TableCell>
-                    <TableCell className="px-1.5 py-1 font-mono text-[11px] text-dim">
+                    <TableCell className="px-1.5 py-1 font-mono text-[12px] text-dim">
                       {v.content_hash.slice(0, 24)}…
                     </TableCell>
-                    <TableCell className="px-1.5 py-1 font-mono text-[11px] text-dim">
+                    <TableCell className="px-1.5 py-1 font-mono text-[12px] text-dim">
                       {parent ? `v${parent.version_no}` : v.parent_version_id ? "v?" : "—"}
                     </TableCell>
                     <TableCell className="px-1.5 py-1 text-right">
@@ -241,7 +222,7 @@ export default function VersionHistory({
                 </div>
               </dl>
 
-              <h3 className="mb-1 text-[11px] tracking-wider text-dim uppercase">
+              <h3 className="mb-1 text-[12px] tracking-wider text-dim uppercase">
                 Every problem this fixture is known to contain
               </h3>
               <ul className="text-xs">
@@ -258,8 +239,9 @@ export default function VersionHistory({
                     >
                       {label.detected ? "found" : "missed"}
                     </span>
-                    <span className="w-56 shrink-0 truncate font-mono text-dim">
-                      {label.kind}@{label.root_cause}
+                    <span className="w-56 shrink-0 truncate text-dim">
+                      {findingKindLabel(label.kind)} ·{" "}
+                      <span className="font-mono">{label.root_cause}</span>
                     </span>
                     <span className="flex-1">{label.description}</span>
                     {label.planted && (

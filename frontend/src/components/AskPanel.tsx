@@ -38,6 +38,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { bandClasses, severityText } from "@/lib/severity";
 import { cn } from "@/lib/utils";
+import { describeMutation } from "@/lib/display";
 import DiffView from "./DiffView";
 import { ErrorNote } from "./ui";
 
@@ -45,7 +46,7 @@ import { ErrorNote } from "./ui";
 const ICON = "size-3.5 shrink-0";
 /** A constraint id, a mutation kind: an identifier on record, not a status. */
 const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
+  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
 
 /** Phrasings the deterministic matcher handles, so the box is never a guessing
  *  game about what it accepts. */
@@ -142,7 +143,7 @@ export default function AskPanel({
                 {status.available ? status.model : "no model configured"}
               </span>
             ) : statusFailed ? (
-              <span className="text-[11px] text-severity-medium">
+              <span className="text-[12px] text-severity-medium">
                 AI status unreadable
               </span>
             ) : null
@@ -180,7 +181,7 @@ export default function AskPanel({
                 setUtterance(e);
                 ask(e);
               }}
-              className="rounded border border-border px-1.5 py-0.5 font-mono text-[11px] transition-colors hover:bg-muted hover:text-foreground"
+              className="rounded border border-border px-1.5 py-0.5 font-mono text-[12px] transition-colors hover:bg-muted hover:text-foreground"
             >
               {e}
             </button>
@@ -234,17 +235,19 @@ export default function AskPanel({
               <p className="mb-3 max-w-3xl text-sm">{result.intent}</p>
               {/* Sentences keep their sentence case; small caps are for
                   column heads, not for claims. */}
-              <div className="mb-1.5 text-[11px] text-dim">
+              <div className="mb-1.5 text-[12px] text-dim">
                 As typed changes from the closed set:
               </div>
               <ol className="mb-1.5 flex flex-col items-start gap-1">
                 {result.mutations.map((m, i) => (
                   <li
                     key={i}
-                    className="max-w-full rounded border border-border bg-muted px-2 py-1 font-mono text-[11px] break-all"
+                    className="max-w-full rounded border border-border bg-muted px-2 py-1 text-[12px] break-all"
                   >
-                    <span className="font-medium">{m.kind}</span>{" "}
-                    <span className="text-dim">
+                    <span className="font-medium" title={m.kind}>
+                      {describeMutation(m)}
+                    </span>{" "}
+                    <span className="font-mono text-dim">
                       {JSON.stringify(m.payload)}
                     </span>
                   </li>
@@ -264,7 +267,7 @@ export default function AskPanel({
 
           {result.unsupported.length > 0 && (
             <div className="mb-3 text-xs">
-              <div className="mb-1 text-[11px] text-dim">
+              <div className="mb-1 text-[12px] text-dim">
                 It could not express:
               </div>
               <ul className="flex flex-col gap-0.5">
@@ -316,7 +319,7 @@ export default function AskPanel({
           )}
 
           <details className="group mt-3">
-            <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[11px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
+            <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
               <ChevronRight
                 className={cn(ICON, "transition-transform group-open:rotate-90")}
                 aria-hidden

@@ -142,7 +142,7 @@ try {
   ok("the member list renders", (await body(page)).match(/member|owner|editor|viewer/i) !== null);
   if (BRANCH) {
     ok("the constraints panel is on the build stage", await waitText(page, "What may not be optimised away"));
-    ok("the seeded constraints are listed with their reasons", await waitText(page, "MANDATORY_TASK") && await waitText(page, "go/no-go gate"));
+    ok("the seeded constraints are listed with their reasons", await waitText(page, "Mandatory") && await waitText(page, "go/no-go gate"));
     // Declare one as the guest: the composer allows it; the backend refuses it.
     const selects = page.locator("select");
     const n = await selects.count();
@@ -192,7 +192,7 @@ try {
     const d2 = await readDay();
     ok("frames keep arriving over SSE: the clock advances", d1 !== null && d2 !== null && d2 > d1, `${d1} -> ${d2}`);
     ok("the frame is labelled a reconstruction", await waitText(page, /reconstruction/i));
-    ok("the evidence tier is on screen and tied to the frame", await waitText(page, /evidence tier/i));
+    ok("the evidence tier is on screen and tied to the frame", await waitText(page, /evidence from/i));
 
     const pause = page.getByRole("button", { name: /^Pause$/ });
     if (await pause.count()) {
@@ -237,7 +237,7 @@ try {
   /* ================================================================= bottlenecks */
   console.log("\n=== bottlenecks ===");
   await open("bottlenecks");
-  ok("the analysis renders", await waitText(page, /Evidence tier \d/, 40000));
+  ok("the analysis renders", await waitText(page, /Evidence from/, 40000));
   ok("the checks that ran are counted", await waitText(page, /\d+ checks? ran/));
   ok("the unavailable checks are rendered, not dropped", await waitText(page, /could not/));
   const details = page.getByText("What this analysis cannot assess yet");
@@ -443,7 +443,7 @@ try {
     await page.getByRole("button", { name: /What this build can and cannot do/ }).click();
     ok("the dialog opens", await waitText(page, "What this build can and cannot do right now", 20000));
     ok("the AI roles are listed as unavailable with what they need", await waitText(page, /ANTHROPIC_API_KEY/, 30000));
-    ok("the reached tier and the unavailable tiers come from the analysis", await waitText(page, /Tier 2 reached/, 60000) && await waitText(page, /Tier 3 · cross-project/));
+    ok("the reached tier and the unavailable tiers come from the analysis", await waitText(page, /Evidence reached · From history/, 60000) && await waitText(page, /From other projects/));
     ok("roles are reported as enforced from the API", await waitText(page, /Roles are enforced on this instance/, 30000));
     ok("the guest's seat is named", await waitText(page, /public read-only guest/));
     ok("calibration is stated as unavailable with what would calibrate it", await waitText(page, /A calibrated probability/) && await waitText(page, /not available/));

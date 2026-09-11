@@ -47,10 +47,16 @@ import {
   TaskForecast,
   assumptionSentences,
   getForecast,
-  humanizeKey,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { bandClasses, bandText } from "@/lib/severity";
+import {
+  bandLabel,
+  distributionLabel,
+  humanize,
+  provenanceLabel,
+  scoreKindLabel,
+} from "@/lib/display";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -72,10 +78,10 @@ import { Assumptions, ErrorNote } from "./ui";
 /* -------------------------------------------------------------- formatting */
 
 const HEAD =
-  "text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground";
+  "text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground";
 
 /** A cell head: the same small caps the other analysis panels use. */
-const TH = "h-7 px-1.5 text-[10px] uppercase tracking-wider text-muted-foreground";
+const TH = "h-7 px-1.5 text-[12px] uppercase tracking-wider text-muted-foreground";
 
 function pct(value: number, digits = 1): string {
   return `${(value * 100).toFixed(digits)}%`;
@@ -132,7 +138,7 @@ function flatten(block: AssumptionsBlock | undefined, prefix = ""): Entry[] {
   const out: Entry[] = [];
   for (const [rawKey, v] of Object.entries(block)) {
     const key = prefix ? `${prefix}.${rawKey}` : rawKey;
-    const label = humanizeKey(key.replace(/\./g, " · "));
+    const label = humanize(key.replace(/\./g, " · "));
     if (v === null || v === undefined) {
       out.push({ key, label, value: "—", prose: false });
     } else if (typeof v === "string") {
@@ -198,12 +204,12 @@ function StatLine({
 }) {
   return (
     <div className="bg-panel px-4 py-3">
-      <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+      <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
         {label}
       </div>
       <div className="mt-1 flex items-baseline gap-2">
         <span className="text-lg font-semibold tracking-tight">{value}</span>
-        {detail && <span className="text-[11px] text-muted-foreground">{detail}</span>}
+        {detail && <span className="text-[12px] text-muted-foreground">{detail}</span>}
       </div>
     </div>
   );
@@ -319,7 +325,7 @@ export default function ForecastPanel({
           <span className="text-xs text-muted-foreground">
             {runs(f.iterations)} runs · seed{" "}
             <span className="font-mono">{f.seed}</span> ·{" "}
-            {(f.distribution ?? "").replace(/_/g, "-")} · v{data.version_no} ·
+            {distributionLabel(f.distribution)} · v{data.version_no} ·
             input <span className="font-mono">{data.input_hash.slice(0, 8)}</span>
           </span>
           <Button
@@ -423,8 +429,8 @@ function WhichNumber({ data }: { data: ForecastResponse }) {
               data-state={r.mine ? "selected" : undefined}
               className="hover:bg-transparent"
             >
-              <TableCell className="px-1.5 py-1.5 font-mono">
-                {r.kind}
+              <TableCell className="px-1.5 py-1.5 font-medium">
+                {scoreKindLabel(r.kind)}
               </TableCell>
               <TableCell className="whitespace-normal px-1.5 py-1.5 text-muted-foreground">
                 {r.what}
@@ -498,7 +504,7 @@ function BandLabel({ band, value }: { band: string; value: string }) {
       variant="outline"
       className={cn("gap-1.5", bandClasses(BAND_ALIAS[band] ?? band))}
     >
-      <span>{band.replace(/_/g, " ")}</span>
+      <span>{bandLabel(band)}</span>
       <span aria-hidden className="opacity-50">
         ·
       </span>
@@ -583,7 +589,7 @@ function Probability({ data }: { data: ForecastResponse }) {
         {str(a, "distribution_cost") && (
           <div className="flex flex-col gap-0.5">
             <dt className="font-medium">
-              What {str(a, "distribution_name") ?? f.distribution} costs
+              What {str(a, "distribution_name") ?? distributionLabel(f.distribution)} costs
             </dt>
             <dd className="text-muted-foreground">{str(a, "distribution_cost")}</dd>
           </div>
@@ -615,18 +621,18 @@ function Completion({ data }: { data: ForecastResponse }) {
           ] as const
         ).map(([label, dayValue, date]) => (
           <div key={label} className="flex items-baseline gap-2">
-            <span className="text-[11px] font-medium tracking-wider text-muted-foreground">
+            <span className="text-[12px] font-medium tracking-wider text-muted-foreground">
               {label}
             </span>
             <span className="text-lg leading-none font-semibold">{date}</span>
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-[12px] text-muted-foreground">
               day {day(dayValue)}
             </span>
           </div>
         ))}
       </div>
 
-      <dl className="flex flex-wrap gap-x-5 gap-y-0.5 text-[11px]">
+      <dl className="flex flex-wrap gap-x-5 gap-y-0.5 text-[12px]">
         <div className="flex gap-1.5">
           <dt className="text-muted-foreground">mean</dt>
           <dd>
@@ -704,7 +710,7 @@ function Histogram({
 
   return (
     <figure className="mt-1 flex flex-col gap-1.5">
-      <figcaption className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+      <figcaption className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12px] text-muted-foreground">
         <span>
           {runs(f.iterations)} runs, binned by finish day — taller is more runs
         </span>
@@ -767,7 +773,7 @@ function Histogram({
         )}
       </div>
 
-      <div className="flex items-baseline justify-between border-t border-border pt-1 text-[10px] text-muted-foreground">
+      <div className="flex items-baseline justify-between border-t border-border pt-1 text-[12px] text-muted-foreground">
         <span>
           {bins[0].from_date} · day {day(from)}
         </span>
@@ -777,7 +783,7 @@ function Histogram({
       </div>
 
       {met !== null && (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px]">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px]">
           <span className="flex items-center gap-1.5">
             <span
               aria-hidden
@@ -800,7 +806,7 @@ function Histogram({
       )}
 
       {deadlineDay !== null && !inRange && (
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-[12px] text-muted-foreground">
           The deadline (day {day(deadlineDay)}) falls outside the sampled range,
           so no line is drawn for it: every run
           {deadlineDay > to ? " met it" : " missed it"}.
@@ -808,7 +814,7 @@ function Histogram({
       )}
 
       {f.histogram.method && (
-        <p className="max-w-4xl text-[11px] text-muted-foreground">
+        <p className="max-w-4xl text-[12px] text-muted-foreground">
           {f.histogram.method}
         </p>
       )}
@@ -904,7 +910,7 @@ function Criticality({ data }: { data: ForecastResponse }) {
       </Table>
 
       {str(a, "spread_provenance_note") && (
-        <p className="max-w-4xl text-[11px] text-muted-foreground">
+        <p className="max-w-4xl text-[12px] text-muted-foreground">
           {str(a, "spread_provenance_note")}
         </p>
       )}
@@ -953,7 +959,7 @@ function CriticalityRow({
       <TableCell className="px-1.5 py-1">
         <span className="flex items-center gap-1.5">
           <span className="text-muted-foreground">
-            {d.spread_provenance.replace(/_/g, " ")}
+            {provenanceLabel(d.spread_provenance)}
           </span>
           {task.assumed && (
             <Badge
@@ -997,8 +1003,8 @@ function Structural({ data }: { data: ForecastResponse }) {
         )}
         <p className="text-xs text-muted-foreground">
           Falling back to:{" "}
-          <span className="font-mono">
-            {f.fall_back_to ?? "structural_estimate"}
+          <span className="font-medium">
+            {scoreKindLabel(f.fall_back_to ?? "structural_estimate")}
           </span>
           . That is a different quantity, so nothing below is a probability and
           no percentage is shown.
@@ -1025,7 +1031,7 @@ function Structural({ data }: { data: ForecastResponse }) {
                 key={t.task_key}
                 className="flex items-center gap-3 px-1.5 py-1"
               >
-                <span className="w-5 shrink-0 text-right text-[11px] text-muted-foreground">
+                <span className="w-5 shrink-0 text-right text-[12px] text-muted-foreground">
                   {i + 1}
                 </span>
                 <span className="w-10 shrink-0 font-mono text-xs text-muted-foreground">
@@ -1087,7 +1093,7 @@ function RestsOn({ data }: { data: ForecastResponse }) {
         <dl className="flex max-w-4xl flex-col gap-1.5 text-xs">
           {prose.map((e) => (
             <div key={e.key} className="flex flex-col gap-0.5">
-              <dt className="font-medium">{humanizeKey(e.key)}</dt>
+              <dt className="font-medium">{humanize(e.key)}</dt>
               <dd className="text-muted-foreground">{e.text}</dd>
             </div>
           ))}
@@ -1111,7 +1117,7 @@ function RestsOn({ data }: { data: ForecastResponse }) {
         />
       )}
 
-      <p className="max-w-4xl text-[11px] text-muted-foreground">
+      <p className="max-w-4xl text-[12px] text-muted-foreground">
         {data.deterministic.note}
       </p>
     </div>

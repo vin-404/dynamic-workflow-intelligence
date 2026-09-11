@@ -31,6 +31,7 @@ import ScenarioList from "@/components/ScenarioList";
 import ConstraintPanel from "@/components/ConstraintPanel";
 import { MemberList } from "@/components/SetupPanel";
 import { Button, EmptyState, ErrorNote, Section, Spinner } from "@/components/ui";
+import { bandLabel, prose, statusLabel } from "@/lib/display";
 import WorkspaceShell, { WorkspaceStage } from "@/components/WorkspaceShell";
 
 const VALID_STAGES: WorkspaceStage[] = [
@@ -416,14 +417,6 @@ export default function WorkspaceStagePage() {
   );
 }
 
-const STATUS_WORDS: Record<string, string> = {
-  done: "Done",
-  in_progress: "In progress",
-  in_review: "In review",
-  blocked: "Blocked",
-  not_started: "Not started",
-};
-
 /**
  * The task a reader clicked in the graph, with what the analysis already
  * says about it: its schedule, its slack, its structural exposure, and every
@@ -476,7 +469,7 @@ function TaskInspector({
         </div>
         <div>
           <dt className="text-[12px] text-dim">Status</dt>
-          <dd>{STATUS_WORDS[task.status] ?? task.status}</dd>
+          <dd>{statusLabel(task.status)}</dd>
         </div>
         <div>
           <dt className="text-[12px] text-dim">Runs</dt>
@@ -496,7 +489,7 @@ function TaskInspector({
         </div>
         <div>
           <dt className="text-[12px] text-dim">Structural exposure</dt>
-          <dd>{risk ? `${risk.score.toFixed(2)} · ${risk.band}` : "Not scored"}</dd>
+          <dd>{risk ? `${risk.score.toFixed(2)} · ${bandLabel(risk.band)}` : "Not scored"}</dd>
         </div>
       </dl>
 
@@ -510,7 +503,7 @@ function TaskInspector({
           <ul className="mt-2 space-y-2">
             {named.map((f) => (
               <li key={`${f.kind}-${f.task_ids.join(",")}`} className="text-[14px]">
-                <span className="font-semibold">Do this:</span> {f.suggested_action}
+                <span className="font-semibold">Do this:</span> {prose(f.suggested_action)}
               </li>
             ))}
           </ul>
@@ -523,7 +516,7 @@ function TaskInspector({
 function Headline({ analysis }: { analysis: Analysis }) {
   return (
     <div className="rounded-2xl border border-[#E2E1EC] bg-white p-5">
-      <div className="text-[11px] uppercase tracking-[0.18em] text-[#68677A] font-semibold">Summary</div>
+      <div className="text-[12px] uppercase tracking-[0.18em] text-[#68677A] font-semibold">Summary</div>
       <div className="text-3xl font-semibold mt-3">{analysis.slip_days > 0 ? `+${analysis.slip_days}` : analysis.slip_days}d</div>
       <div className="text-sm text-[#68677A] mt-1">projected slip</div>
       <div className="grid grid-cols-2 gap-3 mt-5">

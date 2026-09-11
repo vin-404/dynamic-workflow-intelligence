@@ -61,7 +61,7 @@ export default async function LoginPage({
             </div>
             <div>
               <div className="text-[17px] font-semibold tracking-[-0.03em]">Flow<span className="text-[#4164FA]">Trace</span></div>
-              <div className="text-[8px] uppercase tracking-[0.18em] text-[#68677A] dark:text-white/40">FlowTrace</div>
+              <div className="text-[12px] uppercase tracking-[0.18em] text-[#68677A] dark:text-white/40">FlowTrace</div>
             </div>
           </a>
         </div>
@@ -73,7 +73,7 @@ export default async function LoginPage({
         <section className="grid w-full max-w-5xl overflow-hidden rounded-[28px] border border-[#E2E1EC] bg-white/85 shadow-[0_30px_100px_rgba(31,35,70,0.12)] backdrop-blur-xl dark:border-white/10 dark:bg-[#111522]/90 dark:shadow-black/30 lg:grid-cols-[1.05fr_0.95fr]">
           <div className="hidden border-r border-[#E2E1EC] p-10 dark:border-white/10 lg:flex lg:flex-col lg:justify-between xl:p-14">
             <div>
-              <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-[#4164FA]/15 bg-[#EAF0FF] px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-[#4164FA] dark:border-[#4164FA]/20 dark:bg-[#4164FA]/10">
+              <div className="mb-8 inline-flex items-center gap-2 rounded-full border border-[#4164FA]/15 bg-[#EAF0FF] px-3 py-1.5 text-[12px] font-semibold uppercase tracking-[0.18em] text-[#4164FA] dark:border-[#4164FA]/20 dark:bg-[#4164FA]/10">
                 <span className="h-1.5 w-1.5 rounded-full bg-[#4164FA]" />
                 Secure workspace access
               </div>
@@ -88,7 +88,7 @@ export default async function LoginPage({
             <div className="mt-12 grid grid-cols-3 gap-4">
               {[["01", "Dependencies"], ["02", "Risk"], ["03", "What if"]].map(([n, label]) => (
                 <div key={n} className="border-t border-[#E2E1EC] pt-3 dark:border-white/10">
-                  <div className="text-[10px] font-semibold tracking-[0.16em] text-[#4164FA]">{n}</div>
+                  <div className="text-[12px] font-semibold tracking-[0.16em] text-[#4164FA]">{n}</div>
                   <div className="mt-1 text-xs font-medium text-[#68677A] dark:text-white/60">{label}</div>
                 </div>
               ))}
@@ -97,7 +97,7 @@ export default async function LoginPage({
 
           <div className="p-7 sm:p-10 lg:p-12 xl:p-14">
             <div className="max-w-md">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#795CF7]">Welcome to FlowTrace</div>
+              <div className="text-[12px] font-semibold uppercase tracking-[0.2em] text-[#795CF7]">Welcome to FlowTrace</div>
               <h2 className="mt-3 text-3xl font-semibold tracking-[-0.04em]">Sign in to your workspace</h2>
               <p className="mt-3 text-sm leading-6 text-[#68677A] dark:text-white/55">
                 Continue securely with Google. We'll use your name and email to create or open your FlowTrace account.
@@ -127,7 +127,7 @@ export default async function LoginPage({
               </form>
 
               <div className="mt-8 flex items-start gap-3 rounded-2xl bg-[#F7F7FC] p-4 dark:bg-white/5">
-                <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#EAF0FF] text-[11px] font-bold text-[#4164FA] dark:bg-[#4164FA]/10">i</div>
+                <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#EAF0FF] text-[12px] font-bold text-[#4164FA] dark:bg-[#4164FA]/10">i</div>
                 <p className="text-xs leading-5 text-[#68677A] dark:text-white/50">
                   FlowTrace only receives the basic Google profile information needed to identify your workspace account.
                 </p>

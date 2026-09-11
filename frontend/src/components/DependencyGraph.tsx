@@ -31,6 +31,7 @@ import "@xyflow/react/dist/style.css";
 
 import { cn } from "@/lib/utils";
 import { Analysis } from "@/lib/api";
+import { statusLabel } from "@/lib/display";
 import { severityText } from "@/lib/severity";
 
 import {
@@ -103,14 +104,6 @@ function useMeasuredWidth<T extends HTMLElement>(): [
 
   return [ref, width];
 }
-
-const STATUS_LABEL: Record<string, string> = {
-  done: "Done",
-  in_progress: "In progress",
-  in_review: "In review",
-  blocked: "Blocked",
-  not_started: "Not started",
-};
 
 const MONTHS = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
@@ -323,7 +316,7 @@ function TaskBar({ data }: NodeProps) {
             </span>
             <span className="opacity-80">
               {task.startDate} to {task.endDate} · {task.duration}d ·{" "}
-              {STATUS_LABEL[task.status] ?? task.status}
+              {statusLabel(task.status)}
             </span>
             <span className="opacity-80">
               {task.critical

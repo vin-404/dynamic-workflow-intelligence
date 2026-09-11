@@ -49,13 +49,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { findingKindLabel, humanize, roleLabel, tierLabel } from "@/lib/display";
 import { cn } from "@/lib/utils";
 import { useAiStatus } from "./AiMethod";
-import { ErrorNote, TIER_NAMES } from "./ui";
+import { ErrorNote } from "./ui";
 
 const ICON = "size-3.5 shrink-0";
 const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
+  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
 
 /* ------------------------------------------------------------ one row */
 
@@ -97,7 +98,7 @@ function Row({
           <span className="text-[13px] font-medium">{name}</span>
           <span
             className={cn(
-              "text-[11px]",
+              "text-[12px]",
               available === false ? "text-severity-medium" : "text-dim",
             )}
           >
@@ -234,8 +235,8 @@ function AiGroup() {
             available={status.available}
             detail={
               status.available
-                ? `Provider ${status.provider}, model ${status.model}.`
-                : `Provider "${status.provider}": no model is answering. Every role below runs its deterministic fallback, and each result is labelled at the point of use.`
+                ? `Provider ${humanize(status.provider)}, model ${status.model}.`
+                : `Provider "${humanize(status.provider)}": no model is answering. Every role below runs its deterministic fallback, and each result is labelled at the point of use.`
             }
             needs={status.needs}
           />
@@ -309,22 +310,20 @@ function EvidenceGroup({ projectId }: { projectId: string }) {
       {value && (
         <ul className="divide-y divide-border/60">
           <Row
-            name={`Tier ${value.tier_reached} reached · ${
-              TIER_NAMES[value.tier_reached] ?? "?"
-            }`}
+            name={`Evidence reached · ${tierLabel(value.tier_reached) || "?"}`}
             available={true}
             detail={`${value.checks_run.length} check${
               value.checks_run.length === 1 ? "" : "s"
             } ran on this workflow.`}
           >
             <details className="group mt-1">
-              <summary className="cursor-pointer list-none text-[11px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
+              <summary className="cursor-pointer list-none text-[12px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
                 <span className="inline-block w-3 group-open:hidden">▸</span>
                 <span className="hidden w-3 group-open:inline-block">▾</span>
                 The checks that ran
               </summary>
-              <p className="mt-1 pl-3 font-mono text-[11px] text-dim">
-                {value.checks_run.join(", ")}
+              <p className="mt-1 pl-3 text-[12px] text-dim">
+                {value.checks_run.map(findingKindLabel).join(", ")}
               </p>
             </details>
           </Row>
@@ -338,7 +337,7 @@ function EvidenceGroup({ projectId }: { projectId: string }) {
           {value.unavailable_checks.map((gap) => (
             <Row
               key={gap.tier}
-              name={`Tier ${gap.tier} · ${TIER_NAMES[gap.tier] ?? "?"}`}
+              name={tierLabel(gap.tier) || "?"}
               available={false}
               detail={gap.why}
               needs={
@@ -347,9 +346,9 @@ function EvidenceGroup({ projectId }: { projectId: string }) {
                 </>
               }
             >
-              <ul className="mt-1 flex flex-col gap-0.5 pl-3 text-[11px] text-dim">
+              <ul className="mt-1 flex flex-col gap-0.5 pl-3 text-[12px] text-dim">
                 {gap.checks.map((c) => (
-                  <li key={c}>· {c}</li>
+                  <li key={c}>· {findingKindLabel(c)}</li>
                 ))}
               </ul>
             </Row>
@@ -463,7 +462,7 @@ function RolesGroup({
               isGuest
                 ? "You are the public read-only guest. Reading, analysing, forecasting, optimising and asking a what-if all work; anything that changes the workflow is refused by the API itself, not hidden by this page."
                 : mine
-                  ? `Signed in as ${person!.name}; your role on this project is ${mine.role}.`
+                  ? `Signed in as ${person!.name}; your role on this project is ${roleLabel(mine.role).toLowerCase()}.`
                   : `Signed in as ${person!.name}; you are not a member of this project, so you can read and evaluate it but not change it.`
             }
           />

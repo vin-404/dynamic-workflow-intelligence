@@ -333,7 +333,7 @@ export default function ReplayControls({
 
         <div
           className={cn(
-            "ml-0 flex h-8 items-center gap-1.5 rounded-md border px-2.5 font-mono text-[10px] uppercase tracking-[0.08em]",
+            "ml-0 flex h-8 items-center gap-1.5 rounded-md border px-2.5 font-mono text-[12px] uppercase tracking-[0.08em]",
             modeClass,
           )}
         >
@@ -351,7 +351,7 @@ export default function ReplayControls({
           {modeLabel}
         </div>
 
-        <div className="ml-auto flex items-center gap-3 font-mono text-[10px] text-muted-foreground">
+        <div className="ml-auto flex items-center gap-3 font-mono text-[12px] text-muted-foreground">
           <span className="hidden sm:inline">
             {stepDays.length} stops
           </span>
@@ -382,16 +382,16 @@ export default function ReplayControls({
       <div className="rounded-lg border border-line bg-panel px-3 py-2.5">
         <div className="mb-2 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="text-[10px] font-medium uppercase tracking-[0.12em] text-dim">
+            <span className="text-[12px] font-medium uppercase tracking-[0.12em] text-dim">
               Replay timeline
             </span>
 
-            <span className="font-mono text-[10px] text-muted-foreground">
+            <span className="font-mono text-[12px] text-muted-foreground">
               d{Math.round(shown)}
             </span>
           </div>
 
-          <span className="font-mono text-[10px] text-muted-foreground">
+          <span className="font-mono text-[12px] text-muted-foreground">
             {dragDay !== null
               ? `seeking d${Math.round(
                   snap(dragDay),
@@ -502,7 +502,7 @@ export default function ReplayControls({
 
         {/* Timeline labels */}
 
-        <div className="flex items-center justify-between font-mono text-[9px] text-muted-foreground">
+        <div className="flex items-center justify-between font-mono text-[12px] text-muted-foreground">
           <span>
             d{Math.round(start)}
           </span>
@@ -525,7 +525,7 @@ export default function ReplayControls({
           KEYBOARD HINT
           -------------------------------------------------- */}
 
-      <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+      <div className="flex items-center justify-between text-[12px] text-muted-foreground">
         <span>
           Drag to seek · ← → move between
           events · Home / End jump

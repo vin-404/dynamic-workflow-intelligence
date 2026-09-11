@@ -61,6 +61,7 @@ Analysis,
   startReplay,
   Workflow,
 } from "@/lib/api";
+import { calendarDate, findingKindLabel, prose, severityLabel, statusLabel, tierLabel, verdictLabel } from "@/lib/display";
 import { severityFill, severityText } from "@/lib/severity";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -100,18 +101,6 @@ function findingId(f: {
 }): string {
   return `${f.kind}:${f.root_cause || "-"}:${(f.task_ids ?? []).join(",")}`;
 }
-
-function prettyKind(kind: string): string {
-  return kind.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
-}
-
-const STATUS_WORD: Record<string, string> = {
-  done: "done",
-  in_progress: "in progress",
-  in_review: "in review",
-  blocked: "blocked",
-  not_started: "not started",
-};
 
 /* ------------------------------------------------------------- highlights */
 
@@ -651,17 +640,17 @@ export default function LiveFeed({
             <div className="border-b border-line bg-panel2/45 px-4 py-3">
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-[10px] font-semibold uppercase tracking-[0.14em] text-dim">
+                  <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-dim">
                     Projected finish
                   </div>
-                  <div className="mt-0.5 text-[11px] text-muted-foreground">
+                  <div className="mt-0.5 text-[12px] text-muted-foreground">
                     Live replay estimate
                   </div>
                 </div>
 
                 <span
                   className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-medium",
+                    "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[12px] font-medium",
                     slipped
                       ? "border-severity-high/25 bg-severity-high/5 text-severity-high"
                       : "border-severity-low/25 bg-severity-low/5 text-severity-low",
@@ -691,10 +680,10 @@ export default function LiveFeed({
                         : "text-foreground",
                     )}
                   >
-                    {p.projected_end_date}
+                    {calendarDate(p.projected_end_date) ?? p.projected_end_date}
                   </div>
 
-                  <div className="mt-2 font-mono text-[10px] text-muted-foreground">
+                  <div className="mt-2 font-mono text-[12px] text-muted-foreground">
                     simulated day {Math.round(p.projected_end_day)}
                   </div>
                 </div>
@@ -708,7 +697,7 @@ export default function LiveFeed({
                   )}
                 >
                   {days(p.slip_days, true)}
-                  <div className="mt-0.5 text-[9px] font-normal uppercase tracking-wide text-muted-foreground">
+                  <div className="mt-0.5 text-[12px] font-normal uppercase tracking-wide text-muted-foreground">
                     vs plan
                   </div>
                 </div>
@@ -716,21 +705,21 @@ export default function LiveFeed({
 
               <div className="mt-4 grid grid-cols-2 divide-x divide-line rounded-lg border border-line bg-panel2/35">
                 <div className="px-3 py-2.5">
-                  <div className="text-[9px] uppercase tracking-wide text-muted-foreground">
+                  <div className="text-[12px] uppercase tracking-wide text-muted-foreground">
                     Planned
                   </div>
                   <div className="mt-1 font-mono text-[12px]">
                     d{Math.round(p.planned_end_day)}
                   </div>
                   {p.planned_end_date && (
-                    <div className="mt-0.5 text-[10px] text-muted-foreground">
-                      {p.planned_end_date}
+                    <div className="mt-0.5 text-[12px] text-muted-foreground">
+                      {calendarDate(p.planned_end_date) ?? p.planned_end_date}
                     </div>
                   )}
                 </div>
 
                 <div className="px-3 py-2.5">
-                  <div className="text-[9px] uppercase tracking-wide text-muted-foreground">
+                  <div className="text-[12px] uppercase tracking-wide text-muted-foreground">
                     Deadline
                   </div>
                   <div
@@ -743,10 +732,10 @@ export default function LiveFeed({
                           : "text-severity-high",
                     )}
                   >
-                    {p.verdict.replace(/_/g, " ")}
+                    {verdictLabel(p.verdict)}
                   </div>
                   {p.margin_days !== null && (
-                    <div className="mt-0.5 text-[10px] text-muted-foreground">
+                    <div className="mt-0.5 text-[12px] text-muted-foreground">
                       {days(p.margin_days, true)} margin
                     </div>
                   )}
@@ -755,10 +744,10 @@ export default function LiveFeed({
 
               <div className="mt-4 border-t border-line pt-3">
                 <div className="mb-1.5 flex items-center justify-between">
-                  <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <span className="text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
                     Open findings
                   </span>
-                  <span className="font-mono text-[10px] text-muted-foreground">
+                  <span className="font-mono text-[12px] text-muted-foreground">
                     {frame.findings.length}
                   </span>
                 </div>
@@ -769,7 +758,7 @@ export default function LiveFeed({
                   <span className="h-1.5 flex-1 rounded-full bg-line" />
                 </div>
 
-                <div className="mt-1.5 flex justify-between font-mono text-[9px] text-muted-foreground">
+                <div className="mt-1.5 flex justify-between font-mono text-[12px] text-muted-foreground">
                   <span>
                     {frame.finding_counts_by_severity.high} high
                   </span>
@@ -782,12 +771,12 @@ export default function LiveFeed({
                 </div>
               </div>
 
-              <p className="mt-4 border-l-2 border-accent/35 pl-2.5 text-[11px] leading-relaxed text-foreground/80">
+              <p className="mt-4 border-l-2 border-accent/35 pl-2.5 text-[12px] leading-relaxed text-foreground/80">
                 {p.statement}
               </p>
 
               {p.is_probability === false && (
-                <p className="mt-2 text-[10px] leading-relaxed text-muted-foreground">
+                <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
                   Arithmetic from the critical path, not a probability. The
                   forecast stage contains the probabilistic view.
                 </p>
@@ -883,7 +872,8 @@ function Reconstruction({
         <span className="font-mono text-muted-foreground">
           computed at simulated day {derived.computed_at_simulated_day} ·{" "}
           {derived.events_known} of {derived.events_total} events known ·{" "}
-          {derived.events_pending} pending · evidence tier {tier}
+          {derived.events_pending} pending · evidence{" "}
+          {tierLabel(tier).toLowerCase()}
           {unavailableCount > 0 ? ` · ${unavailableCount} checks could not run` : ""}
         </span>
       </div>
@@ -893,8 +883,9 @@ function Reconstruction({
             as the replay observes transitions. A reader who took it for the
             project's standing tier would over-read an early frame. */}
         <li className="border-l border-line pl-2.5 text-[12px] leading-snug text-muted-foreground">
-          Evidence tier {tier} is what this frame reached, not this
-          project&rsquo;s tier today. It is recomputed on every simulated day
+          The evidence level above ({tierLabel(tier).toLowerCase()}) is what
+          this frame reached, not this project&rsquo;s level today. It is
+          recomputed on every simulated day
           and climbs as the replay observes transitions
           {unavailableCount > 0
             ? `, so the ${unavailableCount} checks listed as unavailable above are the ones this day's evidence could not support.`
@@ -937,7 +928,7 @@ function LiveFindings({
         <h2 className="text-sm font-medium">
           What the engine says at simulated day {day}
         </h2>
-        <p className="font-mono text-[11px] text-dim">
+        <p className="font-mono text-[12px] text-dim">
           {frame.findings.length} open · {delta.appeared.length} appeared ·{" "}
           {delta.cleared.length} cleared · {delta.severity_changed.length}{" "}
           changed severity · {delta.unchanged} unchanged
@@ -945,7 +936,7 @@ function LiveFindings({
       </div>
 
       {jumped && (
-        <p className="mt-1 text-[11px] text-muted-foreground">
+        <p className="mt-1 text-[12px] text-muted-foreground">
           {frame.reason === "start"
             ? "This is the replay's first frame, so everything the engine found at this simulated day is counted as having appeared. Nothing is highlighted, because nothing has changed yet."
             : `That was a ${frame.reason}, so the counts above are the difference from where the replay was, not things that happened on this simulated day. Nothing is highlighted for a jump.`}
@@ -1019,22 +1010,22 @@ function FindingRow({
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <span className="font-mono text-xs">{finding.task_ids.join(" ")}</span>
           <span className="text-[13px] font-medium">
-            {prettyKind(finding.kind)}
+            {findingKindLabel(finding.kind)}
           </span>
-          <span className={cn("text-[11px]", severityText(finding.severity))}>
-            {finding.severity}
+          <span className={cn("text-[12px]", severityText(finding.severity))}>
+            {severityLabel(finding.severity).toLowerCase()}
           </span>
           {onCriticalPath && (
-            <span className="text-[11px] text-accent">critical path</span>
+            <span className="text-[12px] text-accent">critical path</span>
           )}
-          <span className="text-[11px] text-muted-foreground">
-            tier {finding.tier} · {finding.tier_name}
+          <span className="text-[12px] text-muted-foreground">
+            {tierLabel(finding.tier)}
           </span>
           {flash && (
-            <Badge variant="outline" className="text-[10px]">
+            <Badge variant="outline" className="text-[12px]">
               {flash.kind === "appeared"
                 ? `appeared d${Math.round(flash.day)}`
-                : `${flash.from} → ${flash.severity} at d${Math.round(flash.day)}`}
+                : `${severityLabel(flash.from).toLowerCase()} → ${severityLabel(flash.severity).toLowerCase()} at d${Math.round(flash.day)}`}
             </Badge>
           )}
           <span className="ml-auto flex items-baseline gap-2">
@@ -1045,11 +1036,11 @@ function FindingRow({
           </span>
         </div>
         <p className="mt-1 text-[13px] leading-snug text-foreground/90">
-          {finding.explanation}
+          {prose(finding.explanation)}
         </p>
         <p className="mt-0.5 text-[13px] leading-snug">
           <span className="text-muted-foreground">Do this: </span>
-          {finding.suggested_action}
+          {prose(finding.suggested_action)}
         </p>
       </div>
     </div>
@@ -1072,15 +1063,15 @@ function ClearedRow({ flash }: { flash: Flash }) {
         <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 line-through decoration-1">
           <span className="font-mono text-xs">{gone.task_ids.join(" ")}</span>
           <span className="text-[13px] font-medium">
-            {prettyKind(gone.kind)}
+            {findingKindLabel(gone.kind)}
           </span>
-          <span className={cn("text-[11px]", severityText(flash.severity))}>
-            was {flash.severity}
+          <span className={cn("text-[12px]", severityText(flash.severity))}>
+            was {severityLabel(flash.severity).toLowerCase()}
           </span>
         </div>
         <p className="mt-1 text-[13px] leading-snug text-muted-foreground">
           Cleared at simulated day {Math.round(flash.day)}. It said:{" "}
-          {gone.explanation_was}
+          {prose(gone.explanation_was)}
         </p>
       </div>
     </div>
@@ -1108,7 +1099,7 @@ function EventFeed({
     <section className="overflow-hidden rounded-xl border border-line bg-panel">
       <div className="border-b border-line bg-panel2/45 px-4 py-3">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.12em] text-dim uppercase">
+          <div className="flex items-center gap-1.5 text-[12px] font-semibold tracking-[0.12em] text-dim uppercase">
             <Radio
               className={cn(
                 "size-3",
@@ -1118,16 +1109,16 @@ function EventFeed({
             />
             Events observed
           </div>
-          <span className="font-mono text-[10px] text-muted-foreground">
+          <span className="font-mono text-[12px] text-muted-foreground">
             {known} / {total}
           </span>
         </div>
       </div>
 
       {events.length === 0 ? (
-        <p className="px-4 py-4 text-[11px] leading-relaxed text-muted-foreground">
+        <p className="px-4 py-4 text-[12px] leading-relaxed text-muted-foreground">
           {total === 0
-            ? "This project has no event log at all, so there is nothing to replay and no observed evidence to reason from. That is why the tier above is 0 and why so many checks could not run."
+            ? `This project has no event log at all, so there is nothing to replay and no observed evidence to reason from. That is why the evidence above is only "${tierLabel(0).toLowerCase()}" and why so many checks could not run.`
             : `No transition has been observed at this simulated day yet. All ${total} in this project's log happen later and are not reflected in any number on this screen.`}
         </p>
       ) : (
@@ -1144,21 +1135,21 @@ function EventFeed({
                 )}
               >
                 <div className="flex items-baseline gap-1.5">
-                  <span className="font-mono text-[11px] text-muted-foreground">
+                  <span className="font-mono text-[12px] text-muted-foreground">
                     d{Math.round(e.day)}
                   </span>
-                  <span className="font-mono text-[11px]">{e.task_key}</span>
-                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">
-                    {e.date}
+                  <span className="font-mono text-[12px]">{e.task_key}</span>
+                  <span className="ml-auto font-mono text-[12px] text-muted-foreground">
+                    {calendarDate(e.date) ?? e.date}
                   </span>
                 </div>
                 <div className="truncate text-foreground/90">
                   {e.task_name || taskNames[e.task_key] || e.task_key}
                 </div>
-                <div className="text-[11px] text-muted-foreground">
-                  {STATUS_WORD[e.from_status] ?? e.from_status} →{" "}
+                <div className="text-[12px] text-muted-foreground">
+                  {statusLabel(e.from_status).toLowerCase()} →{" "}
                   <span className="text-foreground/90">
-                    {STATUS_WORD[e.to_status] ?? e.to_status}
+                    {statusLabel(e.to_status).toLowerCase()}
                   </span>
                   {e.actor ? ` · ${e.actor}` : ""}
                 </div>

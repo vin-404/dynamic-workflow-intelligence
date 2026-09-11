@@ -35,13 +35,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { describeMutation } from "@/lib/display";
 import DiffView from "./DiffView";
 import MutationVocabulary from "./MutationVocabulary";
 import { ErrorNote } from "./ui";
 
 /** One inline icon size across every panel. */
 const ICON = "size-3.5 shrink-0";
-const LABEL = "text-[11px] font-medium uppercase tracking-wider text-dim";
+const LABEL = "text-[12px] font-medium uppercase tracking-wider text-dim";
 /** A native control that matches the shadcn `Input` it sits beside. */
 const CONTROL =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm " +
@@ -175,7 +176,7 @@ export default function WhatIfPanel({
           <h2 className="text-[13px] font-semibold tracking-tight">
             Ask a hypothetical
           </h2>
-          <span className="text-[11px] text-dim">
+          <span className="text-[12px] text-dim">
             {workflow.tasks.length} tasks · {workflow.resources.length} resources
           </span>
         </div>
@@ -199,7 +200,7 @@ export default function WhatIfPanel({
           <div className="mt-4">
             {/* A sentence, not a column head, so it is not shouted in
                 small caps: it is the integrity claim for this panel. */}
-            <div className="mb-1.5 text-[11px] text-dim">
+            <div className="mb-1.5 text-[12px] text-dim">
               These changes, in order — nothing is written to your workflow:
             </div>
             <ol className="mb-3 max-w-3xl divide-y divide-border/60 border-y border-border/60">
@@ -208,12 +209,12 @@ export default function WhatIfPanel({
                   key={i}
                   className="flex items-center gap-2 py-1 text-[13px]"
                 >
-                  <span className="w-4 shrink-0 text-right text-[11px] text-dim">
+                  <span className="w-4 shrink-0 text-right text-[12px] text-dim">
                     {i + 1}
                   </span>
                   <span className="min-w-0 flex-1 truncate">{p.label}</span>
-                  <span className="font-mono text-[11px] text-dim">
-                    {p.mutation.kind}
+                  <span className="text-[12px] text-dim" title={p.mutation.kind}>
+                    {describeMutation(p.mutation)}
                   </span>
                   <Button
                     variant="ghost"
@@ -268,7 +269,7 @@ export default function WhatIfPanel({
           <p>{error.userMessage}</p>
           {error.constraint && (
             <p className="mt-2 flex flex-wrap items-baseline gap-x-2 text-xs">
-              <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+              <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]">
                 {error.constraint.constraint}
               </span>
               <span className="text-dim">
@@ -487,7 +488,7 @@ function RecipeForm({
         Add change
       </Button>
       {blocked && (
-        <span className="pb-1.5 text-[11px] text-dim">{blocked}</span>
+        <span className="pb-1.5 text-[12px] text-dim">{blocked}</span>
       )}
     </div>
   );

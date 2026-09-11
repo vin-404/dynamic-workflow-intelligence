@@ -76,7 +76,7 @@ export default function Clock({
         </div>
         <div
           className={cn(
-            "flex items-center gap-1 text-[11px] tracking-wide uppercase",
+            "flex items-center gap-1 text-[12px] tracking-wide uppercase",
             state === "running" ? "text-foreground" : "text-muted-foreground",
           )}
         >
@@ -102,7 +102,7 @@ export default function Clock({
         />
       </div>
 
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12px] text-muted-foreground">
         <span>
           simulated window d{Math.round(startDay)}&ndash;d
           {horizonDay === undefined ? "?" : Math.round(horizonDay)}

@@ -22,12 +22,18 @@ import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { MutationKindSpec, mutationKinds } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { humanize, mutationKindLabel } from "@/lib/display";
 
 type Vocabulary = { closed: boolean; note: string; kinds: MutationKindSpec[] };
 
 const ICON = "size-3.5 shrink-0";
 const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
+  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
+
+/** Payload field names as words, lower-case so they read on from "optional". */
+function fieldWords(fields: string[]): string {
+  return fields.map((f) => humanize(f).toLowerCase()).join(", ");
+}
 
 let pending: Promise<Vocabulary> | null = null;
 let settled: Vocabulary | null = null;
@@ -90,7 +96,7 @@ export default function MutationVocabulary({
 
   if (failed) {
     return (
-      <p className={cn("text-[11px] text-severity-medium", className)}>
+      <p className={cn("text-[12px] text-severity-medium", className)}>
         The list of change kinds could not be read from the API, so it is not
         shown here. Every change is still validated against it on the server.
       </p>
@@ -98,7 +104,7 @@ export default function MutationVocabulary({
   }
   if (!vocabulary) {
     return (
-      <p className={cn("text-[11px] text-dim", className)}>
+      <p className={cn("text-[12px] text-dim", className)}>
         Reading the closed set of change kinds…
       </p>
     );
@@ -106,7 +112,7 @@ export default function MutationVocabulary({
 
   return (
     <details className={cn("group", className)}>
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[11px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
         <ChevronRight
           className={cn(ICON, "transition-transform group-open:rotate-90")}
           aria-hidden
@@ -116,27 +122,28 @@ export default function MutationVocabulary({
         {marked.size > 0 ? ` · ${marked.size} used here` : ""}
       </summary>
       <div className="mt-1.5 pl-4">
-        <p className="mb-1.5 max-w-2xl text-[11px] text-dim">{vocabulary.note}</p>
+        <p className="mb-1.5 max-w-2xl text-[12px] text-dim">{vocabulary.note}</p>
         <ul className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
           {vocabulary.kinds.map((k) => (
             <li
               key={k.kind}
-              className="flex flex-wrap items-baseline gap-x-1.5 text-[11px]"
+              className="flex flex-wrap items-baseline gap-x-1.5 text-[12px]"
             >
               <span
                 className={cn(
                   TOKEN,
                   marked.has(k.kind) ? "text-foreground" : "text-dim",
                 )}
+                title={k.kind}
               >
-                {k.kind}
+                {mutationKindLabel(k.kind)}
               </span>
               <span className="text-dim">
-                {k.required.length > 0 ? k.required.join(", ") : "no fields"}
+                {k.required.length > 0 ? fieldWords(k.required) : "no fields"}
                 {k.optional.length > 0 && (
                   <span className="opacity-70">
                     {" "}
-                    · optional {k.optional.join(", ")}
+                    · optional {fieldWords(k.optional)}
                   </span>
                 )}
               </span>

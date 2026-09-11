@@ -23,12 +23,9 @@
 
 import { useEffect, useState } from "react";
 import { ApiError, RequirementImpactPreview, requirementImpact } from "@/lib/api";
+import { statusLabel } from "@/lib/display";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorNote, days } from "./ui";
-
-function statusLabel(status: string): string {
-  return status.replace(/_/g, " ");
-}
 
 function TaskList({
   title,
@@ -45,7 +42,7 @@ function TaskList({
   return (
     <section className="min-w-0">
       <div className="mb-1.5 border-b border-line pb-1">
-        <h4 className="text-[11px] font-medium tracking-wider text-dim uppercase">
+        <h4 className="text-[12px] font-medium tracking-wider text-dim uppercase">
           {title} — {rows.length}
         </h4>
         <p className="mt-0.5 text-xs text-dim">{note}</p>
@@ -140,7 +137,7 @@ export default function RequirementStaleness({
   return (
     <section className="rounded-xl border border-line bg-panel p-5">
       <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-1">
-        <h3 className="text-[11px] font-medium tracking-wider text-dim uppercase">
+        <h3 className="text-[12px] font-medium tracking-wider text-dim uppercase">
           If {impact.requirement_key} changes at all
         </h3>
         <span className="text-xs text-dim">

@@ -80,7 +80,7 @@ async function main() {
     // Stage 2 - bottlenecks
     await page.getByRole("button", { name: /Bottlenecks/ }).click();
     ok("analysis headline appears", await waitText(page, "Projected finish"));
-    ok("evidence tier is shown", await waitText(page, "Evidence tier"));
+    ok("evidence tier is shown", await waitText(page, "Evidence from"));
     ok(
       "unavailable checks are disclosed",
       await waitText(page, "cannot assess yet"),

@@ -40,6 +40,7 @@ import { LoaderCircle } from "lucide-react";
 import { Analysis, ApiError, RiskFactor, TaskRisk } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { bandClasses, bandText, severityFill } from "@/lib/severity";
+import { bandLabel, factorLabel, humanize, prose as proseWords, provenanceLabel, scoreKindLabel, verdictLabel } from "@/lib/display";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -146,8 +147,8 @@ export default function RiskPanel({
                 const feasible = verdict === "feasible";
                 return (
                   <div key={band} className="px-3 py-2">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                      {band}
+                    <div className="text-[12px] uppercase tracking-wider text-muted-foreground">
+                      {bandLabel(band)}
                     </div>
                     <div
                       className={cn(
@@ -158,17 +159,17 @@ export default function RiskPanel({
                     >
                       day {Math.round(day)}
                     </div>
-                    <div className="text-[11px] text-muted-foreground">
+                    <div className="text-[12px] text-muted-foreground">
                       {feasible
                         ? "meets the deadline"
-                        : verdict.replace(/_/g, " ")}
+                        : verdictLabel(verdict)}
                     </div>
                   </div>
                 );
               })}
             </div>
 
-            <dl className="flex flex-wrap gap-x-5 gap-y-0.5 text-[11px]">
+            <dl className="flex flex-wrap gap-x-5 gap-y-0.5 text-[12px]">
               <div className="flex gap-1.5">
                 <dt className="text-muted-foreground">spread</dt>
                 <dd>{days(tp.spread_days)}</dd>
@@ -197,7 +198,7 @@ export default function RiskPanel({
               * from being confused.
               */}
             <div className="flex max-w-4xl flex-col gap-1 border-l border-border pl-3 text-xs">
-              <p className="text-[11px] font-medium tracking-wider uppercase text-muted-foreground">
+              <p className="text-[12px] font-medium tracking-wider uppercase text-muted-foreground">
                 Why this range carries no percentage
               </p>
               <p className="text-foreground/90">{tp.monte_carlo.why}</p>
@@ -261,7 +262,7 @@ export default function RiskPanel({
         <FactorTable task={focus} />
 
         <div>
-          <div className="flex items-baseline gap-2 pb-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+          <div className="flex items-baseline gap-2 pb-1 text-[12px] uppercase tracking-wider text-muted-foreground">
             <span>all {risk.tasks.length} tasks, ranked</span>
             <span className="ml-auto">pick one to decompose it above</span>
           </div>
@@ -276,7 +277,7 @@ export default function RiskPanel({
                   task.task_key === focus.task_key && "bg-muted",
                 )}
               >
-                <span className="w-5 shrink-0 text-right text-[11px] text-muted-foreground">
+                <span className="w-5 shrink-0 text-right text-[12px] text-muted-foreground">
                   {i + 1}
                 </span>
                 <span className="w-10 shrink-0 font-mono text-xs text-muted-foreground">
@@ -296,11 +297,11 @@ export default function RiskPanel({
                 </span>
                 <span
                   className={cn(
-                    "w-16 shrink-0 text-right text-[11px]",
+                    "w-16 shrink-0 text-right text-[12px]",
                     bandText(task.band),
                   )}
                 >
-                  {task.band}
+                  {bandLabel(task.band)}
                 </span>
               </button>
             ))}
@@ -310,11 +311,11 @@ export default function RiskPanel({
         <Assumptions
           disclaimer={risk.assumptions.what_would_make_this_a_probability}
           entries={[
-            ["Score kind", risk.assumptions.score_kind.replace(/_/g, " ")],
+            ["Score kind", scoreKindLabel(risk.assumptions.score_kind)],
             ["Formula", <code key="f">{risk.assumptions.formula}</code>],
             [
               "Duration spread",
-              `${Math.round(risk.assumptions.duration_spread.relative_spread * 100)}% (${risk.assumptions.duration_spread.provenance})`,
+              `${Math.round(risk.assumptions.duration_spread.relative_spread * 100)}% (${provenanceLabel(risk.assumptions.duration_spread.provenance)})`,
             ],
             [
               "Tasks with a real estimate",
@@ -331,13 +332,13 @@ export default function RiskPanel({
             [
               "Factors unavailable",
               risk.assumptions.factors_unavailable.length
-                ? risk.assumptions.factors_unavailable.join(", ")
+                ? risk.assumptions.factors_unavailable.map(factorLabel).join(", ")
                 : "none",
             ],
           ]}
         />
         {risk.assumptions.factors_unavailable.length > 0 && (
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-[12px] text-muted-foreground">
             {risk.assumptions.factors_unavailable_note}
           </p>
         )}
@@ -357,8 +358,11 @@ export default function RiskPanel({
         <div className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3 lg:grid-cols-5">
           {Object.entries(weights).map(([name, value]) => (
             <label key={name} className="flex flex-col gap-0.5">
-              <span className="text-[11px] text-muted-foreground">
-                {name.replace(/_/g, " ")}
+              {/* The factor's words, lower-case: this label is the field's
+                  name in a form, and the walkthrough reads the key back from
+                  it, so it stays "downstream fan out", not "fan-out". */}
+              <span className="text-[12px] text-muted-foreground">
+                {humanize(name).toLowerCase()}
               </span>
               <Input
                 type="number"
@@ -426,14 +430,14 @@ function FactorTable({ task }: { task: TaskRisk }) {
           {task.task_key}
         </span>
         <span className="text-[13px]">{task.task_name}</span>
-        <span className="ml-auto text-[10px] uppercase tracking-wider text-muted-foreground">
+        <span className="ml-auto text-[12px] uppercase tracking-wider text-muted-foreground">
           score
         </span>
         <span className={cn("text-[13px] font-semibold", bandText(task.band))}>
           {task.score.toFixed(3)}
         </span>
         <Badge variant="outline" className={bandClasses(task.band)}>
-          {task.band}
+          {bandLabel(task.band)}
         </Badge>
       </div>
 
@@ -444,19 +448,19 @@ function FactorTable({ task }: { task: TaskRisk }) {
       <Table className="text-xs">
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            <TableHead className="h-7 px-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <TableHead className="h-7 px-1.5 text-[12px] uppercase tracking-wider text-muted-foreground">
               Factor
             </TableHead>
-            <TableHead className="h-7 w-14 px-1.5 text-right text-[10px] uppercase tracking-wider text-muted-foreground">
+            <TableHead className="h-7 w-14 px-1.5 text-right text-[12px] uppercase tracking-wider text-muted-foreground">
               Value
             </TableHead>
-            <TableHead className="h-7 w-14 px-1.5 text-right text-[10px] uppercase tracking-wider text-muted-foreground">
+            <TableHead className="h-7 w-14 px-1.5 text-right text-[12px] uppercase tracking-wider text-muted-foreground">
               Weight
             </TableHead>
-            <TableHead className="h-7 w-44 px-1.5 text-right text-[10px] uppercase tracking-wider text-muted-foreground">
+            <TableHead className="h-7 w-44 px-1.5 text-right text-[12px] uppercase tracking-wider text-muted-foreground">
               Contrib.
             </TableHead>
-            <TableHead className="h-7 px-1.5 text-[10px] uppercase tracking-wider text-muted-foreground">
+            <TableHead className="h-7 px-1.5 text-[12px] uppercase tracking-wider text-muted-foreground">
               Reading
             </TableHead>
           </TableRow>
@@ -511,7 +515,7 @@ function FactorRow({
     <TableRow className={cn("hover:bg-muted/40", !factor.available && "opacity-60")}>
       <TableCell className="px-1.5 py-1 font-medium">
         <span className="flex items-center gap-1.5">
-          {factor.name.replace(/_/g, " ")}
+          {factorLabel(factor.name)}
           {!factor.available && (
             <Badge
               variant="outline"
@@ -548,7 +552,7 @@ function FactorRow({
         </span>
       </TableCell>
       <TableCell className="px-1.5 py-1 whitespace-normal text-muted-foreground">
-        {factor.reason}
+        {proseWords(factor.reason)}
       </TableCell>
     </TableRow>
   );

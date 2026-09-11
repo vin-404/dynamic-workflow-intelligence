@@ -87,7 +87,7 @@ function FlowLogo() {
           Flow<span className="text-[#4164FA]">Trace</span>
         </div>
 
-        <div className="text-[8px] uppercase tracking-[0.2em] text-[#68677A]">
+        <div className="text-[12px] uppercase tracking-[0.2em] text-[#68677A]">
           FlowTrace
         </div>
       </div>
@@ -178,14 +178,14 @@ export default function WorkspaceShell({
           </button>
         </div>
 
-        <div className="px-3 pt-8">
+        <div className="px-3 pt-6">
           <button
             type="button"
             onClick={() => router.push("/workspace")}
             className={
               darkMode
-                ? "mb-7 px-3 text-sm font-semibold text-white/70 transition-colors hover:text-white"
-                : "mb-7 px-3 text-sm font-semibold text-[#17172A] transition-colors hover:text-[#4164FA]"
+                ? "mb-5 px-3 text-sm font-semibold text-white/70 transition-colors hover:text-white"
+                : "mb-5 px-3 text-sm font-semibold text-[#17172A] transition-colors hover:text-[#4164FA]"
             }
           >
             ← all workflows
@@ -194,14 +194,14 @@ export default function WorkspaceShell({
           <div
             className={
               darkMode
-                ? "mb-4 px-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-white/35"
-                : "mb-4 px-3 text-[11px] font-semibold uppercase tracking-[0.2em] text-[#68677A]"
+                ? "mb-4 px-3 text-[12px] font-semibold uppercase tracking-[0.2em] text-white/35"
+                : "mb-4 px-3 text-[12px] font-semibold uppercase tracking-[0.2em] text-[#68677A]"
             }
           >
             Workspace
           </div>
 
-          <nav className="space-y-1.5">
+          <nav className="space-y-1">
             {WORKSPACE_STAGES.map((item) => {
               const active = item.id === stage;
 
@@ -212,10 +212,10 @@ export default function WorkspaceShell({
                   onClick={() => goToStage(item.id)}
                   className={
                     active
-                      ? "group flex w-full items-center gap-3 rounded-xl bg-gradient-to-r from-[#EAF0FF] to-[#F0EBFF] px-3 py-3 text-left text-[#17172A] transition-all"
+                      ? "group flex w-full items-center gap-3 rounded-xl bg-gradient-to-r from-[#EAF0FF] to-[#F0EBFF] px-3 py-2 text-left text-[#17172A] transition-all"
                       : darkMode
-                        ? "group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-white/45 transition-all hover:bg-white/5 hover:text-white"
-                        : "group flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[#68677A] transition-all hover:bg-[#F5F5FB] hover:text-[#17172A]"
+                        ? "group flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-white/45 transition-all hover:bg-white/5 hover:text-white"
+                        : "group flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left text-[#68677A] transition-all hover:bg-[#F5F5FB] hover:text-[#17172A]"
                   }
                 >
                   <span
@@ -236,10 +236,10 @@ export default function WorkspaceShell({
                     <div
                       className={
                         active
-                          ? "mt-0.5 text-[10px] text-[#68677A]"
+                          ? "mt-0.5 text-[12px] text-[#68677A]"
                           : darkMode
-                            ? "mt-0.5 text-[10px] text-white/30"
-                            : "mt-0.5 text-[10px] text-[#68677A]"
+                            ? "mt-0.5 text-[12px] text-white/30"
+                            : "mt-0.5 text-[12px] text-[#68677A]"
                       }
                     >
                       {item.description}
@@ -266,7 +266,7 @@ export default function WorkspaceShell({
         >
           <div className="flex h-full items-center justify-between px-8">
             <div>
-              <div className="text-[11px] font-semibold uppercase tracking-[0.2em] text-[#68677A]">
+              <div className="text-[12px] font-semibold uppercase tracking-[0.2em] text-[#68677A]">
                 {
                   WORKSPACE_STAGES.find(
                     (item) => item.id === stage,

@@ -12,8 +12,8 @@
  *
  * The five kinds come from `ConstraintIn` in `backend/app/schemas/
  * authoring.py` - `ConstraintKind` in `core/workflow.py` is the closed enum.
- * Each has a plain-language label here and the identifier on record beside
- * it, because the identifier is what the optimizer's refusal will quote.
+ * Each has a plain-language label here; the identifier on record sits in the
+ * chip's hover text, because that is what the optimizer's refusal quotes.
  *
  * The reason is required by this composer even though the API allows it to
  * be empty. A constraint with no reason is a rule nobody can argue with,
@@ -38,13 +38,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { constraintKindLabel } from "@/lib/display";
 import { ErrorNote, Textarea } from "./ui";
 
 const ICON = "size-3.5 shrink-0";
-const LABEL = "text-[11px] font-medium uppercase tracking-wider text-dim";
+const LABEL = "text-[12px] font-medium uppercase tracking-wider text-dim";
 /** A constraint id on record, not a status - the same chip the builder uses. */
 const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
+  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
 const CONTROL =
   "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm " +
   "outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 " +
@@ -221,10 +222,10 @@ export default function ConstraintPanel({
     <section className="flex flex-col gap-4">
       <div className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <h2 className="text-sm font-medium">What may not be optimised away</h2>
-        <span className="font-mono text-[11px] text-dim">
+        <span className="font-mono text-[12px] text-dim">
           {workflow.constraints.length}
         </span>
-        <span className="text-[11px] text-dim">
+        <span className="text-[12px] text-dim">
           Declared here, enforced on every proposal - the optimizer, a what-if,
           a sentence - and quoted back with your reason when one is refused.
         </span>
@@ -254,7 +255,9 @@ export default function ConstraintPanel({
               key={`${c.kind}:${c.target}`}
               className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2 text-sm"
             >
-              <span className={TOKEN}>{c.kind}</span>
+              <span className={TOKEN} title={c.kind}>
+                {constraintKindLabel(c.kind)}
+              </span>
               <span className="font-mono text-xs">{c.target}</span>
               <span className="text-[13px]">{describeTarget(c, workflow)}</span>
               {c.value !== null && (
@@ -266,7 +269,7 @@ export default function ConstraintPanel({
               <button
                 type="button"
                 disabled={busy}
-                aria-label={`Remove constraint ${c.kind} on ${c.target}`}
+                aria-label={`Remove constraint ${constraintKindLabel(c.kind)} on ${c.target}`}
                 title="Remove this constraint from the draft"
                 onClick={() =>
                   run(() =>
@@ -374,7 +377,9 @@ export default function ConstraintPanel({
         </div>
 
         <p className="max-w-3xl text-xs text-dim">
-          <span className={cn(TOKEN, "mr-1.5")}>{spec.kind}</span>
+          <span className={cn(TOKEN, "mr-1.5")} title={spec.kind}>
+            {constraintKindLabel(spec.kind)}
+          </span>
           {spec.what}
         </p>
 
@@ -397,9 +402,9 @@ export default function ConstraintPanel({
           >
             {busy ? "Writing…" : "Declare this constraint"}
           </Button>
-          {blocked && <span className="text-[11px] text-dim">{blocked}</span>}
+          {blocked && <span className="text-[12px] text-dim">{blocked}</span>}
           {!blocked && (
-            <span className="text-[11px] text-dim">
+            <span className="text-[12px] text-dim">
               Writes to the draft version. Needs the editor role.
             </span>
           )}

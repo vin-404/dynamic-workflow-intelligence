@@ -49,25 +49,20 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { bandClasses, bandText } from "@/lib/severity";
+import { originLabel, scenarioStatusLabel } from "@/lib/display";
 import { cn } from "@/lib/utils";
+import When from "@/components/When";
 import DiffView from "./DiffView";
 import ErrorBoundary from "./ErrorBoundary";
-import { ErrorNote, days, instantUTC } from "./ui";
+import { ErrorNote, days } from "./ui";
 
 const ICON = "size-3.5 shrink-0";
 /** An identifier on record - an origin, a kind - not a status. */
 const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
+  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
 
 /** How many diffs are in flight at once. Pure reads, but still engine runs. */
 const DIFF_CONCURRENCY = 4;
-
-/** Where a scenario came from, in the reader's words. */
-const ORIGIN_LABEL: Record<string, string> = {
-  user_whatif: "what-if",
-  heuristic_proposal: "optimizer generator",
-  llm_proposal: "model proposal",
-};
 
 /** Origins the optimizer writes in bulk; collapsed by default. */
 const OPTIMIZER_ORIGINS = new Set(["heuristic_proposal", "llm_proposal"]);
@@ -202,7 +197,7 @@ export default function ScenarioList({
         <h2 className="text-[13px] font-semibold tracking-tight">
           Saved scenarios
         </h2>
-        <span className="text-[11px] text-dim">
+        <span className="text-[12px] text-dim">
           {scenarios.length === 0
             ? "none"
             : `${scenarios.length} · ${authored.length} authored, ${candidates.length} optimizer candidate${candidates.length === 1 ? "" : "s"} · newest first · effects computed on the engine`}
@@ -247,7 +242,7 @@ export default function ScenarioList({
               type="button"
               onClick={() => setShowCandidates((v) => !v)}
               aria-expanded={showCandidates}
-              className="mt-2 inline-flex items-center gap-1 text-[11px] text-dim hover:text-foreground"
+              className="mt-2 inline-flex items-center gap-1 text-[12px] text-dim hover:text-foreground"
             >
               <ChevronRight
                 className={cn(ICON, "transition-transform", showCandidates && "rotate-90")}
@@ -321,7 +316,6 @@ function ScenarioRow({
     }
   }
 
-  const when = instantUTC(scenario.created_at);
   const rejected = scenario.status === "rejected";
 
   return (
@@ -349,21 +343,21 @@ function ScenarioRow({
           variant="outline"
           className={cn("font-normal", bandClasses(statusTone(scenario.status)))}
         >
-          {scenario.status}
+          {scenarioStatusLabel(scenario.status)}
         </Badge>
         <span className={cn(TOKEN, "text-dim")}>
-          {ORIGIN_LABEL[scenario.origin] ?? scenario.origin}
+          {originLabel(scenario.origin)}
         </span>
         {olderBase && (
           <span
-            className="text-[11px] text-severity-medium"
+            className="text-[12px] text-severity-medium"
             title="This scenario was written over a workflow version that is no longer current. Its diff is against that older base."
           >
             over an older version
           </span>
         )}
-        <span className="ml-auto font-mono text-[11px] text-dim">
-          {when ? `${when} UTC` : scenario.created_at}
+        <span className="ml-auto text-[12px] text-dim">
+          <When iso={scenario.created_at} />
         </span>
       </div>
 

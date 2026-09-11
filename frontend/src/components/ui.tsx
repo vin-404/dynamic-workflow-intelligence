@@ -11,6 +11,7 @@
  */
 
 import { ReactNode, useState } from "react";
+import { tierLabel } from "@/lib/display";
 
 /* ------------------------------------------------------------- containers */
 
@@ -37,7 +38,7 @@ export function CardTitle({
 }) {
   return (
     <div className="flex items-baseline justify-between gap-3 mb-3">
-      <h2 className="text-[11px] uppercase tracking-[0.14em] text-dim font-semibold">
+      <h2 className="text-[12px] uppercase tracking-[0.14em] text-dim font-semibold">
         {children}
       </h2>
       {right}
@@ -131,7 +132,7 @@ export function Field({
     <label className={`block ${className}`}>
       <span className="block text-xs text-dim mb-1">{label}</span>
       {children}
-      {hint && <span className="block text-[11px] text-dim mt-1">{hint}</span>}
+      {hint && <span className="block text-[12px] text-dim mt-1">{hint}</span>}
     </label>
   );
 }
@@ -192,7 +193,7 @@ export function Badge({
   return (
     <span
       title={title}
-      className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] border font-medium ${TONES[tone]}`}
+      className={`inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[12px] border font-medium ${TONES[tone]}`}
     >
       {children}
     </span>
@@ -228,9 +229,9 @@ export function Stat({
           : "text-foreground";
   return (
     <div className="bg-panel border border-line rounded-lg px-3 py-2.5">
-      <div className="text-[11px] uppercase tracking-wider text-dim">{label}</div>
+      <div className="text-[12px] uppercase tracking-wider text-dim">{label}</div>
       <div className={`text-lg font-semibold mt-0.5 ${colour}`}>{value}</div>
-      {sub && <div className="text-[11px] text-dim mt-0.5">{sub}</div>}
+      {sub && <div className="text-[12px] text-dim mt-0.5">{sub}</div>}
     </div>
   );
 }
@@ -293,7 +294,7 @@ export function ErrorNote({
         </div>
       )}
       {requestId && (
-        <div className="mt-1.5 text-[11px] text-muted-foreground">
+        <div className="mt-1.5 text-[12px] text-muted-foreground">
           Request <span className="font-mono">{requestId}</span> — quote this
           if you report it.
         </div>
@@ -351,11 +352,7 @@ export function TierBanner({
     <div className="mb-4 border-b border-line pb-2">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[13px]">
         <span className="font-medium">
-          Evidence tier {tier}
-          <span className="text-muted-foreground">
-            {" · "}
-            {TIER_NAMES[tier] ?? "?"}
-          </span>
+          Evidence {tierLabel(tier).toLowerCase()}
         </span>
         <span className="text-muted-foreground">
           {checksRun.length} check{checksRun.length === 1 ? "" : "s"} ran.
@@ -375,7 +372,7 @@ export function TierBanner({
             {unavailable.map((gap) => (
               <div key={gap.tier} className="text-xs">
                 <div className="font-medium text-foreground/90">
-                  Tier {gap.tier} — needs {gap.requires}
+                  {tierLabel(gap.tier)} — needs {gap.requires}
                 </div>
                 <ul className="mt-1 space-y-0.5 text-muted-foreground">
                   {gap.checks.map((c) => (
@@ -423,7 +420,7 @@ export function Assumptions({
 /** A number and the arithmetic behind it, never a bare score. */
 export function Worked({ children }: { children: ReactNode }) {
   return (
-    <code className="rounded bg-panel2 px-1 py-px font-mono text-[11px] text-muted-foreground">
+    <code className="rounded bg-panel2 px-1 py-px font-mono text-[12px] text-muted-foreground">
       {children}
     </code>
   );

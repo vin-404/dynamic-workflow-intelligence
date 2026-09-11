@@ -237,7 +237,7 @@ function FlowLogo({
           <div className="text-[20px] font-semibold tracking-[-0.04em]">
             Flow<span className="text-[#4164FA]">Trace</span>
           </div>
-          <div className="text-[8px] uppercase tracking-[0.2em] text-[#68677A]">
+          <div className="text-[12px] uppercase tracking-[0.2em] text-[#68677A]">
             FlowTrace
           </div>
         </div>
@@ -454,7 +454,7 @@ export function LandingPage({
 
                   <div className="absolute top-6 left-6 right-6 flex justify-between items-center">
                     <div>
-                      <div className="text-[10px] uppercase tracking-[0.18em] text-[#68677A]">
+                      <div className="text-[12px] uppercase tracking-[0.18em] text-[#68677A]">
                         Live workflow
                       </div>
                       <div className="text-sm font-semibold mt-1">
@@ -462,7 +462,7 @@ export function LandingPage({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#F0EBFF] text-[#795CF7] text-[10px] font-medium">
+                    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#F0EBFF] text-[#795CF7] text-[12px] font-medium">
                       <span className="w-1.5 h-1.5 rounded-full bg-[#795CF7] animate-pulse" />
                       Intelligence active
                     </div>
@@ -542,18 +542,18 @@ export function LandingPage({
                   />
 
                   <div className="absolute left-[50%] bottom-[8%] w-[220px] p-4 rounded-2xl bg-[#101522] text-white shadow-2xl">
-                    <div className="text-[9px] uppercase tracking-[0.18em] text-white/50">
+                    <div className="text-[12px] uppercase tracking-[0.18em] text-white/50">
                       Predicted next
                     </div>
                     <div className="text-sm font-semibold mt-1">
                       Launch preparation
                     </div>
-                    <div className="text-[10px] text-white/50 mt-2">
+                    <div className="text-[12px] text-white/50 mt-2">
                       Based on connected workflow state
                     </div>
                   </div>
 
-                  <div className="absolute right-5 bottom-5 px-3 py-2 rounded-xl bg-[#EAF0FF] text-[#4164FA] text-[10px] font-medium">
+                  <div className="absolute right-5 bottom-5 px-3 py-2 rounded-xl bg-[#EAF0FF] text-[#4164FA] text-[12px] font-medium">
                     6 connected tasks
                   </div>
                 </div>
@@ -566,7 +566,7 @@ export function LandingPage({
           onClick={onOpenWorkspace}
           className="relative z-20 mx-auto mb-7 flex flex-col items-center gap-2 text-[#68677A] hover:text-[#4164FA] transition-colors"
         >
-          <span className="text-[9px] uppercase tracking-[0.22em]">
+          <span className="text-[12px] uppercase tracking-[0.22em]">
             Explore workspace
           </span>
           <span className="text-lg animate-bounce">↓</span>
@@ -708,7 +708,7 @@ export function LandingPage({
                   />
 
                   <div className="absolute right-[7%] top-[40%] w-[170px] rounded-2xl bg-[#101522] text-white p-4 shadow-xl">
-                    <div className="text-[10px] uppercase tracking-[0.16em] text-white/45">
+                    <div className="text-[12px] uppercase tracking-[0.16em] text-white/45">
                       Projected
                     </div>
                     <div className="text-sm font-semibold mt-2">Launch</div>
@@ -847,7 +847,7 @@ export function LandingPage({
                   {question.description}
                 </p>
 
-                <div className="text-[10px] uppercase tracking-[0.18em] mt-7 text-[#4164FA] opacity-70 group-hover:opacity-100">
+                <div className="text-[12px] uppercase tracking-[0.18em] mt-7 text-[#4164FA] opacity-70 group-hover:opacity-100">
                   Open the answer →
                 </div>
               </button>
@@ -905,7 +905,7 @@ export function LandingPage({
                         <span className="text-lg font-semibold">{title}</span>
 
                         {index === 0 && (
-                          <span className="text-[9px] uppercase tracking-[0.16em] text-[#8FA8FF] border border-[#8FA8FF]/20 rounded-full px-2 py-1">
+                          <span className="text-[12px] uppercase tracking-[0.16em] text-[#8FA8FF] border border-[#8FA8FF]/20 rounded-full px-2 py-1">
                             Start here
                           </span>
                         )}
@@ -960,7 +960,7 @@ function LandingNode({
           className="w-2 h-2 rounded-full"
           style={{ backgroundColor: color }}
         />
-        <span className="text-[10px] uppercase tracking-wider text-[#68677A]">
+        <span className="text-[12px] uppercase tracking-wider text-[#68677A]">
           {label}
         </span>
       </div>
@@ -973,7 +973,7 @@ function LandingNode({
         </div>
       ) : (
         <div
-          className="text-[10px] mt-2 font-medium"
+          className="text-[12px] mt-2 font-medium"
           style={{ color }}
         >
           {footer}
@@ -1039,8 +1039,8 @@ function RippleNode({
       <div
         className={
           isBlue
-            ? "text-[10px] uppercase tracking-[0.16em] text-[#4164FA]"
-            : "text-[10px] uppercase tracking-[0.16em] text-[#795CF7]"
+            ? "text-[12px] uppercase tracking-[0.16em] text-[#4164FA]"
+            : "text-[12px] uppercase tracking-[0.16em] text-[#795CF7]"
         }
       >
         {label}

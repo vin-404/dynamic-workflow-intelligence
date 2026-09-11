@@ -30,6 +30,13 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  calendarDate,
+  describeMutation,
+  findingKindLabel,
+  originLabel,
+  verdictLabel,
+} from "@/lib/display";
 import { bandClasses, bandText } from "@/lib/severity";
 import { cn } from "@/lib/utils";
 import { days } from "./ui";
@@ -37,7 +44,7 @@ import { days } from "./ui";
 /** One inline icon size across every panel. */
 const ICON = "size-3.5 shrink-0";
 /** Column and section labels: small, quiet, upper. */
-const LABEL = "text-[11px] font-medium uppercase tracking-wider text-dim";
+const LABEL = "text-[12px] font-medium uppercase tracking-wider text-dim";
 /**
  * A list whose length is the workflow's, not the diff's, scrolls in its own
  * box.
@@ -89,7 +96,7 @@ function Head({
   return (
     <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1.5">
       <h2 className="text-[13px] font-semibold tracking-tight">{children}</h2>
-      {right && <span className="text-[11px] text-dim">{right}</span>}
+      {right && <span className="text-[12px] text-dim">{right}</span>}
     </div>
   );
 }
@@ -103,7 +110,7 @@ function Reveal({
 }) {
   return (
     <details className="group mt-2">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[11px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
         <ChevronRight
           className={cn(ICON, "transition-transform group-open:rotate-90")}
           aria-hidden
@@ -159,7 +166,7 @@ function CompareTable({ rows }: { rows: MetricRow[] }) {
             <TableCell className="max-w-[22rem] px-2 py-1.5 align-top whitespace-normal">
               <span className={cn(!r.changed && "text-dim")}>{r.label}</span>
               {r.detail && (
-                <span className="mt-0.5 block text-[11px] leading-snug text-dim">
+                <span className="mt-0.5 block text-[12px] leading-snug text-dim">
                   {r.detail}
                 </span>
               )}
@@ -199,7 +206,7 @@ function verdictBadge(verdict: string) {
         bandClasses(verdict === "feasible" ? "low" : "high"),
       )}
     >
-      {verdict.replace(/_/g, " ")}
+      {verdictLabel(verdict)}
     </Badge>
   );
 }
@@ -228,7 +235,7 @@ export default function DiffView({ result }: { result: SimulationResponse }) {
   const rows: MetricRow[] = [
     {
       label: "projected completion",
-      detail: `${result.projected_end_date_before} → ${result.projected_end_date_after} · ${completion.direction}`,
+      detail: `${calendarDate(result.projected_end_date_before) ?? result.projected_end_date_before} → ${calendarDate(result.projected_end_date_after) ?? result.projected_end_date_after} · ${completion.direction}`,
       before: `day ${Math.round(completion.before_day)}`,
       after: `day ${Math.round(completion.after_day)}`,
       delta: days(completion.delta_days, true),
@@ -314,7 +321,7 @@ export default function DiffView({ result }: { result: SimulationResponse }) {
     <div className="flex flex-col gap-6">
       {/* ------------------------------------------------ the comparison */}
       <section>
-        <Head right={result.origin}>What this would do</Head>
+        <Head right={originLabel(result.origin)}>What this would do</Head>
         <p className="mb-3 max-w-3xl text-sm">{result.summary}</p>
         <CompareTable rows={rows} />
       </section>
@@ -452,7 +459,7 @@ export default function DiffView({ result }: { result: SimulationResponse }) {
           The base version&apos;s content hash, before and after this
           evaluation.
         </p>
-        <dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-1 rounded-md bg-muted px-2.5 py-2 font-mono text-[11px]">
+        <dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-1 rounded-md bg-muted px-2.5 py-2 font-mono text-[12px]">
           <dt className="text-dim">before</dt>
           <dd className="truncate">{result.base_version_hash.slice(0, 32)}…</dd>
           <dt className="text-dim">after</dt>
@@ -470,10 +477,13 @@ export default function DiffView({ result }: { result: SimulationResponse }) {
           } that would undo this`}
         >
           <div className={cn(SCROLL, "max-w-3xl px-2.5 py-1.5")}>
-            <ul className="flex flex-col gap-0.5 font-mono text-[11px] break-all text-dim">
+            <ul className="flex flex-col gap-0.5 text-[12px] text-dim">
+              {/* The phrase is the text; the recorded payload is hover text,
+                  so a sceptical reader can still see exactly what was stored
+                  without the primary line being JSON. */}
               {result.inverse_mutations.map((m, i) => (
-                <li key={i}>
-                  {m.kind} {JSON.stringify(m.payload)}
+                <li key={i} title={JSON.stringify(m.payload)}>
+                  {describeMutation(m)}
                 </li>
               ))}
             </ul>
@@ -602,7 +612,7 @@ function FindingsCompare({ comparison }: { comparison: Comparison }) {
             <ul className="flex flex-col gap-0.5 text-xs">
               {f.removed.map((x, i) => (
                 <li key={i} className="text-dim">
-                  {x.kind.replace(/_/g, " ")} on{" "}
+                  {findingKindLabel(x.kind)} on{" "}
                   <span className="font-mono text-foreground">
                     {x.root_cause}
                   </span>
@@ -619,7 +629,7 @@ function FindingsCompare({ comparison }: { comparison: Comparison }) {
             <ul className="flex flex-col gap-0.5 text-xs">
               {f.created.map((x, i) => (
                 <li key={i} className="text-dim">
-                  {x.kind.replace(/_/g, " ")} on{" "}
+                  {findingKindLabel(x.kind)} on{" "}
                   <span className="font-mono text-foreground">
                     {x.root_cause}
                   </span>

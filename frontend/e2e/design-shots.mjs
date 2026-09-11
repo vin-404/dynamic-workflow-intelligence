@@ -1,8 +1,10 @@
 // Screenshot every stage at two viewports against the seeded project, as the guest.
-//   node e2e/.shots-design.mjs <outdir> [base] [stages,comma]
+//   node e2e/design-shots.mjs <outdir> [base] [stages,comma] [--full]
 import { chromium } from "playwright";
 import { mkdirSync } from "node:fs";
-const [outDir, baseArg, stagesArg] = process.argv.slice(2);
+const positional = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const FULL = process.argv.includes("--full");
+const [outDir, baseArg, stagesArg] = positional;
 const BASE = (baseArg ?? "http://localhost:3000").replace(/\/+$/, "");
 const P = "00000000-0000-0000-0000-000000000001";
 const STAGES = stagesArg ? stagesArg.split(",") : ["build","live","bottlenecks","risk","requirements","whatif","optimize","history"];
@@ -20,7 +22,7 @@ for (const [w, h] of SIZES) {
       await page.goto(url, { waitUntil: "networkidle", timeout: 120000 });
       await page.waitForTimeout(stage === "bottlenecks" || stage === "risk" ? 2500 : 1200);
       await page.screenshot({ path: `${outDir}/${stage}-${w}.png`, fullPage: false });
-      await page.screenshot({ path: `${outDir}/${stage}-${w}-full.png`, fullPage: true });
+      if (FULL) await page.screenshot({ path: `${outDir}/${stage}-${w}-full.png`, fullPage: true });
       console.log(`shot ${stage} @${w}`);
     } catch (e) { console.log(`FAILED ${stage} @${w}: ${e.message}`); }
   }

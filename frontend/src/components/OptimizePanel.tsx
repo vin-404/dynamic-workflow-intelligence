@@ -53,6 +53,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { generatorLabel, objectiveLabel } from "@/lib/display";
 import { bandClasses, bandText } from "@/lib/severity";
 import { cn } from "@/lib/utils";
 import { MethodLabel, RoleAvailability } from "./AiMethod";
@@ -61,10 +62,10 @@ import { ErrorNote, Worked, days } from "./ui";
 
 /** One inline icon size across every panel. */
 const ICON = "size-3.5 shrink-0";
-const LABEL = "text-[11px] font-medium uppercase tracking-wider text-dim";
+const LABEL = "text-[12px] font-medium uppercase tracking-wider text-dim";
 /** A constraint id, a generator name: an identifier on record, not a status. */
 const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
+  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
 /**
  * The whole-field comparison scrolls in its own box.
  *
@@ -120,7 +121,7 @@ function Head({
   return (
     <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1.5">
       <h2 className="text-[13px] font-semibold tracking-tight">{children}</h2>
-      {right && <span className="text-[11px] text-dim">{right}</span>}
+      {right && <span className="text-[12px] text-dim">{right}</span>}
     </div>
   );
 }
@@ -152,7 +153,7 @@ function Metric({
       >
         {value}
       </div>
-      {sub && <div className="mt-0.5 text-[11px] text-dim">{sub}</div>}
+      {sub && <div className="mt-0.5 text-[12px] text-dim">{sub}</div>}
     </div>
   );
 }
@@ -329,7 +330,7 @@ export default function OptimizePanel({
             />
             <span>
               No limits
-              <span className="block text-[11px] text-dim">
+              <span className="block text-[12px] text-dim">
                 also propose cutting scope
               </span>
             </span>
@@ -357,7 +358,7 @@ export default function OptimizePanel({
             </span>
           )}
         </div>
-        <p className="mt-1.5 text-[11px] text-dim">
+        <p className="mt-1.5 text-[12px] text-dim">
           the search is never unbounded
         </p>
       </section>
@@ -559,7 +560,7 @@ function CandidateBody({
         <Metric
           label="Typed changes"
           value={candidate.mutations.length}
-          sub={candidate.generator.replace(/_/g, " ")}
+          sub={generatorLabel(candidate.generator)}
         />
       </div>
 
@@ -570,9 +571,9 @@ function CandidateBody({
       )}
 
       <div className="mb-3">
-        <div className="mb-1 text-[11px] text-dim">The exact changes:</div>
+        <div className="mb-1 text-[12px] text-dim">The exact changes:</div>
         <div className={cn(SCROLL, "max-w-3xl px-2.5 py-1.5")}>
-          <ol className="flex flex-col gap-0.5 font-mono text-[11px]">
+          <ol className="flex flex-col gap-0.5 font-mono text-[12px]">
             {candidate.mutation_summary.map((m, i) => (
               <li key={i} className="flex gap-2">
                 <span className="w-4 shrink-0 text-right text-dim">{i + 1}</span>
@@ -626,7 +627,7 @@ function CandidateBody({
                       c.improvement === 0 && "text-dim",
                     )}
                   >
-                    {c.name.replace(/_/g, " ")}
+                    {objectiveLabel(c.name)}
                   </TableCell>
                   <TableCell className="px-2 py-1 text-right text-dim">
                     {c.before.toFixed(2)}
@@ -660,7 +661,7 @@ function CandidateBody({
               ))}
             </TableBody>
           </Table>
-          <p className="mt-1.5 max-w-3xl text-[11px] text-dim">
+          <p className="mt-1.5 max-w-3xl text-[12px] text-dim">
             <Worked>{candidate.scores.formula}</Worked> {candidate.scores.note}
           </p>
         </>
@@ -745,7 +746,7 @@ function ObjectivesSection({
                 className="flex flex-wrap items-center gap-x-4 gap-y-1 py-1.5"
               >
                 <label className="flex w-24 shrink-0 flex-col gap-0.5">
-                  <span className="sr-only">{name.replace(/_/g, " ")} weight</span>
+                  <span className="sr-only">{objectiveLabel(name)} weight</span>
                   <Input
                     type="number"
                     min={0}
@@ -759,7 +760,7 @@ function ObjectivesSection({
                   />
                 </label>
                 <span className="w-44 shrink-0 text-[13px] font-medium">
-                  {name.replace(/_/g, " ")}
+                  {objectiveLabel(name)}
                 </span>
                 {c ? (
                   <span className="min-w-0 flex-1 text-xs text-dim">
@@ -791,7 +792,7 @@ function ObjectivesSection({
           </span>
         )}
       </div>
-      <p className="mt-2 max-w-3xl text-[11px] text-dim">
+      <p className="mt-2 max-w-3xl text-[12px] text-dim">
         {usedNote ?? objectives?.note}
       </p>
     </section>
@@ -820,8 +821,8 @@ function ComparisonTable({ result }: { result: OptimizeResponse }) {
                 key={c.name}
                 className={cn("h-9 px-2 text-right align-bottom", LABEL)}
               >
-                {c.name.replace(/_/g, " ")}
-                <span className="block text-[9px] font-normal normal-case">
+                {objectiveLabel(c.name)}
+                <span className="block text-[12px] font-normal normal-case">
                   {c.better} is better
                 </span>
               </TableHead>
@@ -873,7 +874,7 @@ function ComparisonTable({ result }: { result: OptimizeResponse }) {
         </TableBody>
       </Table>
       </div>
-      <p className="mt-2 max-w-3xl text-[11px] text-dim">
+      <p className="mt-2 max-w-3xl text-[12px] text-dim">
         <span className="font-medium text-foreground">
           Why the total is not the answer.
         </span>{" "}

@@ -32,7 +32,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { ErrorNote, instantUTC } from "./ui";
+import When from "@/components/When";
+import { ErrorNote } from "./ui";
 
 /* --------------------------------------------------------------- shapes */
 
@@ -136,7 +137,7 @@ export default function RequirementHistory({
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-line bg-panel p-5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-1">
-        <h3 className="text-[11px] font-medium tracking-wider text-dim uppercase">
+        <h3 className="text-[12px] font-medium tracking-wider text-dim uppercase">
           Recorded wordings of {requirementKey}
         </h3>
         <span className="text-xs text-dim">
@@ -197,10 +198,12 @@ export default function RequirementHistory({
                         </Badge>
                       )}
                     </div>
-                    <span className="font-mono text-xs text-dim">
-                      {rev.backfilled
-                        ? "instant unknown"
-                        : `${instantUTC(rev.recorded_at) ?? "—"} UTC`}
+                    <span className="text-xs text-dim">
+                      {rev.backfilled ? (
+                        "instant unknown"
+                      ) : (
+                        <When iso={rev.recorded_at} />
+                      )}
                     </span>
                   </div>
                   <p className="mt-0.5 text-sm">{rev.text}</p>
@@ -250,7 +253,7 @@ export default function RequirementHistory({
 
       {diff && (
         <div className="border-l-2 border-line pl-3">
-          <p className="text-[11px] font-medium tracking-wider text-dim uppercase">
+          <p className="text-[12px] font-medium tracking-wider text-dim uppercase">
             v{diff.from_version} → v{diff.to_version}
           </p>
           <p className="mt-1 text-sm leading-relaxed">

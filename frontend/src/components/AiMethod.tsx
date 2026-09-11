@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 
 /** A provenance token: an identifier on record, not a status colour. */
 const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
+  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
 
 /** One request per page, shared by every caller. Reset on failure so a
  *  retry is possible rather than a page-long cached rejection. */

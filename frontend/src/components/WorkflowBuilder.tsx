@@ -25,8 +25,9 @@
  */
 
 import { useMemo, useState } from "react";
-import { Lock, X } from "lucide-react";
+import { Lock, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { resourceKindLabel, statusLabel } from "@/lib/display";
 import {
   ApiError,
   Workflow,
@@ -68,13 +69,6 @@ import {
 import { ErrorNote, days } from "./ui";
 
 const STATUSES = ["not_started", "in_progress", "in_review", "blocked", "done"];
-const STATUS_LABEL: Record<string, string> = {
-  not_started: "Not started",
-  in_progress: "In progress",
-  in_review: "In review",
-  blocked: "Blocked",
-  done: "Done",
-};
 
 /**
  * Radix's Select refuses an empty string as an item value, and the previous
@@ -95,7 +89,7 @@ const ICON = "size-3.5 shrink-0";
  * identifier, so the token can be deleted.
  */
 const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
+  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
 
 /** A borderless cell input: the border arrives on hover and focus. */
 const CELL =
@@ -133,8 +127,8 @@ function Head({
   return (
     <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
       <h2 className="text-sm font-medium">{title}</h2>
-      <span className="font-mono text-[11px] text-dim">{count}</span>
-      {note && <span className="text-[11px] text-dim">{note}</span>}
+      <span className="font-mono text-[12px] text-dim">{count}</span>
+      {note && <span className="text-[12px] text-dim">{note}</span>}
     </div>
   );
 }
@@ -153,9 +147,9 @@ function Lbl({
 }) {
   return (
     <label className={cn("flex flex-col gap-1", className)}>
-      <span className="text-[11px] leading-none text-dim">{label}</span>
+      <span className="text-[12px] leading-none text-dim">{label}</span>
       {children}
-      {hint && <span className="text-[10px] leading-none text-dim">{hint}</span>}
+      {hint && <span className="text-[12px] leading-none text-dim">{hint}</span>}
     </label>
   );
 }
@@ -371,7 +365,7 @@ function TaskPanel({
                 <TableHead
                   key={label}
                   className={cn(
-                    "h-7 px-1.5 text-[11px] font-medium tracking-wider text-dim uppercase",
+                    "h-7 px-1.5 text-[12px] font-medium tracking-wider text-dim uppercase",
                     width,
                   )}
                 >
@@ -479,7 +473,7 @@ function TaskPanel({
               </Button>
             ))}
           </div>
-          <p className="mt-2 text-[11px] text-dim">
+          <p className="mt-2 text-[12px] text-dim">
             Templates are suggestions from the domain you picked. They fill the
             form; nothing is added until you press Add task.
           </p>
@@ -610,7 +604,7 @@ function TaskRow({
             <SelectGroup>
               {STATUSES.map((s) => (
                 <SelectItem key={s} value={s}>
-                  {STATUS_LABEL[s]}
+                  {statusLabel(s)}
                 </SelectItem>
               ))}
             </SelectGroup>
@@ -637,17 +631,32 @@ function TaskRow({
             disabled={busy || unassigned.length === 0}
             onValueChange={(v) => v !== NONE && onAssign(task.key, v)}
           >
+            {/* A small round "+" rather than the word "add…": the chips are
+                the content of this cell, the button is how one more arrives.
+                Same Select, same picker, same request. */}
             <SelectTrigger
               size="sm"
-              aria-label={`Assign someone to ${task.key}`}
-              className={cn(CELL_TRIGGER, "w-auto text-dim")}
+              aria-label="Add an assignee"
+              title={
+                workflow.resources.length
+                  ? `Assign someone to ${task.key}`
+                  : "Add a resource first"
+              }
+              className={cn(
+                CELL_TRIGGER,
+                "w-6 justify-center rounded-full border-border p-0 text-dim",
+                "data-[size=sm]:h-6 data-[size=sm]:rounded-full",
+                "hover:text-foreground [&>svg:last-child]:hidden",
+              )}
             >
-              <SelectValue />
+              <Plus className={ICON} aria-hidden />
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
                 <SelectItem value={NONE}>
-                  {workflow.resources.length ? "add…" : "add a resource first"}
+                  {workflow.resources.length
+                    ? "Choose someone…"
+                    : "Add a resource first"}
                 </SelectItem>
                 {unassigned.map((r) => (
                   <SelectItem key={r.key} value={r.key}>
@@ -736,8 +745,8 @@ function ResourcePanel({
               className="flex items-baseline gap-2 border-b border-line/50 py-1 text-sm"
             >
               <span className="truncate">{r.name}</span>
-              <span className="flex-1 truncate font-mono text-[11px] text-dim">
-                {r.kind} · cap {r.capacity}
+              <span className="flex-1 truncate font-mono text-[12px] text-dim">
+                {resourceKindLabel(r.kind)} · capacity {r.capacity}
                 {r.parent_key
                   ? ` · in ${
                       workflow.resources.find((p) => p.key === r.parent_key)
@@ -772,10 +781,12 @@ function ResourcePanel({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="person">person</SelectItem>
-                <SelectItem value="team">team</SelectItem>
-                <SelectItem value="equipment">equipment</SelectItem>
-                <SelectItem value="budget">budget</SelectItem>
+                <SelectItem value="person">{resourceKindLabel("person")}</SelectItem>
+                <SelectItem value="team">{resourceKindLabel("team")}</SelectItem>
+                <SelectItem value="equipment">
+                  {resourceKindLabel("equipment")}
+                </SelectItem>
+                <SelectItem value="budget">{resourceKindLabel("budget")}</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>
@@ -814,7 +825,7 @@ function ResourcePanel({
           </Button>
         </div>
       </div>
-      <p className="mt-2 text-[11px] text-dim">
+      <p className="mt-2 text-[12px] text-dim">
         A team&apos;s capacity can be lower than its headcount — that gap is
         how a bottleneck gets found.
       </p>
@@ -904,7 +915,7 @@ function DependencyPanel({
                       <TooltipTrigger asChild>
                         <span
                           className={cn(
-                            "shrink-0 font-mono text-[11px]",
+                            "shrink-0 font-mono text-[12px]",
                             d.consumes ? "text-foreground" : "text-dim",
                           )}
                         >

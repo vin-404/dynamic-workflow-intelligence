@@ -112,7 +112,7 @@ function RequirementRail({
 }) {
   return (
     <nav className="flex flex-col">
-      <h3 className="mb-2 border-b border-line pb-1 text-[11px] font-medium tracking-wider text-dim uppercase">
+      <h3 className="mb-2 border-b border-line pb-1 text-[12px] font-medium tracking-wider text-dim uppercase">
         Requirements — {requirements.length}
       </h3>
       <ul>
@@ -135,7 +135,7 @@ function RequirementRail({
                   <span className={cn("font-mono text-xs", active && "font-semibold")}>
                     {r.key}
                   </span>
-                  <span className="text-[11px] text-dim">
+                  <span className="text-[12px] text-dim">
                     v{r.version_no}
                   </span>
                 </div>
@@ -196,7 +196,7 @@ function ScopeChips({
                 : `${key} consumed this requirement but this wording is judged to spare its work`
             }
             className={cn(
-              "rounded border px-1.5 py-px font-mono text-[11px] transition-colors",
+              "rounded border px-1.5 py-px font-mono text-[12px] transition-colors",
               on
                 ? "border-severity-high/40 bg-severity-high/10 text-severity-high"
                 : "border-line text-dim line-through hover:border-foreground/40",
@@ -251,7 +251,7 @@ function ComparisonView({
     <div className="flex flex-col gap-4">
       <div>
         <div className="mb-2 border-b border-line pb-1">
-          <h3 className="text-[11px] font-medium tracking-wider text-dim uppercase">
+          <h3 className="text-[12px] font-medium tracking-wider text-dim uppercase">
             {tie
               ? `${options.length} wordings, the same cost`
               : `Cheapest: ${
@@ -293,13 +293,13 @@ function ComparisonView({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="text-[11px] tracking-wider text-dim uppercase">
+            <TableHead className="text-[12px] tracking-wider text-dim uppercase">
               Measure
             </TableHead>
             {options.map((o) => (
               <TableHead
                 key={o.index}
-                className="text-right text-[11px] tracking-wider text-dim uppercase"
+                className="text-right text-[12px] tracking-wider text-dim uppercase"
               >
                 {o.label}
               </TableHead>
@@ -608,7 +608,7 @@ export default function RequirementChange({
             {/* ---------------------------------------------- composer */}
             <section className="rounded-xl border border-line bg-panel p-5">
               <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-1">
-                <h3 className="text-[11px] font-medium tracking-wider text-dim uppercase">
+                <h3 className="text-[12px] font-medium tracking-wider text-dim uppercase">
                   Propose a new wording for {current.key}
                 </h3>
                 <span className="text-xs text-dim">
@@ -774,7 +774,7 @@ export default function RequirementChange({
                 />
                 {openedOption && (
                   <div className="border-t border-line pt-4">
-                    <p className="mb-3 text-[11px] font-medium tracking-wider text-dim uppercase">
+                    <p className="mb-3 text-[12px] font-medium tracking-wider text-dim uppercase">
                       {openedOption.label} in full
                     </p>
                     <ErrorBoundary

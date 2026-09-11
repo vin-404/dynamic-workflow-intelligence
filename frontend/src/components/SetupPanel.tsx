@@ -84,10 +84,10 @@ function Lbl({
 }) {
   return (
     <label className={cn("flex flex-col gap-1", className)}>
-      <span className="text-[11px] leading-none text-dim">{label}</span>
+      <span className="text-[12px] leading-none text-dim">{label}</span>
       {children}
       {hint && (
-        <span className="text-[10px] leading-none text-dim">{hint}</span>
+        <span className="text-[12px] leading-none text-dim">{hint}</span>
       )}
     </label>
   );
@@ -298,11 +298,11 @@ export function MemberList({ projectId }: { projectId: string }) {
     <section>
       <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
         <h2 className="text-sm font-medium">Who is collaborating</h2>
-        <span className="font-mono text-[11px] text-dim">{members.length}</span>
+        <span className="font-mono text-[12px] text-dim">{members.length}</span>
       </div>
 
       {/* Enforced, not advisory. See the note at the top of this file. */}
-      <p className="max-w-3xl text-[11px] text-dim">
+      <p className="max-w-3xl text-[12px] text-dim">
         Roles are enforced, not advisory: a viewer may read and ask questions,
         an editor may also change the workflow, and an owner may additionally
         change who is on the project. Reads stay open to anyone signed in —
@@ -329,12 +329,12 @@ export function MemberList({ projectId }: { projectId: string }) {
               <span className="w-48 shrink-0 truncate">
                 {m.name || m.email}
               </span>
-              <span className="flex-1 truncate font-mono text-[11px] text-dim">
+              <span className="flex-1 truncate font-mono text-[12px] text-dim">
                 {m.email}
               </span>
               <span
                 className={cn(
-                  "shrink-0 font-mono text-[11px]",
+                  "shrink-0 font-mono text-[12px]",
                   m.role === "owner" ? "text-foreground" : "text-dim",
                 )}
               >

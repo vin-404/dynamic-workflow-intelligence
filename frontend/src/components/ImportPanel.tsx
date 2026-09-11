@@ -63,6 +63,7 @@ import {
   importPreview,
   listImportSamples,
 } from "@/lib/api";
+import { humanize, resourceKindLabel, statusLabel } from "@/lib/display";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -89,10 +90,10 @@ import { ErrorNote, days } from "./ui";
 /** One inline icon size across every panel. */
 const ICON = "size-3.5 shrink-0";
 /** Column and section labels: small, quiet, upper. */
-const LABEL = "text-[11px] font-medium uppercase tracking-wider text-dim";
+const LABEL = "text-[12px] font-medium uppercase tracking-wider text-dim";
 /** An identifier on record — a task key, a column name, a hash. Form, not hue. */
 const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px]";
+  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
 /**
  * "This value was not in the file; the importer chose it."
  *
@@ -104,7 +105,7 @@ const TOKEN =
  */
 const ASSUMED =
   "ml-1.5 inline-block shrink-0 rounded border border-dashed border-dim/70 " +
-  "px-1 align-[1px] text-[10px] font-medium uppercase tracking-wider text-dim";
+  "px-1 align-[1px] text-[12px] font-medium uppercase tracking-wider text-dim";
 /**
  * A long table scrolls inside its own box; the page never scrolls sideways.
  *
@@ -148,7 +149,7 @@ function Head({
   return (
     <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1.5">
       <h2 className="text-[13px] font-semibold tracking-tight">{children}</h2>
-      {right && <span className="text-[11px] text-dim">{right}</span>}
+      {right && <span className="text-[12px] text-dim">{right}</span>}
     </div>
   );
 }
@@ -179,7 +180,7 @@ function Metric({
       >
         {value}
       </div>
-      {sub && <div className="mt-0.5 text-[11px] text-dim">{sub}</div>}
+      {sub && <div className="mt-0.5 text-[12px] text-dim">{sub}</div>}
     </div>
   );
 }
@@ -224,7 +225,7 @@ function Reveal({
 }) {
   return (
     <details className="group mt-1.5">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[11px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
         <ChevronRight
           className={cn(ICON, "transition-transform group-open:rotate-90")}
           aria-hidden
@@ -275,6 +276,7 @@ function readingValue(field: string, value: unknown): React.ReactNode {
     // show; every other numeric field can speak for itself.
     return field === "effort" ? days(value) : String(value);
   }
+  if (field === "status" && typeof value === "string") return statusLabel(value);
   return String(value);
 }
 
@@ -288,10 +290,10 @@ function Reading({
 }) {
   return (
     <div className="grid grid-cols-[6rem_1fr] gap-x-3 gap-y-0.5 py-0.5">
-      <dt className="text-[11px] text-dim">{field.replace(/_/g, " ")}</dt>
+      <dt className="text-[12px] text-dim">{humanize(field)}</dt>
       <dd className="min-w-0">
         <div className="flex flex-wrap items-baseline gap-x-1.5 text-[13px]">
-          <span className="font-mono text-[11px] break-all text-dim">
+          <span className="font-mono text-[12px] break-all text-dim">
             {reading.raw ? `"${reading.raw}"` : "(nothing in this row)"}
           </span>
           <ChevronRight className={cn(ICON, "text-dim")} aria-hidden />
@@ -300,7 +302,7 @@ function Reading({
           </span>
           {reading.assumed && <span className={ASSUMED}>assumed</span>}
         </div>
-        <p className="mt-0.5 text-[11px] leading-snug text-dim">
+        <p className="mt-0.5 text-[12px] leading-snug text-dim">
           <Prose>{reading.how}</Prose>
           {reading.source && (
             <span>
@@ -323,18 +325,18 @@ function RowReadings({ row }: { row: PreviewRow }) {
   return (
     <li className="py-2">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[13px]">
-        <span className="w-12 shrink-0 text-right text-[11px] text-dim">
+        <span className="w-12 shrink-0 text-right text-[12px] text-dim">
           row {row.row}
         </span>
         <span className={TOKEN}>{row.task_key}</span>
         <span className="min-w-0 flex-1 truncate">{row.name}</span>
-        <span className="text-[11px] text-dim">
+        <span className="text-[12px] text-dim">
           {assumed.length === 0
             ? `${entries.length} readings, none assumed`
             : `${assumed.length} of ${entries.length} readings assumed`}
         </span>
         {row.line !== row.row && (
-          <span className="text-[11px] text-dim">line {row.line}</span>
+          <span className="text-[12px] text-dim">line {row.line}</span>
         )}
       </div>
 
@@ -347,7 +349,7 @@ function RowReadings({ row }: { row: PreviewRow }) {
       )}
 
       {row.notes.length > 0 && (
-        <ul className="mt-1 ml-14 flex flex-col gap-0.5 text-[11px] text-dim">
+        <ul className="mt-1 ml-14 flex flex-col gap-0.5 text-[12px] text-dim">
           {row.notes.map((note, i) => (
             <li key={i}>
               · <Prose>{note}</Prose>
@@ -441,7 +443,7 @@ function AssumptionsView({ block }: { block: AssumptionsBlock }) {
                 </span>
                 {value.assumed && <span className={ASSUMED}>assumed</span>}
                 {value.how && (
-                  <span className="block text-[11px] leading-snug text-dim">
+                  <span className="block text-[12px] leading-snug text-dim">
                     {value.how}
                   </span>
                 )}
@@ -457,7 +459,7 @@ function AssumptionsView({ block }: { block: AssumptionsBlock }) {
           <dl className="flex flex-wrap gap-x-5 gap-y-1">
             {Object.entries(value).map(([k, v]) => (
               <div key={k} className="flex gap-1.5">
-                <dt className="text-dim">{k.replace(/_/g, " ")}</dt>
+                <dt className="text-dim">{humanize(k)}</dt>
                 <dd className="font-mono">
                   {v === null || v === undefined ? "—" : String(v)}
                 </dd>
@@ -519,7 +521,7 @@ function RejectedRows({
                   <TableCell className="px-2 py-1.5 text-right align-top text-dim">
                     {row.row}
                     {row.line !== row.row && (
-                      <span className="block text-[10px]">line {row.line}</span>
+                      <span className="block text-[12px]">line {row.line}</span>
                     )}
                   </TableCell>
                   <TableCell className="max-w-[26rem] px-2 py-1.5 align-top leading-snug whitespace-normal">
@@ -532,7 +534,7 @@ function RejectedRows({
                         taller than the box they sit in - which is a way of
                         hiding the third one, and the whole point of this
                         table is that none of them get hidden. */}
-                    <p className="font-mono text-[11px] leading-relaxed break-words">
+                    <p className="font-mono text-[12px] leading-relaxed break-words">
                       {filled.map(([column, value], i) => (
                         <span key={i}>
                           {i > 0 && <span className="text-dim"> · </span>}
@@ -591,7 +593,7 @@ function DroppedDependencies({ dropped }: { dropped: DroppedDependency[] }) {
                 <TableCell className="px-2 py-1.5 align-top">
                   <span className={TOKEN}>{d.task_key}</span>
                 </TableCell>
-                <TableCell className="px-2 py-1.5 align-top font-mono text-[11px] break-all">
+                <TableCell className="px-2 py-1.5 align-top font-mono text-[12px] break-all">
                   {d.raw || "(empty)"}
                   <span className="block text-dim">{d.column}</span>
                 </TableCell>
@@ -653,7 +655,7 @@ function Cycles({ cycles }: { cycles: ImportCycle[] }) {
               <span className={cn("font-mono text-[13px] break-all", bandText("high"))}>
                 {cycle.path.join(" → ")}
               </span>
-              <span className="text-[11px] text-dim">
+              <span className="text-[12px] text-dim">
                 {cycle.length} task{cycle.length === 1 ? "" : "s"} · from row
                 {cycle.from_rows.length === 1 ? " " : "s "}
                 {cycle.from_rows.join(", ")}
@@ -661,7 +663,7 @@ function Cycles({ cycles }: { cycles: ImportCycle[] }) {
             </div>
             <p className="mt-1 max-w-3xl text-xs">{cycle.message}</p>
             {cycle.evidence.length > 0 && (
-              <ul className="mt-1.5 flex flex-col gap-0.5 text-[11px]">
+              <ul className="mt-1.5 flex flex-col gap-0.5 text-[12px]">
                 {cycle.evidence.map((e, j) => (
                   <li key={j} className="flex flex-wrap gap-x-2">
                     <span className="shrink-0 text-dim">row {e.row}</span>
@@ -819,7 +821,7 @@ export default function ImportPanel({
           <h1 className="text-base font-semibold tracking-tight">
             Import from a Jira export
           </h1>
-          <span className="text-[11px] text-dim">
+          <span className="text-[12px] text-dim">
             {stage === "source"
               ? "step 1 of 2 · choose a file"
               : stage === "preview"
@@ -884,7 +886,7 @@ export default function ImportPanel({
                   />
                 </label>
               </Button>
-              <span className="text-[11px] text-dim">
+              <span className="text-[12px] text-dim">
                 …or paste the export below. It never leaves this instance.
               </span>
             </div>
@@ -898,7 +900,7 @@ export default function ImportPanel({
                   >
                     <span className="min-w-0 flex-1">
                       {s.title}
-                      <span className="block text-[11px] text-dim">
+                      <span className="block text-[12px] text-dim">
                         {s.description}
                       </span>
                     </span>
@@ -919,7 +921,7 @@ export default function ImportPanel({
                 <div className="flex flex-wrap items-baseline gap-x-2 text-[13px]">
                   <span className="font-medium">{sample.title}</span>
                   <span className={TOKEN}>{sample.filename}</span>
-                  <span className="text-[11px] text-dim">
+                  <span className="text-[12px] text-dim">
                     {sample.lines} lines · {sample.bytes} bytes · sha256{" "}
                     {sample.sha256.slice(0, 12)}…
                   </span>
@@ -930,7 +932,7 @@ export default function ImportPanel({
                 <Reveal
                   summary={`what this file is built to exercise (${sample.demonstrates.length})`}
                 >
-                  <ul className="flex max-w-3xl flex-col gap-1 text-[11px] text-dim">
+                  <ul className="flex max-w-3xl flex-col gap-1 text-[12px] text-dim">
                     {sample.demonstrates.map((d, i) => (
                       <li key={i}>· {d}</li>
                     ))}
@@ -955,7 +957,7 @@ export default function ImportPanel({
                 className={TEXTAREA}
               />
             </label>
-            <p className="mt-1 text-[11px] text-dim">
+            <p className="mt-1 text-[12px] text-dim">
               {csv
                 ? `${csv.length.toLocaleString()} characters · ${lines} lines. Editable — change a blocking link here to see the importer refuse a cycle.`
                 : "Nothing loaded yet."}
@@ -1050,7 +1052,7 @@ export default function ImportPanel({
                 />
               </label>
             </div>
-            <p className="mt-1.5 text-[11px] text-dim">
+            <p className="mt-1.5 text-[12px] text-dim">
               Leave the two dates empty and they are derived from the file — the
               earliest date found and the latest due date — and reported as
               derived.
@@ -1073,7 +1075,7 @@ export default function ImportPanel({
             </span>
           </section>
 
-          <p className="max-w-3xl text-[11px] text-dim">
+          <p className="max-w-3xl text-[12px] text-dim">
             This screen reads a Jira issue export, which is the only source with
             a preset. The API also takes a generic CSV with an explicit column
             mapping — which column is the key, the name, the estimate, the
@@ -1287,7 +1289,7 @@ function PreviewView({
                     {days(t.effort)}
                   </TableCell>
                   <TableCell className="px-2 py-1 text-dim">
-                    {t.status.replace(/_/g, " ")}
+                    {statusLabel(t.status)}
                   </TableCell>
                 </TableRow>
               ))}
@@ -1339,7 +1341,7 @@ function PreviewView({
                 <span className={TOKEN}>{r.key}</span>
                 <span>{r.name}</span>
                 <span className="text-dim">
-                  {r.kind} · capacity {r.capacity} · {r.task_count} task
+                  {resourceKindLabel(r.kind)} · capacity {r.capacity} · {r.task_count} task
                   {r.task_count === 1 ? "" : "s"}
                 </span>
               </li>

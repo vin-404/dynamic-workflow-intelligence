@@ -41,6 +41,7 @@ import {
   humanizeKey,
   unavailableEntries,
 } from "@/lib/api";
+import { calendarDate, describeMutation, findingKindLabel, prose, scenarioStatusLabel, statusLabel } from "@/lib/display";
 import { severityClasses, severityText } from "@/lib/severity";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -60,23 +61,13 @@ import { ErrorNote, Worked, days } from "./ui";
 /* ------------------------------------------------------------------ bits */
 
 /**
- * `2026-09-23` as `23 Sep 2026`.
- *
- * Read through the UTC accessors. An ISO date-only string is parsed as UTC
- * midnight, so `getDate()` would shift the day backwards for every reader west
- * of Greenwich — silently, and differently per reader. Same reasoning as
- * D-127.
+ * `2026-09-23` as `23 Sep 2026`, through the display map's `calendarDate`
+ * (UTC accessors, so the day never shifts per reader — D-127). An
+ * unparsable string is shown as sent rather than hidden.
  */
 function dateLabel(iso: string | null | undefined): string {
   if (!iso) return "—";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return iso;
-  const d = new Date(t);
-  const month = [
-    "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-  ][d.getUTCMonth()];
-  return `${d.getUTCDate()} ${month} ${d.getUTCFullYear()}`;
+  return calendarDate(iso) ?? iso;
 }
 
 function plural(n: number, one: string, many = `${one}s`): string {
@@ -96,7 +87,7 @@ function Heading({
   return (
     <div className="mb-2 border-b border-border pb-1">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-        <h3 className="text-[11px] font-medium tracking-wider text-muted-foreground uppercase">
+        <h3 className="text-[12px] font-medium tracking-wider text-muted-foreground uppercase">
           {children}
         </h3>
         {right}
@@ -109,10 +100,6 @@ function Heading({
 /** A task key, everywhere, in the one form identifiers take in this product. */
 function Key({ children }: { children: ReactNode }) {
   return <span className="font-mono text-xs">{children}</span>;
-}
-
-function statusLabel(status: string): string {
-  return status.replace(/_/g, " ");
 }
 
 /* ------------------------------------------------------- honesty elements */
@@ -260,7 +247,7 @@ function Headline({ report }: { report: Report }) {
       {/* The date, and its caveat, as one indivisible unit. */}
       <div className="border-l-2 border-border pl-3">
         <p className="flex flex-wrap items-baseline gap-x-2 text-sm">
-          <span className="text-[11px] tracking-wider text-muted-foreground uppercase">
+          <span className="text-[12px] tracking-wider text-muted-foreground uppercase">
             Projected finish
           </span>
           <span className="font-medium">
@@ -433,22 +420,22 @@ function MustRedo({ report }: { report: Report }) {
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="text-[11px] tracking-wider text-muted-foreground uppercase">
+            <TableHead className="text-[12px] tracking-wider text-muted-foreground uppercase">
               Task
             </TableHead>
-            <TableHead className="text-[11px] tracking-wider text-muted-foreground uppercase">
+            <TableHead className="text-[12px] tracking-wider text-muted-foreground uppercase">
               Status
             </TableHead>
-            <TableHead className="text-[11px] tracking-wider text-muted-foreground uppercase">
+            <TableHead className="text-[12px] tracking-wider text-muted-foreground uppercase">
               Owner
             </TableHead>
-            <TableHead className="w-[1%] text-right text-[11px] tracking-wider text-muted-foreground uppercase">
+            <TableHead className="w-[1%] text-right text-[12px] tracking-wider text-muted-foreground uppercase">
               Effort
             </TableHead>
-            <TableHead className="w-[1%] text-right text-[11px] tracking-wider text-muted-foreground uppercase">
+            <TableHead className="w-[1%] text-right text-[12px] tracking-wider text-muted-foreground uppercase">
               Wasted
             </TableHead>
-            <TableHead className="w-[1%] text-right text-[11px] tracking-wider text-muted-foreground uppercase">
+            <TableHead className="w-[1%] text-right text-[12px] tracking-wider text-muted-foreground uppercase">
               Redo
             </TableHead>
           </TableRow>
@@ -681,14 +668,14 @@ function FindingsDelta({ report }: { report: Report }) {
                 appears
               </Badge>
               <span className="text-sm font-medium">
-                {finding.kind.replace(/_/g, " ")}
+                {findingKindLabel(finding.kind)}
               </span>
               <span className="text-xs text-muted-foreground">
                 {finding.task_ids.join(", ")}
               </span>
             </div>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {finding.explanation}
+              {prose(finding.explanation)}
             </p>
           </li>
         ))}
@@ -702,7 +689,7 @@ function FindingsDelta({ report }: { report: Report }) {
                 clears
               </Badge>
               <span className="text-sm font-medium text-muted-foreground line-through">
-                {finding.kind.replace(/_/g, " ")}
+                {findingKindLabel(finding.kind)}
               </span>
               <span className="text-xs text-muted-foreground">
                 {finding.task_ids.join(", ")}
@@ -826,7 +813,8 @@ function Replan({
         note={replan.expressed_in}
         right={
           <span className="text-xs text-muted-foreground">
-            {replan.status} · {applied ? "applied" : "not applied"}
+            {scenarioStatusLabel(replan.status)} ·{" "}
+            {applied ? "applied" : "not applied"}
           </span>
         }
       >
@@ -834,20 +822,29 @@ function Replan({
       </Heading>
 
       <ul className="mb-2">
-        {replan.mutations.map((m: MutationIn, i) => (
-          <li
-            key={i}
-            className="flex flex-wrap items-baseline gap-x-2 border-b border-border py-1.5 text-xs last:border-0"
-          >
-            <span className="rounded border border-border px-1.5 py-px font-mono text-[11px]">
-              {m.kind}
-            </span>
-            <span className="text-muted-foreground">
-              {(m as { describes?: string }).describes ??
-                JSON.stringify(m.payload)}
-            </span>
-          </li>
-        ))}
+        {replan.mutations.map((m: MutationIn, i) => {
+          // The phrase is built from kind and payload; the engine's own
+          // `describes` sentence, when it says something more, stays beside
+          // it. The raw payload is hover text, never the primary line.
+          const phrase = describeMutation(m);
+          const describes = (m as { describes?: string }).describes;
+          return (
+            <li
+              key={i}
+              className="flex flex-wrap items-baseline gap-x-2 border-b border-border py-1.5 text-xs last:border-0"
+            >
+              <span
+                className="text-foreground/90"
+                title={JSON.stringify(m.payload)}
+              >
+                {phrase}
+              </span>
+              {describes && describes !== phrase && (
+                <span className="text-muted-foreground">{describes}</span>
+              )}
+            </li>
+          );
+        })}
       </ul>
 
       {replan.inverse_mutations.length > 0 && (

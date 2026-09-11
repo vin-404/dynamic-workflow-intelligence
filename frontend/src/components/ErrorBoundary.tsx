@@ -93,7 +93,7 @@ export default class ErrorBoundary extends Component<Props, State> {
           <summary className="flex w-fit cursor-pointer list-none items-center gap-1 text-xs text-muted-foreground marker:content-none hover:text-foreground [&::-webkit-details-marker]:hidden">
             Technical detail
           </summary>
-          <pre className="mt-1 whitespace-pre-wrap break-words text-[11px] text-muted-foreground">
+          <pre className="mt-1 whitespace-pre-wrap break-words text-[12px] text-muted-foreground">
             {error.name}: {error.message}
           </pre>
         </details>
