@@ -118,6 +118,23 @@ export function roleLabel(raw: string | null | undefined): string {
   return lookup(ROLE, raw);
 }
 
+/* ----------------------------------------------------------- AI provider */
+
+const PROVIDER: Record<string, string> = {
+  null: "None configured",
+  none: "None configured",
+  "": "None configured",
+  anthropic: "Anthropic",
+  openai: "OpenAI",
+  fallback: "Built-in fallback",
+};
+
+/** The AI provider the API reports; it sends the string "null" for none. */
+export function providerLabel(raw: string | null | undefined): string {
+  if (raw === null || raw === undefined) return PROVIDER.null;
+  return lookup(PROVIDER, raw);
+}
+
 /* -------------------------------------------------------------- findings */
 
 const FINDING_KIND: Record<string, string> = {

@@ -24,12 +24,18 @@
  * determined" with the error - rather than as "available" or as an empty
  * section. An unknown is a third state and it is drawn as one.
  *
+ * Presentation (design brief §4): grouped by capability; each row is
+ * name · status chip · one line, with anything longer behind a "Why"
+ * disclosure that carries the API's text verbatim. The endpoint each group
+ * was read from is kept, so the claim can be checked, but sits inside the
+ * group's own disclosure rather than in a heading.
+ *
  * The panel is per workflow, because the evidence tier is: the same build
  * reaches tier 2 on a project with an event log and tier 0 on a fresh one.
  */
 
 import { ReactNode, useCallback, useEffect, useState } from "react";
-import { CircleCheck, CircleHelp, CircleOff, LoaderCircle } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
 import {
   Analysis,
   ApiError,
@@ -49,73 +55,128 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { findingKindLabel, humanize, roleLabel, tierLabel } from "@/lib/display";
+import { findingKindLabel, humanize, providerLabel, roleLabel, tierLabel } from "@/lib/display";
 import { cn } from "@/lib/utils";
 import { useAiStatus } from "./AiMethod";
-import { ErrorNote } from "./ui";
 
-const ICON = "size-3.5 shrink-0";
-const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
+/* ------------------------------------------------------------- helpers */
 
-/* ------------------------------------------------------------ one row */
+/**
+ * The lead of a passage: up to the first sentence end or the first colon,
+ * whichever comes first. This is a cut, never a rewrite - the full text is
+ * always offered verbatim behind the row's disclosure when there is more.
+ */
+function lead(text: string | null | undefined): string {
+  if (!text) return "";
+  const m = text.match(/^[^:]*?(?:[.!?](?=\s|$)|(?=:))/);
+  const cut = m ? m[0].trim() : text.trim();
+  return cut.length > 0 ? cut : text.trim();
+}
 
-/** available: true / false / null-for-unknown. Three states, three glyphs. */
-function Row({
-  name,
-  available,
-  detail,
-  needs,
-  children,
-}: {
-  name: ReactNode;
-  available: boolean | null;
-  /** What runs, or what would run. One sentence. */
-  detail?: ReactNode;
-  /** When unavailable: the specific thing it needs. Never shown as empty. */
-  needs?: ReactNode;
-  children?: ReactNode;
-}) {
-  const glyph =
-    available === true ? (
-      <CircleCheck className={cn(ICON, "text-severity-low")} aria-hidden />
-    ) : available === false ? (
-      <CircleOff className={cn(ICON, "text-severity-medium")} aria-hidden />
-    ) : (
-      <CircleHelp className={cn(ICON, "text-dim")} aria-hidden />
-    );
+/** Whether `lead()` left anything out, i.e. whether a "Why" is worth opening. */
+function hasMore(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return lead(text).length < text.trim().length;
+}
+
+/**
+ * One entry of a withheld tier's `checks` list. The API writes it as
+ * "kind: what it would find", so the kind goes through the display map and
+ * the description stays as written.
+ */
+function checkLabel(entry: string): string {
+  const at = entry.indexOf(":");
+  if (at < 0) return findingKindLabel(entry);
+  return `${findingKindLabel(entry.slice(0, at))}: ${entry.slice(at + 1).trim()}`;
+}
+
+/* ----------------------------------------------------------- primitives */
+
+/** available: true / false / null-for-unknown. Three states, three chips. */
+function Chip({ available }: { available: boolean | null }) {
+  const tone =
+    available === true
+      ? "border-severity-low/30 bg-severity-low/10 text-severity-low"
+      : available === false
+        ? "border-line bg-panel2 text-dim"
+        : "border-severity-medium/30 bg-severity-medium/10 text-severity-medium";
   const word =
     available === true
       ? "available"
       : available === false
         ? "not available"
-        : "could not be determined";
+        : "could not determine";
   return (
-    <li className="flex gap-2.5 py-2">
-      <span className="mt-0.5">{glyph}</span>
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="text-[13px] font-medium">{name}</span>
-          <span
-            className={cn(
-              "text-[12px]",
-              available === false ? "text-severity-medium" : "text-dim",
-            )}
-          >
-            {word}
-          </span>
-        </div>
-        {detail && <p className="mt-0.5 text-xs text-foreground/85">{detail}</p>}
-        {available === false && (
-          <p className="mt-0.5 text-xs">
-            <span className="font-medium">Needs: </span>
-            <span className="text-foreground/85">
-              {needs ?? "not stated by the API - that is itself a gap."}
-            </span>
-          </p>
-        )}
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center rounded-md border px-2 py-0.5 text-[12px] font-medium leading-5",
+        tone,
+      )}
+    >
+      {word}
+    </span>
+  );
+}
+
+/** A 12px "Why ▸" disclosure. Its body is where verbatim API text lives. */
+function Why({
+  label = "Why",
+  children,
+}: {
+  label?: string;
+  children: ReactNode;
+}) {
+  return (
+    <details className="group mt-1">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
+        {label}
+        <span aria-hidden className="group-open:hidden">
+          ▸
+        </span>
+        <span aria-hidden className="hidden group-open:inline">
+          ▾
+        </span>
+      </summary>
+      <div className="mt-1.5 flex flex-col gap-1.5 border-l-2 border-line pl-3 text-[12px] text-dim">
         {children}
       </div>
+    </details>
+  );
+}
+
+/**
+ * One capability: name · chip · one line. Anything longer goes in `why`.
+ * `note` is a dim suffix on the name (the role's job, the active provider).
+ */
+function Row({
+  name,
+  note,
+  available,
+  line,
+  why,
+  children,
+}: {
+  name: ReactNode;
+  note?: ReactNode;
+  available: boolean | null;
+  /** What runs, what it needs, or why it could not be read. One line. */
+  line: ReactNode;
+  /** The full text behind the line, verbatim from the API. */
+  why?: ReactNode;
+  children?: ReactNode;
+}) {
+  return (
+    <li className="py-2.5">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <span className="text-[14px] font-medium text-foreground">
+          {name}
+          {note && <span className="font-normal text-dim"> · {note}</span>}
+        </span>
+        <Chip available={available} />
+      </div>
+      <p className="mt-1 text-[14px] text-foreground/85">{line}</p>
+      {why && <Why>{why}</Why>}
+      {children}
     </li>
   );
 }
@@ -132,9 +193,25 @@ function Group({
 }) {
   return (
     <section>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 border-b border-border pb-1">
-        <h3 className="text-[13px] font-semibold tracking-tight">{title}</h3>
-        <span className={cn(TOKEN, "text-dim")}>{source}</span>
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 border-b border-line pb-1.5">
+        <h3 className="text-[18px] font-semibold tracking-tight">{title}</h3>
+        <details className="group">
+          <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
+            Where this was read
+            <span aria-hidden className="group-open:hidden">
+              ▸
+            </span>
+            <span aria-hidden className="hidden group-open:inline">
+              ▾
+            </span>
+          </summary>
+          <p className="mt-1 text-[12px] text-dim">
+            Read live from{" "}
+            <span className="rounded border border-line bg-panel2 px-1.5 py-0.5 font-mono">
+              {source}
+            </span>
+          </p>
+        </details>
       </div>
       {children}
     </section>
@@ -143,34 +220,62 @@ function Group({
 
 function Loading({ what }: { what: string }) {
   return (
-    <p className="flex items-center gap-1.5 py-2 text-xs text-dim">
-      <LoaderCircle className={cn(ICON, "animate-spin")} aria-hidden />
+    <p className="flex items-center gap-1.5 py-2.5 text-[12px] text-dim">
+      <LoaderCircle className="size-3.5 shrink-0 animate-spin" aria-hidden />
       Reading {what}…
     </p>
   );
 }
 
-/** A source that did not answer. Shown as a failure, never as "available". */
+/**
+ * A source that did not answer. Drawn as the third state, "could not
+ * determine", never as "available" and never as an empty section.
+ */
 function Unreachable({
+  name,
   what,
   error,
   onRetry,
 }: {
+  /** The row's name: the thing that could not be read. */
+  name: string;
+  /** Completes "Could not determine …". */
   what: string;
   error: ApiError | string;
   onRetry?: () => void;
 }) {
+  const message = error instanceof ApiError ? error.userMessage : String(error);
+  const hint = error instanceof ApiError ? error.hint : undefined;
+  const requestId = error instanceof ApiError ? error.requestId : undefined;
   return (
-    <div className="py-2">
-      <ErrorNote
-        onRetry={onRetry}
-        hint={error instanceof ApiError ? error.hint : undefined}
-        requestId={error instanceof ApiError ? error.requestId : undefined}
+    <ul>
+      <Row
+        name={name}
+        available={null}
+        line={`Could not determine ${what}: the API did not answer.`}
+        why={
+          <>
+            <p>{message}</p>
+            {hint && <p>{hint}</p>}
+            {requestId && (
+              <p>
+                Request <span className="font-mono">{requestId}</span> — quote
+                this if you report it.
+              </p>
+            )}
+          </>
+        }
       >
-        Could not determine {what}: the API did not answer.{" "}
-        {error instanceof ApiError ? error.userMessage : String(error)}
-      </ErrorNote>
-    </div>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="mt-1.5 rounded border border-line px-2 py-0.5 text-[12px] text-dim hover:border-dim hover:text-foreground"
+          >
+            Try again
+          </button>
+        )}
+      </Row>
+    </ul>
   );
 }
 
@@ -225,39 +330,66 @@ function AiGroup() {
   return (
     <Group title="Language model" source="GET /api/ai/status">
       {failed && (
-        <Unreachable what="the AI layer's status" error="ai/status failed" />
+        <Unreachable
+          name="The AI layer"
+          what="the AI layer's status"
+          error="The status endpoint did not respond, so nothing about the model can be claimed."
+        />
       )}
       {!failed && !status && <Loading what="the AI layer's status" />}
       {status && (
-        <ul className="divide-y divide-border/60">
+        <ul className="divide-y divide-line/60">
           <Row
             name="A configured model"
+            note={`provider ${providerLabel(status.provider)}`}
             available={status.available}
-            detail={
+            line={
               status.available
-                ? `Provider ${humanize(status.provider)}, model ${status.model}.`
-                : `Provider "${humanize(status.provider)}": no model is answering. Every role below runs its deterministic fallback, and each result is labelled at the point of use.`
+                ? `${status.model} is answering; every output is validated against the engine before it is shown.`
+                : status.needs
+                  ? `Needs ${status.needs.charAt(0).toLowerCase()}${status.needs.slice(1)}`
+                  : "Not stated by the API - that is itself a gap."
             }
-            needs={status.needs}
+            why={
+              status.available
+                ? undefined
+                : "No model is answering. Every role below runs its deterministic fallback, and each result is labelled at the point of use."
+            }
           />
-          {status.roles.map((role) => (
-            <Row
-              key={role}
-              name={
-                <>
-                  {role[0].toUpperCase() + role.slice(1)}
-                  <span className="text-dim"> · {ROLE_WHAT[role] ?? ""}</span>
-                </>
-              }
-              available={status.available}
-              detail={
-                status.available
-                  ? `Answered by ${status.model}; output is validated against the engine before it is shown.`
-                  : `Running its fallback: ${status.degraded_behaviour[role] ?? "not described by the API"}`
-              }
-              needs={status.needs}
-            />
-          ))}
+          {status.roles.map((role) => {
+            const fallback = status.degraded_behaviour[role];
+            return (
+              <Row
+                key={role}
+                name={humanize(role)}
+                note={ROLE_WHAT[role]}
+                available={status.available}
+                line={
+                  status.available
+                    ? `Right now: answered by ${status.model}, checked against the engine.`
+                    : "Right now: its deterministic fallback is answering, not a model."
+                }
+                why={
+                  status.available ? undefined : (
+                    <>
+                      <p>
+                        <span className="font-medium text-foreground/85">
+                          The fallback:{" "}
+                        </span>
+                        {fallback ?? "not described by the API."}
+                      </p>
+                      <p>
+                        <span className="font-medium text-foreground/85">
+                          A model needs:{" "}
+                        </span>
+                        {status.needs ?? "not stated by the API."}
+                      </p>
+                    </>
+                  )
+                }
+              />
+            );
+          })}
         </ul>
       )}
     </Group>
@@ -269,27 +401,24 @@ function WithoutModelGroup() {
   if (failed || !status) return null;
   return (
     <Group title="Works with or without a model" source="GET /api/ai/status">
-      <ul className="divide-y divide-border/60">
+      <ul className="divide-y divide-line/60">
         {Object.entries(status.capabilities_without_model).map(
           ([capability, mechanism]) => (
             <Row
               key={capability}
-              name={capability[0].toUpperCase() + capability.slice(1)}
+              name={humanize(capability)}
               available={true}
-              detail={`Computed by ${mechanism}.`}
+              line={`Computed by ${mechanism}.`}
             />
           ),
         )}
       </ul>
       {status.guarantees.length > 0 && (
-        <div className="mt-2 border-l-2 border-border pl-2.5 text-xs text-foreground/85">
-          <p className="mb-1 font-medium">What the model may never do here</p>
-          <ul className="flex flex-col gap-0.5">
-            {status.guarantees.map((g) => (
-              <li key={g}>{g}</li>
-            ))}
-          </ul>
-        </div>
+        <Why label="What the model may never do here">
+          {status.guarantees.map((g) => (
+            <p key={g}>{g}</p>
+          ))}
+        </Why>
       )}
     </Group>
   );
@@ -304,34 +433,36 @@ function EvidenceGroup({ projectId }: { projectId: string }) {
       source="POST /api/projects/{id}/analyze"
     >
       {error && (
-        <Unreachable what="which checks can run" error={error} onRetry={retry} />
+        <Unreachable
+          name="Which checks can run"
+          what="which checks can run"
+          error={error}
+          onRetry={retry}
+        />
       )}
       {!error && busy && !value && <Loading what="the analysis" />}
       {value && (
-        <ul className="divide-y divide-border/60">
+        <ul className="divide-y divide-line/60">
           <Row
             name={`Evidence reached · ${tierLabel(value.tier_reached) || "?"}`}
             available={true}
-            detail={`${value.checks_run.length} check${
+            line={`${value.checks_run.length} check${
               value.checks_run.length === 1 ? "" : "s"
             } ran on this workflow.`}
-          >
-            <details className="group mt-1">
-              <summary className="cursor-pointer list-none text-[12px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
-                <span className="inline-block w-3 group-open:hidden">▸</span>
-                <span className="hidden w-3 group-open:inline-block">▾</span>
-                The checks that ran
-              </summary>
-              <p className="mt-1 pl-3 text-[12px] text-dim">
+            why={
+              <p>
+                <span className="font-medium text-foreground/85">
+                  The checks that ran:{" "}
+                </span>
                 {value.checks_run.map(findingKindLabel).join(", ")}
               </p>
-            </details>
-          </Row>
+            }
+          />
           {value.unavailable_checks.length === 0 && (
             <Row
               name="Every detector tier"
               available={true}
-              detail="Nothing was withheld: every check the engine has ran."
+              line="Nothing was withheld: every check the engine has ran."
             />
           )}
           {value.unavailable_checks.map((gap) => (
@@ -339,19 +470,21 @@ function EvidenceGroup({ projectId }: { projectId: string }) {
               key={gap.tier}
               name={tierLabel(gap.tier) || "?"}
               available={false}
-              detail={gap.why}
-              needs={
+              line={`Needs ${gap.requires}.`}
+              why={
                 <>
-                  {gap.requires}. {gap.unlocked_by}
+                  <p>{gap.why}</p>
+                  <p>{gap.unlocked_by}</p>
+                  {gap.checks.length > 0 && (
+                    <ul className="flex flex-col gap-0.5">
+                      {gap.checks.map((c) => (
+                        <li key={c}>· {checkLabel(c)}</li>
+                      ))}
+                    </ul>
+                  )}
                 </>
               }
-            >
-              <ul className="mt-1 flex flex-col gap-0.5 pl-3 text-[12px] text-dim">
-                {gap.checks.map((c) => (
-                  <li key={c}>· {findingKindLabel(c)}</li>
-                ))}
-              </ul>
-            </Row>
+            />
           ))}
         </ul>
       )}
@@ -368,41 +501,62 @@ function ForecastGroup({ projectId }: { projectId: string }) {
       source="GET /api/projects/{id}/forecast/assumptions"
     >
       {error && (
-        <Unreachable what="the forecast's basis" error={error} onRetry={retry} />
+        <Unreachable
+          name="The forecast's basis"
+          what="the forecast's basis"
+          error={error}
+          onRetry={retry}
+        />
       )}
       {!error && busy && !value && <Loading what="the forecast's assumptions" />}
       {value && (
-        <ul className="divide-y divide-border/60">
+        <ul className="divide-y divide-line/60">
           <Row
             name="Seeded simulation of finish dates"
             available={true}
-            detail={
-              <>
-                {value.distribution_name ?? "The configured distribution"}
-                {value.default_iterations
-                  ? `, ${value.default_iterations} iterations by default`
-                  : ""}
-                . {value.disclaimer ?? ""}
-              </>
-            }
+            line={`${value.distribution_name ?? "The configured distribution"}${
+              value.default_iterations
+                ? `, ${value.default_iterations} iterations by default`
+                : ""
+            }.`}
+            why={value.disclaimer ? <p>{value.disclaimer}</p> : undefined}
           />
           <Row
             name="A calibrated probability"
             available={value.is_calibrated === true}
-            detail={
+            line={
               value.is_calibrated === true
                 ? "Calibrated against recorded outcomes."
-                : "The forecast is a real probability under its assumptions, but it has not been checked against any real outcome."
+                : value.what_would_calibrate_it
+                  ? `Needs ${lead(value.what_would_calibrate_it).charAt(0).toLowerCase()}${lead(value.what_would_calibrate_it).slice(1)}`
+                  : "Not stated by the API - that is itself a gap."
             }
-            needs={value.what_would_calibrate_it}
+            why={
+              value.is_calibrated === true ? undefined : (
+                <>
+                  <p>
+                    The forecast is a real probability under its assumptions,
+                    but it has not been checked against any real outcome.
+                  </p>
+                  {value.what_would_calibrate_it && (
+                    <p>
+                      <span className="font-medium text-foreground/85">
+                        What would calibrate it:{" "}
+                      </span>
+                      {value.what_would_calibrate_it}
+                    </p>
+                  )}
+                </>
+              )
+            }
           />
           {(value.not_modelled ?? []).map((n) => (
             <Row
               key={n.what}
               name={`Modelling of ${n.what}`}
               available={false}
-              detail={n.why_it_matters}
-              needs="a model extension; this is a known limit of the simulator, stated rather than papered over."
+              line={lead(n.why_it_matters) || "Not modelled by the simulator."}
+              why={hasMore(n.why_it_matters) ? <p>{n.why_it_matters}</p> : undefined}
             />
           ))}
         </ul>
@@ -434,13 +588,17 @@ function RolesGroup({
       source="GET /api/users/{me}/projects"
     >
       {!person && (
-        <p className="py-2 text-xs text-dim">
-          Your identity has not resolved yet, so whether roles bind you cannot
-          be read.
-        </p>
+        <ul>
+          <Row
+            name="Roles are enforced by the API"
+            available={null}
+            line="Your identity has not resolved yet, so whether roles bind you cannot be read."
+          />
+        </ul>
       )}
       {person && error && (
         <Unreachable
+          name="Roles are enforced by the API"
           what="whether roles are enforced"
           error={error}
           onRetry={retry}
@@ -448,22 +606,47 @@ function RolesGroup({
       )}
       {person && !error && busy && !value && <Loading what="your role" />}
       {value && (
-        <ul className="divide-y divide-border/60">
+        <ul className="divide-y divide-line/60">
           <Row
             name="Roles are enforced by the API"
             available={value.roles_enforced}
-            detail={value.note}
-            needs="a PROXY_SHARED_SECRET set on both the API server and the web app, so the identity header can be trusted. Until then a role is a label, not a permission."
+            line={lead(value.note) || (value.roles_enforced ? "Enforced." : "Advisory only.")}
+            why={
+              hasMore(value.note) || !value.roles_enforced ? (
+                <>
+                  {hasMore(value.note) && <p>{value.note}</p>}
+                  {!value.roles_enforced && (
+                    <p>
+                      <span className="font-medium text-foreground/85">
+                        Needs:{" "}
+                      </span>
+                      a PROXY_SHARED_SECRET set on both the API server and the
+                      web app, so the identity header can be trusted. Until then
+                      a role is a label, not a permission.
+                    </p>
+                  )}
+                </>
+              ) : undefined
+            }
           />
           <Row
             name="Your seat here"
             available={true}
-            detail={
+            line={
               isGuest
-                ? "You are the public read-only guest. Reading, analysing, forecasting, optimising and asking a what-if all work; anything that changes the workflow is refused by the API itself, not hidden by this page."
+                ? "You are the public read-only guest; the API refuses anything that changes the workflow."
                 : mine
                   ? `Signed in as ${person!.name}; your role on this project is ${roleLabel(mine.role).toLowerCase()}.`
                   : `Signed in as ${person!.name}; you are not a member of this project, so you can read and evaluate it but not change it.`
+            }
+            why={
+              isGuest ? (
+                <p>
+                  Reading, analysing, forecasting, optimising and asking a
+                  what-if all work. Anything that changes the workflow is
+                  refused by the API itself, not hidden by this page.
+                </p>
+              ) : undefined
             }
           />
         </ul>
@@ -484,7 +667,7 @@ export default function CapabilityPanel({
   isGuest: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-6">
       <AiGroup />
       <EvidenceGroup projectId={projectId} />
       <ForecastGroup projectId={projectId} />
@@ -511,13 +694,14 @@ export function CapabilityDialog(props: {
           What this build can and cannot do
         </Button>
       </DialogTrigger>
-      <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-3xl">
+      <DialogContent className="max-h-[85vh] overflow-y-auto bg-panel sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>What this build can and cannot do right now</DialogTitle>
-          <DialogDescription>
-            Read live from the API for this workflow. Where something is not
-            available, the row says what it needs. Where a source did not
-            answer, the row says that instead of guessing.
+          <DialogTitle className="text-[18px] font-semibold leading-tight">
+            What this build can and cannot do right now
+          </DialogTitle>
+          <DialogDescription className="text-[14px] text-dim">
+            Read live from the API for this workflow. What is not available
+            says what it needs; a source that did not answer says so.
           </DialogDescription>
         </DialogHeader>
         <CapabilityPanel {...props} />
