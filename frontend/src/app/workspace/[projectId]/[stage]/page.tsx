@@ -65,6 +65,9 @@ export default function WorkspaceStagePage() {
   // Bumped whenever a panel on the what-if stage saves a scenario, so the
   // list below it re-reads without the panels knowing about each other.
   const [scenarioRefresh, setScenarioRefresh] = useState(0);
+  // The task a reader clicked in the graph; the inspector in the rail shows
+  // it. Null when nothing is focused.
+  const [focusTask, setFocusTask] = useState<string | null>(null);
 
   const loadProject = useCallback(async () => {
     setBusy(true);
@@ -254,23 +257,38 @@ export default function WorkspaceStagePage() {
             </EmptyState>
           )}
           {analysis && (
-            <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
-              <div className="flex min-w-0 flex-1 flex-col gap-5">
-                <ErrorBoundary what="The dependency graph" resetKey={stage}>
-                  <DependencyGraph analysis={analysis} />
-                </ErrorBoundary>
-                <ErrorBoundary what="The findings panel" resetKey={stage}>
-                  <FindingsPanel analysis={analysis} />
-                </ErrorBoundary>
+            <div className="flex flex-col gap-6">
+              {/* The graph takes the whole main column: it is the one thing on
+                  this stage that needs the width (design brief §3). */}
+              <ErrorBoundary what="The dependency graph" resetKey={stage}>
+                <DependencyGraph
+                  analysis={analysis}
+                  selected={focusTask}
+                  onSelect={setFocusTask}
+                />
+              </ErrorBoundary>
+              <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+                <div className="flex min-w-0 flex-1 flex-col gap-5">
+                  <ErrorBoundary what="The findings panel" resetKey={stage}>
+                    <FindingsPanel analysis={analysis} />
+                  </ErrorBoundary>
+                </div>
+                <aside className="flex w-full shrink-0 flex-col gap-5 lg:w-80 lg:border-l lg:border-line lg:pl-5">
+                  <ErrorBoundary what="The summary" resetKey={stage}>
+                    <Headline analysis={analysis} />
+                  </ErrorBoundary>
+                  <ErrorBoundary what="The task inspector" resetKey={stage}>
+                    <TaskInspector
+                      analysis={analysis}
+                      taskKey={focusTask}
+                      onClear={() => setFocusTask(null)}
+                    />
+                  </ErrorBoundary>
+                  <ErrorBoundary what="The plain-language summary" resetKey={stage}>
+                    <Explainer projectId={project.id} />
+                  </ErrorBoundary>
+                </aside>
               </div>
-              <aside className="flex w-full shrink-0 flex-col gap-5 lg:w-72 lg:border-l lg:border-line lg:pl-5">
-                <ErrorBoundary what="The summary" resetKey={stage}>
-                  <Headline analysis={analysis} />
-                </ErrorBoundary>
-                <ErrorBoundary what="The plain-language summary" resetKey={stage}>
-                  <Explainer projectId={project.id} />
-                </ErrorBoundary>
-              </aside>
             </div>
           )}
         </Section>
@@ -395,6 +413,110 @@ export default function WorkspaceStagePage() {
         </Section>
       )}
     </WorkspaceShell>
+  );
+}
+
+const STATUS_WORDS: Record<string, string> = {
+  done: "Done",
+  in_progress: "In progress",
+  in_review: "In review",
+  blocked: "Blocked",
+  not_started: "Not started",
+};
+
+/**
+ * The task a reader clicked in the graph, with what the analysis already
+ * says about it: its schedule, its slack, its structural exposure, and every
+ * finding that names it. Nothing here is computed; every figure is the
+ * engine's, read from the analysis on screen.
+ */
+function TaskInspector({
+  analysis,
+  taskKey,
+  onClear,
+}: {
+  analysis: Analysis;
+  taskKey: string | null;
+  onClear: () => void;
+}) {
+  const task = taskKey ? analysis.tasks.find((t) => t.key === taskKey) : undefined;
+
+  if (!task) {
+    return (
+      <div className="rounded-2xl border border-dashed border-line px-5 py-4 text-[12px] text-dim">
+        Click a bar in the graph to inspect that task here.
+      </div>
+    );
+  }
+
+  const risk = analysis.risk.tasks.find((r) => r.task_key === task.key);
+  const named = analysis.findings.filter((f) => f.task_ids.includes(task.key));
+
+  return (
+    <div className="rounded-2xl border border-line bg-panel p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="font-mono text-[12px] text-dim">{task.key}</div>
+          <div className="text-[18px] font-semibold leading-tight">{task.name}</div>
+        </div>
+        <button
+          type="button"
+          onClick={onClear}
+          className="shrink-0 rounded-lg border border-line px-2 py-1 text-[12px] text-dim hover:text-foreground"
+          aria-label="Clear the selected task"
+        >
+          Clear
+        </button>
+      </div>
+
+      <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-2 text-[14px]">
+        <div>
+          <dt className="text-[12px] text-dim">Owner</dt>
+          <dd>{task.assignees.join(", ") || "Unassigned"}</dd>
+        </div>
+        <div>
+          <dt className="text-[12px] text-dim">Status</dt>
+          <dd>{STATUS_WORDS[task.status] ?? task.status}</dd>
+        </div>
+        <div>
+          <dt className="text-[12px] text-dim">Runs</dt>
+          <dd>
+            {task.start_date} to {task.end_date}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[12px] text-dim">Duration</dt>
+          <dd>{Math.round(task.duration * 10) / 10}d</dd>
+        </div>
+        <div>
+          <dt className="text-[12px] text-dim">Slack</dt>
+          <dd className={task.critical ? "font-semibold text-critical" : ""}>
+            {task.critical ? "None, zero-slack chain" : `${Math.round(task.slack)}d`}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[12px] text-dim">Structural exposure</dt>
+          <dd>{risk ? `${risk.score.toFixed(2)} · ${risk.band}` : "Not scored"}</dd>
+        </div>
+      </dl>
+
+      <div className="mt-4 border-t border-line pt-3">
+        <div className="text-[12px] text-dim">
+          {named.length === 0
+            ? "No finding names this task."
+            : `Named in ${named.length} ${named.length === 1 ? "finding" : "findings"}`}
+        </div>
+        {named.length > 0 && (
+          <ul className="mt-2 space-y-2">
+            {named.map((f) => (
+              <li key={`${f.kind}-${f.task_ids.join(",")}`} className="text-[14px]">
+                <span className="font-semibold">Do this:</span> {f.suggested_action}
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </div>
   );
 }
 

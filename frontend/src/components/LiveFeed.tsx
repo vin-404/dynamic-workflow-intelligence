@@ -618,10 +618,10 @@ export default function LiveFeed({
       {/* Hero and rail, the arrangement D-115 settled: the map takes the
           width because it is the only thing here that needs it, and the
           numbers go in the rail because they are what you glance at. */}
+      <DependencyGraph analysis={base} live={live} />
+
       <div className="flex flex-col gap-7 lg:flex-row lg:items-start">
         <div className="flex min-w-0 flex-1 flex-col gap-5">
-          <DependencyGraph analysis={base} live={live} />
-
           <Reconstruction
             derived={d}
             tier={frame.tier_reached}

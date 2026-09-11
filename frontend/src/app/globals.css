@@ -48,6 +48,13 @@
 
   --violet: #795cf7;
 
+  /* The zero-slack chain and nothing else: one warm colour, full opacity. */
+  --critical: #c2410c;
+  --on-critical: #ffffff;
+  /* Dependency edges and the day grid inside the timeline. */
+  --edge: #a9a8ba;
+  --grid: #ecebf3;
+
   --primary: #17172a;
   --primary-foreground: #ffffff;
 
@@ -91,6 +98,11 @@
 
     --violet: #a371f7;
 
+    --critical: #fb923c;
+    --on-critical: #0e1116;
+    --edge: #4d5560;
+    --grid: #232a35;
+
     --primary: #e6edf3;
     --primary-foreground: #0e1116;
 
@@ -124,6 +136,11 @@
   --severity-low: #3fb950;
 
   --violet: #a371f7;
+
+  --critical: #fb923c;
+  --on-critical: #0e1116;
+  --edge: #4d5560;
+  --grid: #232a35;
 
   --primary: #e6edf3;
   --primary-foreground: #0e1116;
@@ -196,6 +213,9 @@
   --color-amber: var(--amber);
   --color-green: var(--green);
   --color-violet: var(--violet);
+  --color-critical: var(--critical);
+  --color-on-critical: var(--on-critical);
+  --color-edge: var(--edge);
 
   --color-severity-high: var(--severity-high);
   --color-severity-medium: var(--severity-medium);
@@ -367,6 +387,11 @@
   --severity-low: #1a7f37;
 
   --violet: #795cf7;
+
+  --critical: #c2410c;
+  --on-critical: #ffffff;
+  --edge: #a9a8ba;
+  --grid: #ecebf3;
 
   color: #17172a !important;
   background: #f7f7fc !important;
