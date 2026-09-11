@@ -30,6 +30,11 @@ const result = await page.evaluate(() => {
     const overlap = a.x < b.x + b.w - 0.5 && b.x < a.x + a.w - 0.5 && a.y < b.y + b.h - 0.5 && b.y < a.y + a.h - 0.5;
     if (overlap) problems.push(`overlap: ${a.key} and ${b.key}`);
   }
+  const controls = document.querySelector(".react-flow__controls")?.getBoundingClientRect();
+  if (controls) for (const b of boxes) {
+    const hit = b.x < controls.right && controls.left < b.x + b.w && b.y < controls.bottom && controls.top < b.y + b.h;
+    if (hit) problems.push(`under the zoom controls: ${b.key}`);
+  }
   const graph = document.querySelector('[data-graph="workflow"] .flowtrace-graph')?.getBoundingClientRect();
   return { count: boxes.length, problems, graphWidth: graph?.width, graphHeight: graph?.height, graphRight: graph ? graph.right : null };
 });

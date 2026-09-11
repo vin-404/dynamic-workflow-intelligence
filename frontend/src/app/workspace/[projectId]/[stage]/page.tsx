@@ -19,6 +19,7 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 import AskPanel from "@/components/AskPanel";
 import Explainer from "@/components/Explainer";
 import FindingsPanel from "@/components/FindingsPanel";
+import BottleneckSummary from "@/components/BottleneckSummary";
 import OptimizePanel from "@/components/OptimizePanel";
 import RiskPanel from "@/components/RiskPanel";
 import VersionHistory from "@/components/VersionHistory";
@@ -268,16 +269,19 @@ export default function WorkspaceStagePage() {
                   onSelect={setFocusTask}
                 />
               </ErrorBoundary>
+
+              {/* Three headline figures and the one honesty line (§4). */}
+              <ErrorBoundary what="The summary" resetKey={stage}>
+                <BottleneckSummary analysis={analysis} />
+              </ErrorBoundary>
+
               <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
                 <div className="flex min-w-0 flex-1 flex-col gap-5">
                   <ErrorBoundary what="The findings panel" resetKey={stage}>
-                    <FindingsPanel analysis={analysis} />
+                    <FindingsPanel analysis={analysis} onFocusTask={setFocusTask} />
                   </ErrorBoundary>
                 </div>
-                <aside className="flex w-full shrink-0 flex-col gap-5 lg:w-80 lg:border-l lg:border-line lg:pl-5">
-                  <ErrorBoundary what="The summary" resetKey={stage}>
-                    <Headline analysis={analysis} />
-                  </ErrorBoundary>
+                <aside className="flex w-full shrink-0 flex-col gap-5 lg:w-80">
                   <ErrorBoundary what="The task inspector" resetKey={stage}>
                     <TaskInspector
                       analysis={analysis}
@@ -508,26 +512,6 @@ function TaskInspector({
             ))}
           </ul>
         )}
-      </div>
-    </div>
-  );
-}
-
-function Headline({ analysis }: { analysis: Analysis }) {
-  return (
-    <div className="rounded-2xl border border-[#E2E1EC] bg-white p-5">
-      <div className="text-[12px] uppercase tracking-[0.18em] text-[#68677A] font-semibold">Summary</div>
-      <div className="text-3xl font-semibold mt-3">{analysis.slip_days > 0 ? `+${analysis.slip_days}` : analysis.slip_days}d</div>
-      <div className="text-sm text-[#68677A] mt-1">projected slip</div>
-      <div className="grid grid-cols-2 gap-3 mt-5">
-        <div className="rounded-xl bg-[#F7F7FC] p-3">
-          <div className="text-lg font-semibold">{analysis.critical_path.length}</div>
-          <div className="text-xs text-[#68677A]">critical tasks</div>
-        </div>
-        <div className="rounded-xl bg-[#F7F7FC] p-3">
-          <div className="text-lg font-semibold">{analysis.findings.length}</div>
-          <div className="text-xs text-[#68677A]">findings</div>
-        </div>
       </div>
     </div>
   );

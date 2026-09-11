@@ -54,8 +54,8 @@ const DAY_W_DEFAULT = 30;
 const DAY_W_MIN = 4;
 const DAY_W_MAX = 56;
 
-/** Room at the right edge for a label drawn beside the last bar. */
-const RIGHT_PAD = 128;
+/** Room at the right edge for the zoom controls; labels are fitted separately. */
+const RIGHT_PAD = 64;
 const LANE_H = 40;
 const BAR_H = 28;
 const AXIS_H = 34;
@@ -497,9 +497,24 @@ export default function DependencyGraph({
 
   const dayWidth = useMemo(() => {
     if (!boxWidth) return DAY_W_DEFAULT;
+    // Fit the horizon, then shrink until the widest bar-plus-label ends
+    // before the right edge, where the zoom controls sit. A label drawn
+    // beside a late bar must never run under them.
     const usable = Math.max(160, boxWidth - GUTTER - RIGHT_PAD);
-    return Math.min(DAY_W_MAX, Math.max(DAY_W_MIN, usable / horizon));
-  }, [boxWidth, horizon]);
+    let dw = Math.min(DAY_W_MAX, Math.max(DAY_W_MIN, usable / horizon));
+    for (let pass = 0; pass < 4; pass += 1) {
+      const rightMost = Math.max(
+        horizon * dw,
+        ...analysis.tasks.map((task) => {
+          const durationWidth = Math.max(8, task.duration * dw);
+          return task.es * dw + labelLayout(task.key, task.name, durationWidth).footprint;
+        }),
+      );
+      if (rightMost <= usable) break;
+      dw = Math.max(DAY_W_MIN, dw * (usable / rightMost));
+    }
+    return dw;
+  }, [boxWidth, horizon, analysis.tasks]);
 
   const tickDays = useMemo(() => tickEvery(dayWidth), [dayWidth]);
 
