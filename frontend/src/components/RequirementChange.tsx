@@ -50,7 +50,6 @@ import {
   humanizeKey,
   listRequirements,
 } from "@/lib/api";
-import { severityText } from "@/lib/severity";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -67,6 +66,25 @@ import ImpactReport from "./ImpactReport";
 import RequirementHistory from "./RequirementHistory";
 import RequirementStaleness from "./RequirementStaleness";
 import { ErrorNote, Textarea, days } from "./ui";
+
+/* ------------------------------------------------------------- styling */
+
+/** The disclosure summary every panel on this stage uses. */
+const SUMMARY =
+  "flex cursor-pointer list-none items-center gap-1 text-[14px] text-accent marker:content-none hover:underline [&::-webkit-details-marker]:hidden";
+
+/** A small version / state chip. */
+const CHIP =
+  "inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] leading-4 whitespace-nowrap";
+
+function Caret() {
+  return (
+    <>
+      <span className="inline-block w-3 group-open:hidden">▸</span>
+      <span className="hidden w-3 group-open:inline-block">▾</span>
+    </>
+  );
+}
 
 /* --------------------------------------------------------------- shapes */
 
@@ -112,7 +130,7 @@ function RequirementRail({
 }) {
   return (
     <nav className="flex flex-col">
-      <h3 className="mb-2 border-b border-line pb-1 text-[12px] font-medium tracking-wider text-dim uppercase">
+      <h3 className="mb-2 border-b border-line pb-1 text-[12px] text-dim">
         Requirements — {requirements.length}
       </h3>
       <ul>
@@ -128,24 +146,35 @@ function RequirementRail({
                   active ? "bg-panel2" : "hover:bg-panel2",
                 )}
               >
-                <div className="flex items-baseline gap-2 px-1.5">
+                <div className="flex items-center gap-2 px-1.5">
                   {/* Selection is carried by the row's ground and weight, not
                       by the accent: a navigation affordance is not meaning,
                       and the accent is reserved for the critical path (D-117). */}
-                  <span className={cn("font-mono text-xs", active && "font-semibold")}>
+                  <span
+                    className={cn(
+                      "font-mono text-[12px]",
+                      active ? "font-semibold text-foreground" : "text-dim",
+                    )}
+                  >
                     {r.key}
                   </span>
-                  <span className="text-[12px] text-dim">
+                  <span className={cn(CHIP, "border-line bg-panel2 text-dim")}>
                     v{r.version_no}
                   </span>
                 </div>
-                <p className="px-1.5 text-sm leading-snug">{r.text}</p>
-                <p className="px-1.5 text-xs text-dim">
+                <p
+                  className={cn(
+                    "mt-1 px-1.5 text-[14px] leading-snug",
+                    active && "font-medium",
+                  )}
+                >
+                  {r.text}
+                </p>
+                <p className="mt-0.5 px-1.5 text-[12px] text-dim">
                   {r.consumed_by_count} consuming ·{" "}
                   <span
                     className={cn(
-                      r.completed_days_at_risk > 0 &&
-                        cn("font-medium", severityText("high")),
+                      r.completed_days_at_risk > 0 && "font-semibold text-critical",
                     )}
                   >
                     {days(r.completed_days_at_risk)} finished
@@ -157,7 +186,7 @@ function RequirementRail({
           );
         })}
       </ul>
-      <p className="mt-2 text-xs text-dim">
+      <p className="mt-3 text-[12px] text-dim">
         &ldquo;Finished&rdquo; is effort already completed that a change to that
         requirement would invalidate, assuming the change is material. Nothing
         here reads the requirement text.
@@ -182,7 +211,7 @@ function ScopeChips({
   const unscoped = scope.length === consumers.length;
   return (
     <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-xs text-dim">invalidates</span>
+      <span className="text-[12px] text-dim">invalidates</span>
       {consumers.map((key) => {
         const on = scope.includes(key);
         return (
@@ -198,7 +227,7 @@ function ScopeChips({
             className={cn(
               "rounded border px-1.5 py-px font-mono text-[12px] transition-colors",
               on
-                ? "border-severity-high/40 bg-severity-high/10 text-severity-high"
+                ? "border-critical/40 bg-critical/10 text-critical"
                 : "border-line text-dim line-through hover:border-foreground/40",
             )}
           >
@@ -211,7 +240,7 @@ function ScopeChips({
           reset to all
         </Button>
       )}
-      <span className="text-xs text-dim">
+      <span className="text-[12px] text-dim">
         {unscoped
           ? "— all consumers, unscoped"
           : `— ${consumers.length - scope.length} spared by your judgement`}
@@ -248,10 +277,10 @@ function ComparisonView({
   const options = comparison.options;
 
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-4 rounded-xl border border-line bg-panel p-5">
       <div>
-        <div className="mb-2 border-b border-line pb-1">
-          <h3 className="text-[12px] font-medium tracking-wider text-dim uppercase">
+        <div className="mb-2">
+          <h3 className="text-[18px] font-semibold">
             {tie
               ? `${options.length} wordings, the same cost`
               : `Cheapest: ${
@@ -266,7 +295,7 @@ function ComparisonView({
         {comparison.differences?.statement && (
           <p
             className={cn(
-              "border-l-2 py-2 pr-2 pl-3 text-xs",
+              "border-l-2 py-2 pr-2 pl-3 text-[14px]",
               tie
                 ? "border-severity-medium bg-severity-medium/5"
                 : "border-line",
@@ -276,11 +305,11 @@ function ComparisonView({
                 same, and that is the correct answer" — a bold restatement
                 above it just says the same thing twice. The heading carries
                 the label; this carries the reasoning. */}
-            <span className={tie ? "text-foreground/90" : "text-dim"}>
+            <span className={tie ? "text-foreground" : "text-dim"}>
               {comparison.differences.statement}
             </span>
             {tie && (
-              <span className="mt-1 block font-medium">
+              <span className="mt-1 block text-[14px] font-medium">
                 Use the <span className="font-mono">invalidates</span> chips on
                 a wording above to say which consumers it spares. Your judgement
                 about meaning, our arithmetic about cost.
@@ -293,13 +322,13 @@ function ComparisonView({
       <Table>
         <TableHeader>
           <TableRow>
-            <TableHead className="text-[12px] tracking-wider text-dim uppercase">
+            <TableHead className="text-[12px] font-medium text-dim">
               Measure
             </TableHead>
             {options.map((o) => (
               <TableHead
                 key={o.index}
-                className="text-right text-[12px] tracking-wider text-dim uppercase"
+                className="text-right text-[12px] font-medium text-dim"
               >
                 {o.label}
               </TableHead>
@@ -313,7 +342,7 @@ function ComparisonView({
               data-state={row.differs ? "selected" : undefined}
             >
               <TableCell className="whitespace-normal">
-                <span className="text-sm">{row.means}</span>
+                <span className="text-[14px]">{row.means}</span>
               </TableCell>
               {row.values.map((v, i) => (
                 <TableCell
@@ -329,13 +358,13 @@ function ComparisonView({
             </TableRow>
           ))}
           <TableRow>
-            <TableCell className="whitespace-normal text-sm text-dim">
+            <TableCell className="whitespace-normal text-[14px] text-dim">
               which consumers this wording is judged to invalidate
             </TableCell>
             {options.map((o) => (
               <TableCell
                 key={o.index}
-                className="text-right text-xs text-dim"
+                className="text-right text-[12px] text-dim"
               >
                 {o.scoped
                   ? o.invalidates.length
@@ -363,7 +392,7 @@ function ComparisonView({
       </div>
 
       {comparison.base && (
-        <p className="text-xs text-dim">
+        <p className="text-[12px] text-dim">
           Both were costed against version {base.version_no} of this workflow.{" "}
           {base.same_base_for_every_option
             ? "Every option used the same base, and the base's content hash is unchanged by asking."
@@ -559,17 +588,27 @@ export default function RequirementChange({
 
   if (requirements.length === 0) {
     return (
-      <div className="max-w-3xl">
-        <p className="text-sm font-medium">
+      <div className="max-w-3xl rounded-xl border border-line bg-panel p-5">
+        <p className="text-[18px] font-semibold">
           This workflow has no requirements to change
         </p>
-        <p className="mt-1 text-sm text-dim">
-          A requirement is a statement the work depends on, and a dependency
-          marked <span className="font-mono">consumes</span> is what makes a
-          task&rsquo;s output depend on it. Without either, there is nothing to
-          reason about: this report is graph reachability, not a reading of the
-          text. Add requirements on the build stage.
+        <p className="mt-1 text-[14px] text-dim">
+          Without a requirement, or a dependency that consumes one, there is
+          nothing to reason about. Add requirements on the build stage.
         </p>
+        <details className="group mt-2">
+          <summary className={SUMMARY}>
+            <Caret />
+            What a requirement is here
+          </summary>
+          <p className="mt-2 max-w-2xl border-l border-line pl-3 text-[12px] text-dim">
+            A requirement is a statement the work depends on, and a dependency
+            marked <span className="font-mono">consumes</span> is what makes a
+            task&rsquo;s output depend on it. Without either, there is nothing
+            to reason about: this report is graph reachability, not a reading
+            of the text. Add requirements on the build stage.
+          </p>
+        </details>
       </div>
     );
   }
@@ -593,10 +632,10 @@ export default function RequirementChange({
       <div className="flex min-w-0 flex-col gap-6">
         {!current ? (
           <div className="max-w-3xl">
-            <p className="text-sm font-medium">
+            <p className="text-[18px] font-semibold">
               Pick a requirement to see what changing it would cost
             </p>
-            <p className="mt-1 text-sm text-dim">
+            <p className="mt-1 text-[14px] text-dim">
               Every figure on this stage comes from the dependency graph — which
               tasks consumed the requirement, what they cost, and what follows
               them. Nothing reads the requirement text, and no language model is
@@ -607,17 +646,17 @@ export default function RequirementChange({
           <>
             {/* ---------------------------------------------- composer */}
             <section className="rounded-xl border border-line bg-panel p-5">
-              <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-1">
-                <h3 className="text-[12px] font-medium tracking-wider text-dim uppercase">
+              <div className="mb-3 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+                <h3 className="text-[18px] font-semibold">
                   Propose a new wording for {current.key}
                 </h3>
-                <span className="text-xs text-dim">
+                <span className="text-[12px] text-dim">
                   currently v{current.version_no} · consumed by{" "}
                   {consumers.length > 0 ? consumers.join(", ") : "nothing"}
                 </span>
               </div>
 
-              <p className="mb-2 text-sm text-dim">
+              <p className="mb-3 text-[14px] text-dim">
                 Now: <span className="text-foreground">{current.text}</span>
               </p>
 
@@ -625,7 +664,7 @@ export default function RequirementChange({
                 {wordings.map((w, i) => (
                   <div key={w.id} className="flex flex-col gap-1.5">
                     <div className="flex items-baseline justify-between gap-2">
-                      <span className="text-xs font-medium">
+                      <span className="text-[12px] font-medium text-dim">
                         {wordings.length > 1 ? `Option ${i + 1}` : "New wording"}
                       </span>
                       {wordings.length > 1 && (
@@ -667,14 +706,25 @@ export default function RequirementChange({
                 ))}
               </div>
 
-              <p className="mt-2 max-w-3xl text-xs text-dim">
-                The chips are the one judgement this system cannot make for you.
+              {/* The composer's one caveat line, and the reasoning behind it. */}
+              <p className="mt-3 text-[14px] text-dim">
                 Every consuming task is assumed invalidated unless you strike it
-                out. Striking one out says &ldquo;this wording does not change
-                what that work relied on&rdquo; — your judgement about meaning,
-                our arithmetic about cost. It is also the only thing that makes
-                two wordings cost differently.
+                out.
               </p>
+              <details className="group mt-1">
+                <summary className={SUMMARY}>
+                  <Caret />
+                  Why the chips are yours to set
+                </summary>
+                <p className="mt-2 max-w-2xl border-l border-line pl-3 text-[12px] text-dim">
+                  The chips are the one judgement this system cannot make for
+                  you. Every consuming task is assumed invalidated unless you
+                  strike it out. Striking one out says &ldquo;this wording does
+                  not change what that work relied on&rdquo; — your judgement
+                  about meaning, our arithmetic about cost. It is also the only
+                  thing that makes two wordings cost differently.
+                </p>
+              </details>
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 <Button
@@ -706,7 +756,7 @@ export default function RequirementChange({
                   <Plus data-icon="inline-start" />
                   Add another wording to compare
                 </Button>
-                <span className="text-xs text-dim">
+                <span className="text-[12px] text-dim">
                   Asking writes nothing. The base version&rsquo;s content hash
                   is returned before and after so you can check that rather than
                   trust it.
@@ -774,7 +824,7 @@ export default function RequirementChange({
                 />
                 {openedOption && (
                   <div className="border-t border-line pt-4">
-                    <p className="mb-3 text-[12px] font-medium tracking-wider text-dim uppercase">
+                    <p className="mb-3 text-[18px] font-semibold">
                       {openedOption.label} in full
                     </p>
                     <ErrorBoundary
@@ -812,15 +862,16 @@ export default function RequirementChange({
                     when no individual report is open. */}
                 {!openedOption &&
                   assumptionSentences(comparison.assumptions).length > 0 && (
-                    <section className="border-t border-line pt-2 text-xs">
-                      <div className="mb-1.5 font-medium tracking-wider text-dim uppercase">
+                    <details className="group rounded-xl border border-line bg-panel p-5">
+                      <summary className={SUMMARY}>
+                        <Caret />
                         What this comparison rests on
-                      </div>
-                      <dl className="flex flex-col gap-1.5">
+                      </summary>
+                      <dl className="mt-3 flex flex-col gap-2 border-l border-line pl-3 text-[12px]">
                         {assumptionSentences(comparison.assumptions).map(
                           ({ key, text }) => (
                             <div key={key}>
-                              <dt className="font-medium text-foreground/90">
+                              <dt className="font-medium text-foreground">
                                 {humanizeKey(key)}
                               </dt>
                               <dd className="text-dim">{text}</dd>
@@ -828,13 +879,13 @@ export default function RequirementChange({
                           ),
                         )}
                       </dl>
-                    </section>
+                    </details>
                   )}
               </>
             )}
 
             {applied && (
-              <p className="text-xs text-dim">
+              <p className="text-[14px] text-dim">
                 Workflow version {applied.new_version?.version_no ?? "?"} is now
                 current. The other stages still hold version{" "}
                 {workflow.version.version_no} until you reload the project.
@@ -842,7 +893,7 @@ export default function RequirementChange({
             )}
 
             {/* --------------------------------------------- provenance */}
-            <section className="border-t border-line pt-4">
+            <section>
               <ErrorBoundary
                 what="The requirement history"
                 resetKey={current.key}

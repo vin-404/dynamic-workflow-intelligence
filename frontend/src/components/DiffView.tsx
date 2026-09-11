@@ -3,23 +3,26 @@
 /**
  * The before/after diff — genuinely side by side.
  *
- * Used by both the what-if panel and the optimizer, because a hand-written
- * hypothetical and an optimizer candidate produce the same comparison payload
- * from the same engine - so they get the same view.
+ * Used by the what-if panel, the optimizer and the requirement replan,
+ * because a hand-written hypothetical, an optimizer candidate and a costed
+ * re-wording produce the same comparison payload from the same engine - so
+ * they get the same view.
  *
  * Every measurement the engine compares is one row of one three-column table:
  * before, after, delta. Not two stacked lists, and not a single column with
  * arrows in it. A row whose delta is zero is deliberately quiet and a row
  * that moved is highlighted, so the eye lands on what changed rather than on
  * the frame around it. The evidence - dates, directions, the task keys that
- * caused a count to move - sits on the row rather than behind a click.
+ * caused a count to move - sits on the row rather than behind a click. The
+ * critical path and the moved tasks keep the same shape: before on the left,
+ * after on the right.
  *
  * The immutability proof is at the bottom on purpose: it is not decoration.
  * "The original workflow remains unchanged" is a product claim, and this is
  * where a sceptical reader checks it.
  */
 
-import { ChevronRight, Check, TriangleAlert } from "lucide-react";
+import { Check, TriangleAlert } from "lucide-react";
 import { Comparison, SimulationResponse } from "@/lib/api";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -43,8 +46,11 @@ import { days } from "./ui";
 
 /** One inline icon size across every panel. */
 const ICON = "size-3.5 shrink-0";
-/** Column and section labels: small, quiet, upper. */
-const LABEL = "text-[12px] font-medium uppercase tracking-wider text-dim";
+/** Column and section labels: meta size, quiet. */
+const LABEL = "text-[12px] font-medium text-dim";
+/** The disclosure summary, the same on every stage. */
+const SUMMARY =
+  "flex cursor-pointer list-none items-center gap-1 text-[14px] text-accent marker:content-none hover:underline [&::-webkit-details-marker]:hidden";
 /**
  * A list whose length is the workflow's, not the diff's, scrolls in its own
  * box.
@@ -60,7 +66,7 @@ const LABEL = "text-[12px] font-medium uppercase tracking-wider text-dim";
  * answer.
  */
 const SCROLL =
-  "max-h-[24rem] overflow-y-auto overscroll-contain rounded-md border border-border/60";
+  "max-h-[24rem] overflow-y-auto overscroll-contain rounded-md border border-line/60";
 
 /**
  * Better, worse, or no change — in the three states `severity.ts` already
@@ -85,7 +91,7 @@ function signed(n: number): string {
 
 /* -------------------------------------------------------------- scaffolding */
 
-/** A heading and a hairline. No card, no shadow: type does the hierarchy. */
+/** A section title and its right-hand meta. No card, no shadow. */
 function Head({
   children,
   right,
@@ -94,10 +100,19 @@ function Head({
   right?: React.ReactNode;
 }) {
   return (
-    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1.5">
-      <h2 className="text-[13px] font-semibold tracking-tight">{children}</h2>
+    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+      <h2 className="text-[18px] font-semibold">{children}</h2>
       {right && <span className="text-[12px] text-dim">{right}</span>}
     </div>
+  );
+}
+
+function Caret() {
+  return (
+    <>
+      <span className="inline-block w-3 group-open:hidden">▸</span>
+      <span className="hidden w-3 group-open:inline-block">▾</span>
+    </>
   );
 }
 
@@ -110,15 +125,30 @@ function Reveal({
 }) {
   return (
     <details className="group mt-2">
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
-        <ChevronRight
-          className={cn(ICON, "transition-transform group-open:rotate-90")}
-          aria-hidden
-        />
+      <summary className={SUMMARY}>
+        <Caret />
         {summary}
       </summary>
-      <div className="mt-1.5 pl-4">{children}</div>
+      <div className="mt-2 pl-4">{children}</div>
     </details>
+  );
+}
+
+/** One side of a before | after pair. */
+function Side({
+  label,
+  children,
+  quiet,
+}: {
+  label: string;
+  children: React.ReactNode;
+  quiet?: boolean;
+}) {
+  return (
+    <div className="min-w-0 rounded-lg bg-panel2/60 p-3">
+      <p className={cn("mb-1", LABEL)}>{label}</p>
+      <div className={cn("text-[14px]", quiet && "text-dim")}>{children}</div>
+    </div>
   );
 }
 
@@ -139,9 +169,9 @@ function CompareTable({ rows }: { rows: MetricRow[] }) {
   return (
     /* Capped, so before/after/delta sit next to the measure they describe
        rather than at the far edge of a wide screen. */
-    <Table className="max-w-3xl text-[13px]">
+    <Table className="max-w-3xl text-[14px]">
       <TableHeader>
-        <TableRow className="border-border hover:bg-transparent">
+        <TableRow className="border-line hover:bg-transparent">
           <TableHead className={cn("h-7 px-2", LABEL)}>Measure</TableHead>
           <TableHead className={cn("h-7 w-24 px-2 text-right", LABEL)}>
             Before
@@ -161,7 +191,7 @@ function CompareTable({ rows }: { rows: MetricRow[] }) {
             /* The primitive's own highlight, so a changed row lifts and an
                unchanged one stays quiet. */
             data-state={r.changed ? "selected" : undefined}
-            className="border-border/50"
+            className="border-line/50"
           >
             <TableCell className="max-w-[22rem] px-2 py-1.5 align-top whitespace-normal">
               <span className={cn(!r.changed && "text-dim")}>{r.label}</span>
@@ -322,7 +352,7 @@ export default function DiffView({ result }: { result: SimulationResponse }) {
       {/* ------------------------------------------------ the comparison */}
       <section>
         <Head right={originLabel(result.origin)}>What this would do</Head>
-        <p className="mb-3 max-w-3xl text-sm">{result.summary}</p>
+        <p className="mb-3 max-w-3xl text-[14px]">{result.summary}</p>
         <CompareTable rows={rows} />
       </section>
 
@@ -341,81 +371,78 @@ export default function DiffView({ result }: { result: SimulationResponse }) {
             Which tasks move, and by how much
           </Head>
           <div className={cn(SCROLL, "max-w-4xl")}>
-          <Table className="text-[13px]">
-            <TableHeader>
-              <TableRow className="border-border hover:bg-transparent">
-                <TableHead className={cn("h-7 px-2", LABEL)}>Task</TableHead>
-                <TableHead className={cn("h-7 px-2", LABEL)}>Name</TableHead>
-                <TableHead className={cn("h-7 w-20 px-2 text-right", LABEL)}>
-                  Before
-                </TableHead>
-                <TableHead className={cn("h-7 w-20 px-2 text-right", LABEL)}>
-                  After
-                </TableHead>
-                <TableHead className={cn("h-7 w-20 px-2 text-right", LABEL)}>
-                  Delta
-                </TableHead>
-                <TableHead className={cn("h-7 w-24 px-2 text-right", LABEL)}>
-                  Slack used
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {c.tasks_moved.map((m) => (
-                <TableRow
-                  key={m.task}
-                  data-state={m.delta_days !== 0 ? "selected" : undefined}
-                  className="border-border/50"
-                >
-                  <TableCell className="px-2 py-1 font-mono text-xs text-dim">
-                    {m.task}
-                  </TableCell>
-                  <TableCell className="max-w-[18rem] truncate px-2 py-1">
-                    {m.name}
-                  </TableCell>
-                  <TableCell className="px-2 py-1 text-right text-dim">
-                    day {Math.round(m.from_day)}
-                  </TableCell>
-                  <TableCell className="px-2 py-1 text-right font-medium">
-                    day {Math.round(m.to_day)}
-                  </TableCell>
-                  <TableCell
-                    className={cn(
-                      "px-2 py-1 text-right",
-                      deltaTone(m.delta_days),
-                    )}
-                  >
-                    {days(m.delta_days, true)}
-                  </TableCell>
-                  <TableCell className="px-2 py-1 text-right text-dim">
-                    {c.slack_consumed[m.task]
-                      ? days(c.slack_consumed[m.task])
-                      : "—"}
-                  </TableCell>
+            <Table className="text-[14px]">
+              <TableHeader>
+                <TableRow className="border-line hover:bg-transparent">
+                  <TableHead className={cn("h-7 px-2", LABEL)}>Task</TableHead>
+                  <TableHead className={cn("h-7 w-20 px-2 text-right", LABEL)}>
+                    Before
+                  </TableHead>
+                  <TableHead className={cn("h-7 w-20 px-2 text-right", LABEL)}>
+                    After
+                  </TableHead>
+                  <TableHead className={cn("h-7 w-20 px-2 text-right", LABEL)}>
+                    Delta
+                  </TableHead>
+                  <TableHead className={cn("h-7 w-24 px-2 text-right", LABEL)}>
+                    Slack used
+                  </TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {c.tasks_moved.map((m) => (
+                  <TableRow
+                    key={m.task}
+                    data-state={m.delta_days !== 0 ? "selected" : undefined}
+                    className="border-line/50"
+                  >
+                    <TableCell className="px-2 py-1 align-top whitespace-normal">
+                      <span className="mr-2 font-mono text-[12px] text-dim">
+                        {m.task}
+                      </span>
+                      {m.name}
+                    </TableCell>
+                    <TableCell className="px-2 py-1 text-right align-top text-dim">
+                      day {Math.round(m.from_day)}
+                    </TableCell>
+                    <TableCell className="px-2 py-1 text-right align-top font-medium">
+                      day {Math.round(m.to_day)}
+                    </TableCell>
+                    <TableCell
+                      className={cn(
+                        "px-2 py-1 text-right align-top",
+                        deltaTone(m.delta_days),
+                      )}
+                    >
+                      {days(m.delta_days, true)}
+                    </TableCell>
+                    <TableCell className="px-2 py-1 text-right align-top text-dim">
+                      {c.slack_consumed[m.task]
+                        ? days(c.slack_consumed[m.task])
+                        : "—"}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           </div>
         </section>
       )}
 
       {/* ------------------------------------------------ the two chains */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2 lg:gap-8">
-        <CriticalPathCompare comparison={c} />
-        <StructureCompare comparison={c} />
-      </div>
+      <CriticalPathCompare comparison={c} />
+      <StructureCompare comparison={c} />
 
       <FindingsCompare comparison={c} />
 
       {result.after.resource_unavailability?.is_approximation && (
         <section>
           <Head>How unavailability was modelled</Head>
-          <p className="mb-1.5 max-w-3xl text-xs text-dim">
+          <p className="mb-1.5 max-w-3xl text-[12px] text-dim">
             {result.after.resource_unavailability.method}
           </p>
           <div className={cn(SCROLL, "max-w-3xl px-2.5 py-1.5")}>
-            <ul className="flex flex-col gap-0.5 text-xs">
+            <ul className="flex flex-col gap-0.5 text-[12px]">
               {result.after.resource_unavailability.adjustments?.map((a) => (
                 <li key={a.task}>
                   <span className="font-mono text-dim">{a.task}</span>{" "}
@@ -455,11 +482,11 @@ export default function DiffView({ result }: { result: SimulationResponse }) {
         >
           Is the original workflow untouched?
         </Head>
-        <p className="mb-2 text-xs text-dim">
+        <p className="mb-2 text-[14px] text-dim">
           The base version&apos;s content hash, before and after this
           evaluation.
         </p>
-        <dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-1 rounded-md bg-muted px-2.5 py-2 font-mono text-[12px]">
+        <dl className="grid grid-cols-[7.5rem_1fr] gap-x-3 gap-y-1 rounded-md bg-panel2 px-2.5 py-2 font-mono text-[12px]">
           <dt className="text-dim">before</dt>
           <dd className="truncate">{result.base_version_hash.slice(0, 32)}…</dd>
           <dt className="text-dim">after</dt>
@@ -501,20 +528,20 @@ function CriticalPathCompare({ comparison }: { comparison: Comparison }) {
   return (
     <section>
       <Head right={cp.changed ? "re-routed" : "unchanged"}>Critical path</Head>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+        <Side label="before" quiet>
+          <span className="font-mono text-[12px] break-words">
+            {cp.before.join(" → ")}
+          </span>
+        </Side>
+        <Side label="after" quiet={!cp.changed}>
+          <span className="font-mono text-[12px] break-words">
+            {cp.after.join(" → ")}
+          </span>
+        </Side>
+      </div>
       {cp.changed ? (
-        <div className="flex flex-col gap-1.5 text-xs">
-          <div className="grid grid-cols-[3.5rem_1fr] gap-x-2">
-            <span className="text-dim">before</span>
-            <span className="font-mono break-words text-dim">
-              {cp.before.join(" → ")}
-            </span>
-          </div>
-          <div className="grid grid-cols-[3.5rem_1fr] gap-x-2">
-            <span className="text-dim">after</span>
-            <span className="font-mono break-words">
-              {cp.after.join(" → ")}
-            </span>
-          </div>
+        <div className="mt-2 flex flex-col gap-0.5 text-[12px]">
           {cp.newly_critical.length > 0 && (
             <p className={bandText("high")}>
               newly critical: {cp.newly_critical.join(", ")}
@@ -527,11 +554,8 @@ function CriticalPathCompare({ comparison }: { comparison: Comparison }) {
           )}
         </div>
       ) : (
-        <p className="text-xs text-dim">
-          Unchanged:{" "}
-          <span className="font-mono break-words">
-            {cp.before.join(" → ")}
-          </span>
+        <p className="mt-2 text-[12px] text-dim">
+          Unchanged: the same zero-slack chain before and after.
         </p>
       )}
     </section>
@@ -572,7 +596,7 @@ function StructureCompare({ comparison }: { comparison: Comparison }) {
         Structure and scope
       </Head>
       {lines.length > 0 ? (
-        <dl className="grid grid-cols-[9.5rem_1fr] gap-x-3 gap-y-1 text-xs">
+        <dl className="grid grid-cols-[9.5rem_1fr] gap-x-3 gap-y-1 text-[12px]">
           {lines.map(([k, v]) => (
             <div key={k} className="col-span-2 grid grid-cols-subgrid">
               <dt className="text-dim">{k}</dt>
@@ -581,12 +605,12 @@ function StructureCompare({ comparison }: { comparison: Comparison }) {
           ))}
         </dl>
       ) : (
-        <p className="text-xs text-dim">
+        <p className="text-[14px] text-dim">
           The same tasks and the same dependencies, in the same shape.
         </p>
       )}
       {scope && (
-        <p className={cn("mt-2 max-w-prose text-xs", bandText("moderate"))}>
+        <p className={cn("mt-2 max-w-prose text-[14px]", bandText("moderate"))}>
           This changes how much work there is, not just how it is arranged.
           That is a scope decision.
         </p>
@@ -603,13 +627,10 @@ function FindingsCompare({ comparison }: { comparison: Comparison }) {
       <Head right={`${f.before_count} → ${f.after_count}`}>
         Findings, before and after
       </Head>
-      <div className="grid grid-cols-1 gap-x-8 gap-y-4 sm:grid-cols-2">
-        {f.removed.length > 0 && (
-          <div>
-            <div className={cn("mb-1", LABEL, bandText("low"))}>
-              {f.removed.length} resolved
-            </div>
-            <ul className="flex flex-col gap-0.5 text-xs">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Side label={`${f.removed.length} resolved`}>
+          {f.removed.length > 0 ? (
+            <ul className="flex flex-col gap-0.5 text-[12px]">
               {f.removed.map((x, i) => (
                 <li key={i} className="text-dim">
                   {findingKindLabel(x.kind)} on{" "}
@@ -619,14 +640,13 @@ function FindingsCompare({ comparison }: { comparison: Comparison }) {
                 </li>
               ))}
             </ul>
-          </div>
-        )}
-        {f.created.length > 0 && (
-          <div>
-            <div className={cn("mb-1", LABEL, bandText("high"))}>
-              {f.created.length} newly appearing
-            </div>
-            <ul className="flex flex-col gap-0.5 text-xs">
+          ) : (
+            <p className="text-[12px] text-dim">none</p>
+          )}
+        </Side>
+        <Side label={`${f.created.length} newly appearing`}>
+          {f.created.length > 0 ? (
+            <ul className="flex flex-col gap-0.5 text-[12px]">
               {f.created.map((x, i) => (
                 <li key={i} className="text-dim">
                   {findingKindLabel(x.kind)} on{" "}
@@ -636,8 +656,10 @@ function FindingsCompare({ comparison }: { comparison: Comparison }) {
                 </li>
               ))}
             </ul>
-          </div>
-        )}
+          ) : (
+            <p className="text-[12px] text-dim">none</p>
+          )}
+        </Side>
       </div>
     </section>
   );

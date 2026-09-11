@@ -43,11 +43,15 @@ import { ErrorNote, Textarea } from "./ui";
 
 const ICON = "size-3.5 shrink-0";
 const LABEL = "text-[12px] font-medium uppercase tracking-wider text-dim";
-/** A constraint id on record, not a status - the same chip the builder uses. */
+/**
+ * A constraint on record, not a status - the same chip the builder draws
+ * beside a task ("Mandatory", "Cannot be split"): bordered, on the inset
+ * surface, in the display map's words. One chip, two panels.
+ */
 const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
+  "inline-flex items-center rounded border border-line bg-panel2 px-1.5 py-0.5 text-[12px] text-dim";
 const CONTROL =
-  "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm " +
+  "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-[14px] " +
   "outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 " +
   "focus-visible:ring-ring/50 dark:bg-input/30";
 
@@ -220,8 +224,9 @@ export default function ConstraintPanel({
 
   return (
     <section className="flex flex-col gap-4">
-      <div className="mb-1 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-        <h2 className="text-sm font-medium">What may not be optimised away</h2>
+      {/* The same heading the builder's sections use: 18px, a count, a note. */}
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+        <h2 className="text-[18px] font-semibold">What may not be optimised away</h2>
         <span className="font-mono text-[12px] text-dim">
           {workflow.constraints.length}
         </span>
@@ -243,27 +248,30 @@ export default function ConstraintPanel({
 
       {/* ------------------------------------------------------ on record */}
       {workflow.constraints.length === 0 ? (
-        <p className="text-sm text-dim">
+        <p className="max-w-2xl text-[14px] text-dim">
           No constraints on record. Until one is declared, every task can be
           removed, split or reassigned by a proposal, and every dependency can
           be dropped.
         </p>
       ) : (
-        <ul className="divide-y divide-border/60 border-y border-border/60">
+        <ul className="divide-y divide-line/60 border-y border-line/60">
+          {/* One row per constraint: the kind as a chip, the target's key and
+              name in body type, then the reason - which is the feature - given
+              the rest of the line, wrapping under the chip when it runs long. */}
           {workflow.constraints.map((c) => (
             <li
               key={`${c.kind}:${c.target}`}
-              className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2 text-sm"
+              className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2 text-[14px]"
             >
               <span className={TOKEN} title={c.kind}>
                 {constraintKindLabel(c.kind)}
               </span>
-              <span className="font-mono text-xs">{c.target}</span>
-              <span className="text-[13px]">{describeTarget(c, workflow)}</span>
+              <span className="font-mono text-[12px] text-dim">{c.target}</span>
+              <span className="text-[14px]">{describeTarget(c, workflow)}</span>
               {c.value !== null && (
-                <span className="text-xs text-dim">≥ {c.value} days</span>
+                <span className="text-[12px] text-dim">≥ {c.value} days</span>
               )}
-              <span className="min-w-0 flex-1 text-xs text-dim">
+              <span className="min-w-[16rem] flex-1 text-[12px] text-dim">
                 {c.reason || "no reason recorded"}
               </span>
               <button
@@ -376,7 +384,7 @@ export default function ConstraintPanel({
           )}
         </div>
 
-        <p className="max-w-3xl text-xs text-dim">
+        <p className="max-w-3xl text-[12px] text-dim">
           <span className={cn(TOKEN, "mr-1.5")} title={spec.kind}>
             {constraintKindLabel(spec.kind)}
           </span>

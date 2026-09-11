@@ -49,6 +49,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { roleLabel } from "@/lib/display";
 import {
   Select,
   SelectContent,
@@ -296,8 +297,9 @@ export function MemberList({ projectId }: { projectId: string }) {
 
   return (
     <section>
-      <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-        <h2 className="text-sm font-medium">Who is collaborating</h2>
+      {/* The same heading the builder's sections use: 18px and a count. */}
+      <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+        <h2 className="text-[18px] font-semibold">Who is collaborating</h2>
         <span className="font-mono text-[12px] text-dim">{members.length}</span>
       </div>
 
@@ -318,27 +320,27 @@ export function MemberList({ projectId }: { projectId: string }) {
       )}
 
       {members.length === 0 ? (
-        <p className="mt-2 text-sm text-dim">Nobody yet.</p>
+        <p className="mt-2 text-[14px] text-dim">Nobody yet.</p>
       ) : (
         <ul className="mt-2">
+          {/* Name, email, role, remove - as grid columns, so a long name or
+              address wraps in its column instead of being clipped. */}
           {members.map((m) => (
             <li
               key={m.user_id}
-              className="flex items-baseline gap-3 border-b border-line/50 py-1 text-sm"
+              className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)_auto_auto] items-baseline gap-3 border-b border-line/50 py-1 text-[14px]"
             >
-              <span className="w-48 shrink-0 truncate">
-                {m.name || m.email}
-              </span>
-              <span className="flex-1 truncate font-mono text-[12px] text-dim">
+              <span className="break-words">{m.name || m.email}</span>
+              <span className="font-mono text-[12px] break-all text-dim">
                 {m.email}
               </span>
               <span
                 className={cn(
-                  "shrink-0 font-mono text-[12px]",
+                  "text-[12px]",
                   m.role === "owner" ? "text-foreground" : "text-dim",
                 )}
               >
-                {m.role}
+                {roleLabel(m.role)}
               </span>
               <button
                 type="button"
@@ -370,9 +372,9 @@ export function MemberList({ projectId }: { projectId: string }) {
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="owner">owner</SelectItem>
-                <SelectItem value="editor">editor</SelectItem>
-                <SelectItem value="viewer">viewer</SelectItem>
+                <SelectItem value="owner">{roleLabel("owner")}</SelectItem>
+                <SelectItem value="editor">{roleLabel("editor")}</SelectItem>
+                <SelectItem value="viewer">{roleLabel("viewer")}</SelectItem>
               </SelectGroup>
             </SelectContent>
           </Select>

@@ -15,17 +15,26 @@
  * one whole simulated day at a time, and the pace comes from the replay's own
  * speed rather than from a `requestAnimationFrame` loop of ours.
  *
- * Everything here is laid out so nothing reflows when a digit changes. Days
- * and dates sit in fixed slots, the state word has a fixed width, and the
- * whole element is one stable subtree - `LiveFeed` never keys or remounts it,
+ * Presentation (design brief §3, last bullet): the calendar date is the one
+ * headline figure of its panel, the simulated day number sits under it in
+ * words ("Simulated day 7"), and the state is a plain-word chip - "Running",
+ * "Paused", "Ended" - never a shouted label. Everything is laid out so nothing
+ * reflows when a digit changes, and `LiveFeed` never keys or remounts it,
  * because a clock that remounts is a clock that flickers.
  */
 
 import { Pause, Play, Square } from "lucide-react";
+import { calendarDate } from "@/lib/display";
 import { cn } from "@/lib/utils";
 
 /** The three things a replay can be doing. Not a severity; not coloured. */
 export type ClockState = "running" | "paused" | "ended";
+
+const STATE_WORD: Record<ClockState, string> = {
+  running: "Running",
+  paused: "Paused",
+  ended: "Ended",
+};
 
 export default function Clock({
   simDay,
@@ -51,8 +60,10 @@ export default function Clock({
   speed?: number;
 }) {
   const Icon = state === "running" ? Play : state === "paused" ? Pause : Square;
-  const word =
-    state === "running" ? "running" : state === "paused" ? "paused" : "ended";
+  const day = Math.round(simDay);
+  const date = calendarDate(simDate);
+  const horizon = horizonDay === undefined ? null : Math.round(horizonDay);
+  const horizonText = calendarDate(horizonDate);
 
   const span =
     horizonDay === undefined ? null : Math.max(1e-9, horizonDay - startDay);
@@ -63,26 +74,44 @@ export default function Clock({
         ? 0
         : ((simDay - startDay) / span) * 100;
 
+  /* The pace rides on the chip as hover text rather than as another line:
+     the speed control beside the clock already says it in full. */
+  const pace =
+    secondsPerDay !== undefined
+      ? `${formatPace(secondsPerDay)}${speed !== undefined ? ` · ${speed} simulated days per real minute` : ""}`
+      : undefined;
+
   return (
-    <div className="flex flex-col gap-1.5">
-      <div className="flex items-baseline gap-3">
+    <div className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {/* The date is the headline because it is what a person reads; the
-            day number is the engine's unit and rides beside it in mono. */}
-        <div className="text-2xl leading-none font-semibold">
-          {simDate ?? `day ${Math.round(simDay)}`}
+            engine's unit - the day number - is the line under it. */}
+        <div className="text-[36px] font-semibold leading-none tracking-[-0.02em]">
+          {date ?? `Day ${day}`}
         </div>
-        <div className="font-mono text-sm text-muted-foreground">
-          d{Math.round(simDay * 10) / 10}
-        </div>
-        <div
+        <span
+          title={pace}
           className={cn(
-            "flex items-center gap-1 text-[12px] tracking-wide uppercase",
-            state === "running" ? "text-foreground" : "text-muted-foreground",
+            "inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-[12px] font-medium",
+            state === "running"
+              ? "border-accent/30 bg-accent/10 text-accent"
+              : "border-line bg-panel2 text-dim",
           )}
         >
           <Icon className="size-3" aria-hidden />
-          {word}
-        </div>
+          {STATE_WORD[state]}
+        </span>
+      </div>
+
+      <div className="text-[14px]">
+        Simulated day {day}
+        {horizon !== null && (
+          <span className="text-dim">
+            {" "}
+            of {Math.round(startDay)}&ndash;{horizon}
+            {horizonText ? ` · the window ends ${horizonText}` : ""}
+          </span>
+        )}
       </div>
 
       {/* Progress through the replay, not progress of the project. Labelled
@@ -100,20 +129,6 @@ export default function Clock({
           className="h-full bg-foreground/40 transition-[width] duration-200 ease-linear motion-reduce:transition-none"
           style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
         />
-      </div>
-
-      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[12px] text-muted-foreground">
-        <span>
-          simulated window d{Math.round(startDay)}&ndash;d
-          {horizonDay === undefined ? "?" : Math.round(horizonDay)}
-          {horizonDate ? ` · ends ${horizonDate}` : ""}
-        </span>
-        {secondsPerDay !== undefined && (
-          <span className="font-mono">
-            {formatPace(secondsPerDay)}
-            {speed !== undefined ? ` · speed ${speed} sim-days/min` : ""}
-          </span>
-        )}
       </div>
     </div>
   );
@@ -133,4 +148,18 @@ export function formatPace(secondsPerDay: number): string {
   }
   const perSecond = Math.round((1 / secondsPerDay) * 10) / 10;
   return `${perSecond} simulated days a second`;
+}
+
+/**
+ * The same pace, short enough for a control that must not clip at 1280px:
+ * "1 day every 4s", "10 days a second". The full sentence goes in the
+ * control's title.
+ */
+export function shortPace(secondsPerDay: number): string {
+  if (secondsPerDay >= 1) {
+    const s = Math.round(secondsPerDay * 10) / 10;
+    return `1 day every ${s}s`;
+  }
+  const perSecond = Math.round((1 / secondsPerDay) * 10) / 10;
+  return `${perSecond} days a second`;
 }

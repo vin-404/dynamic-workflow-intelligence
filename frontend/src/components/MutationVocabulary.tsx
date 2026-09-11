@@ -27,8 +27,12 @@ import { humanize, mutationKindLabel } from "@/lib/display";
 type Vocabulary = { closed: boolean; note: string; kinds: MutationKindSpec[] };
 
 const ICON = "size-3.5 shrink-0";
-const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
+/** A kind, named through the display map: a chip, not an engine token. */
+const CHIP = "rounded border border-line bg-panel2 px-1.5 py-0.5 text-[12px]";
+/** The one disclosure style on this stage: a link in the accent, no marker. */
+const SUMMARY =
+  "inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-accent " +
+  "marker:content-none hover:underline [&::-webkit-details-marker]:hidden";
 
 /** Payload field names as words, lower-case so they read on from "optional". */
 function fieldWords(fields: string[]): string {
@@ -112,7 +116,7 @@ export default function MutationVocabulary({
 
   return (
     <details className={cn("group", className)}>
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
+      <summary className={SUMMARY}>
         <ChevronRight
           className={cn(ICON, "transition-transform group-open:rotate-90")}
           aria-hidden
@@ -131,7 +135,7 @@ export default function MutationVocabulary({
             >
               <span
                 className={cn(
-                  TOKEN,
+                  CHIP,
                   marked.has(k.kind) ? "text-foreground" : "text-dim",
                 )}
                 title={k.kind}

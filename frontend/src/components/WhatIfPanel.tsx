@@ -35,7 +35,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { describeMutation } from "@/lib/display";
+import { constraintKindLabel, describeMutation } from "@/lib/display";
 import DiffView from "./DiffView";
 import MutationVocabulary from "./MutationVocabulary";
 import { ErrorNote } from "./ui";
@@ -43,9 +43,12 @@ import { ErrorNote } from "./ui";
 /** One inline icon size across every panel. */
 const ICON = "size-3.5 shrink-0";
 const LABEL = "text-[12px] font-medium uppercase tracking-wider text-dim";
+/** A constraint's kind, named through the display map: a chip, not a token. */
+const CHIP =
+  "rounded border border-line bg-panel2 px-1.5 py-0.5 text-[12px] text-foreground";
 /** A native control that matches the shadcn `Input` it sits beside. */
 const CONTROL =
-  "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-sm " +
+  "h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-[14px] " +
   "outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 " +
   "focus-visible:ring-ring/50 dark:bg-input/30";
 
@@ -172,14 +175,17 @@ export default function WhatIfPanel({
   return (
     <div className="flex flex-col gap-6">
       <section>
-        <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1.5">
-          <h2 className="text-[13px] font-semibold tracking-tight">
-            Ask a hypothetical
-          </h2>
+        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+          <h2 className="text-[18px] font-semibold">Ask a hypothetical</h2>
           <span className="text-[12px] text-dim">
             {workflow.tasks.length} tasks · {workflow.resources.length} resources
           </span>
         </div>
+        {/* The panel's one caveat, always visible. */}
+        <p className="mb-3 text-[12px] text-dim">
+          Each question is one kind of change from a closed set, checked
+          before it runs against a copy of the workflow.
+        </p>
 
         <RecipeForm
           workflow={workflow}
@@ -203,11 +209,11 @@ export default function WhatIfPanel({
             <div className="mb-1.5 text-[12px] text-dim">
               These changes, in order — nothing is written to your workflow:
             </div>
-            <ol className="mb-3 max-w-3xl divide-y divide-border/60 border-y border-border/60">
+            <ol className="mb-3 max-w-3xl divide-y divide-line border-y border-line">
               {pending.map((p, i) => (
                 <li
                   key={i}
-                  className="flex items-center gap-2 py-1 text-[13px]"
+                  className="flex items-center gap-2 py-1 text-[14px]"
                 >
                   <span className="w-4 shrink-0 text-right text-[12px] text-dim">
                     {i + 1}
@@ -243,7 +249,7 @@ export default function WhatIfPanel({
               >
                 Clear
               </Button>
-              <label className="ml-1 flex items-center gap-1.5 text-xs text-dim">
+              <label className="ml-1 flex items-center gap-1.5 text-[12px] text-dim">
                 <input
                   type="checkbox"
                   checked={keep}
@@ -258,7 +264,7 @@ export default function WhatIfPanel({
       </section>
 
       {busy && (
-        <div className="flex items-center gap-1.5 text-xs text-dim">
+        <div className="flex items-center gap-1.5 text-[12px] text-dim">
           <LoaderCircle className={cn(ICON, "animate-spin")} aria-hidden />
           Evaluating against an in-memory copy…
         </div>
@@ -268,16 +274,16 @@ export default function WhatIfPanel({
         <ErrorNote hint={error.hint} requestId={error.requestId}>
           <p>{error.userMessage}</p>
           {error.constraint && (
-            <p className="mt-2 flex flex-wrap items-baseline gap-x-2 text-xs">
-              <span className="rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]">
-                {error.constraint.constraint}
+            <p className="mt-2 flex flex-wrap items-baseline gap-x-2 text-[12px]">
+              <span className={CHIP}>
+                {constraintKindLabel(error.constraint.constraint)}
               </span>
               <span className="text-dim">
                 {error.constraint.constraint_reason}
               </span>
             </p>
           )}
-          <p className="mt-2 text-xs text-dim">
+          <p className="mt-2 text-[12px] text-dim">
             Nothing was changed. A refusal is the system declining to model
             something it has been told is not allowed.
           </p>

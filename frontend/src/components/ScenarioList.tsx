@@ -28,9 +28,16 @@
  *
  * Optimizer candidates are the exception to "list everything": one search
  * persists up to forty of them, so after two searches they would bury every
- * what-if and replan. They are counted in the header and collapsed behind a
- * disclosure that says how many there are - hidden from the eye, never from
- * the count - and their diffs are computed only once they are shown.
+ * what-if and replan. Authored scenarios are listed first; the candidates are
+ * counted in the header and collapsed under one row that says how many there
+ * are - hidden from the eye, never from the count - and their diffs are
+ * computed only once that row is opened.
+ *
+ * Presentation (design brief §4, "What if"): a row leads with the name the
+ * user gave, then the engine's finish-date effect in colour, then the typed
+ * changes said in the product's words through `describeMutation`. The
+ * engine's own `describes` sentences are still on the page, inside the
+ * opened row, so nothing the API said is dropped.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -48,8 +55,12 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { bandClasses, bandText } from "@/lib/severity";
-import { originLabel, scenarioStatusLabel } from "@/lib/display";
+import { bandClasses } from "@/lib/severity";
+import {
+  describeMutation,
+  originLabel,
+  scenarioStatusLabel,
+} from "@/lib/display";
 import { cn } from "@/lib/utils";
 import When from "@/components/When";
 import DiffView from "./DiffView";
@@ -57,9 +68,13 @@ import ErrorBoundary from "./ErrorBoundary";
 import { ErrorNote, days } from "./ui";
 
 const ICON = "size-3.5 shrink-0";
-/** An identifier on record - an origin, a kind - not a status. */
-const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
+/** An identifier on record - an origin - named through the display map. */
+const CHIP =
+  "rounded border border-line bg-panel2 px-1.5 py-0.5 text-[12px] text-dim";
+/** The one disclosure style on this stage: a link in the accent, no marker. */
+const SUMMARY =
+  "inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-accent " +
+  "marker:content-none hover:underline [&::-webkit-details-marker]:hidden";
 
 /** How many diffs are in flight at once. Pure reads, but still engine runs. */
 const DIFF_CONCURRENCY = 4;
@@ -72,6 +87,16 @@ function statusTone(status: string): string {
   if (status === "applied" || status === "validated") return "low";
   if (status === "rejected") return "high";
   return "moderate";
+}
+
+/**
+ * The typed changes as one sentence in the product's voice: "Anitha
+ * unavailable day 14 to day 21". Only the first letter is raised, so a
+ * lower-case resource key reads as the start of a sentence.
+ */
+function describeChanges(scenario: Scenario): string {
+  const text = scenario.mutations.map((m) => describeMutation(m)).join("; ");
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
 }
 
 type Effect =
@@ -98,7 +123,6 @@ export default function ScenarioList({
 
   const authored = (scenarios ?? []).filter((s) => !OPTIMIZER_ORIGINS.has(s.origin));
   const candidates = (scenarios ?? []).filter((s) => OPTIMIZER_ORIGINS.has(s.origin));
-  const visible = showCandidates ? scenarios ?? [] : authored;
 
   // Fetch only. Resets live in the handlers (D-103).
   useEffect(() => {
@@ -191,67 +215,102 @@ export default function ScenarioList({
     );
   }
 
+  const candidateWord = `optimizer candidate${candidates.length === 1 ? "" : "s"}`;
+
+  const row = (s: Scenario) => (
+    <ScenarioRow
+      key={s.id}
+      scenario={s}
+      effect={effects[s.id] ?? { state: "pending" }}
+      olderBase={
+        currentVersionId !== null && s.base_version_id !== currentVersionId
+      }
+      onDeleted={reload}
+    />
+  );
+
   return (
-    <section>
-      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1.5">
-        <h2 className="text-[13px] font-semibold tracking-tight">
-          Saved scenarios
-        </h2>
+    <section className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h2 className="text-[18px] font-semibold">Saved scenarios</h2>
         <span className="text-[12px] text-dim">
           {scenarios.length === 0
             ? "none"
-            : `${scenarios.length} · ${authored.length} authored, ${candidates.length} optimizer candidate${candidates.length === 1 ? "" : "s"} · newest first · effects computed on the engine`}
+            : `${authored.length} authored · ${candidates.length} ${candidateWord} · newest first`}
         </span>
       </div>
 
+      {/* The panel's one caveat, always visible. */}
+      <p className="text-[12px] text-dim">
+        Each effect is computed on the engine against the scenario&apos;s own
+        base; nothing here is estimated by the page.
+      </p>
+
       {scenarios.length === 0 ? (
-        <div className="max-w-3xl py-2">
-          <p className="text-sm font-medium">No saved scenarios yet</p>
-          <p className="mt-1 text-sm text-dim">
+        <div className="max-w-3xl">
+          <p className="text-[14px] font-medium">No saved scenarios yet</p>
+          <p className="mt-1 text-[14px] text-dim">
             A simulation from the composer above is discarded once you have
-            read it unless you tick &ldquo;keep it&rdquo;. The sentence box
-            saves each interpretation it understood, the optimizer saves every
-            candidate that survived its gates, and a requirement change saves
-            its replan. Any of those will appear here.
+            read it unless you tick &ldquo;keep it&rdquo;.
           </p>
+          <details className="group mt-1.5">
+            <summary className={SUMMARY}>
+              <ChevronRight
+                className={cn(ICON, "transition-transform group-open:rotate-90")}
+                aria-hidden
+              />
+              How scenarios come to exist
+            </summary>
+            <p className="mt-1.5 max-w-2xl pl-4 text-[14px] text-dim">
+              The sentence box saves each interpretation it understood, the
+              optimizer saves every candidate that survived its gates, and a
+              requirement change saves its replan. Any of those will appear
+              here.
+            </p>
+          </details>
         </div>
       ) : (
         <>
-          {visible.length === 0 && (
-            <p className="py-2 text-sm text-dim">
+          {authored.length === 0 && (
+            <p className="text-[14px] text-dim">
               Nothing authored by hand yet; every saved scenario here is an
               optimizer candidate.
             </p>
           )}
-          <ul className="divide-y divide-border/60">
-            {visible.map((s) => (
-              <ScenarioRow
-                key={s.id}
-                scenario={s}
-                effect={effects[s.id] ?? { state: "pending" }}
-                olderBase={
-                  currentVersionId !== null &&
-                  s.base_version_id !== currentVersionId
-                }
-                onDeleted={reload}
-              />
-            ))}
-          </ul>
+          {authored.length > 0 && (
+            <ul className="divide-y divide-line rounded-xl border border-line bg-panel px-4">
+              {authored.map(row)}
+            </ul>
+          )}
           {candidates.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setShowCandidates((v) => !v)}
-              aria-expanded={showCandidates}
-              className="mt-2 inline-flex items-center gap-1 text-[12px] text-dim hover:text-foreground"
+            <details
+              className="group rounded-xl border border-line bg-panel px-4"
+              onToggle={(e) => setShowCandidates(e.currentTarget.open)}
             >
-              <ChevronRight
-                className={cn(ICON, "transition-transform", showCandidates && "rotate-90")}
-                aria-hidden
-              />
-              {showCandidates
-                ? `Hide the ${candidates.length} optimizer candidate${candidates.length === 1 ? "" : "s"}`
-                : `Show the ${candidates.length} optimizer candidate${candidates.length === 1 ? "" : "s"} the searches saved`}
-            </button>
+              {/* One row for all of them. Their diffs are asked for only
+                  once this is open, because each is an engine run. */}
+              <summary
+                className={cn(
+                  SUMMARY,
+                  "flex w-full py-2.5 text-[14px] font-medium text-foreground",
+                )}
+              >
+                <ChevronRight
+                  className={cn(
+                    ICON,
+                    "text-dim transition-transform group-open:rotate-90",
+                  )}
+                  aria-hidden
+                />
+                {candidates.length} {candidateWord}
+                <span className="ml-auto text-[12px] font-normal text-dim">
+                  saved by the searches
+                </span>
+              </summary>
+              <ul className="divide-y divide-line border-t border-line">
+                {candidates.map(row)}
+              </ul>
+            </details>
           )}
         </>
       )}
@@ -317,9 +376,11 @@ function ScenarioRow({
   }
 
   const rejected = scenario.status === "rejected";
+  const changes = describeChanges(scenario);
+  const name = scenario.name.trim() || "(unnamed scenario)";
 
   return (
-    <li className="py-2.5">
+    <li className="py-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <button
           type="button"
@@ -335,19 +396,18 @@ function ScenarioRow({
             )}
             aria-hidden
           />
-          <span className="text-sm font-medium">
-            {scenario.name.trim() || "(unnamed scenario)"}
-          </span>
+          <span className="text-[14px] font-medium">{name}</span>
         </button>
         <Badge
           variant="outline"
-          className={cn("font-normal", bandClasses(statusTone(scenario.status)))}
+          className={cn(
+            "text-[12px] font-normal",
+            bandClasses(statusTone(scenario.status)),
+          )}
         >
           {scenarioStatusLabel(scenario.status)}
         </Badge>
-        <span className={cn(TOKEN, "text-dim")}>
-          {originLabel(scenario.origin)}
-        </span>
+        <span className={CHIP}>{originLabel(scenario.origin)}</span>
         {olderBase && (
           <span
             className="text-[12px] text-severity-medium"
@@ -361,44 +421,67 @@ function ScenarioRow({
         </span>
       </div>
 
-      {/* The headline: the engine's finish-date delta, or why there is none. */}
-      <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1 pl-5 text-xs">
+      {/* The headline: the engine's finish-date delta, or why there is none,
+          then the typed changes in the product's words. */}
+      <div className="mt-1 flex flex-wrap items-baseline gap-x-3 gap-y-1 pl-5">
         {rejected ? (
-          <span className={bandText("high")}>
+          <span className="text-[14px] text-critical">
             rejected — {scenario.rejection_reason || "no reason recorded"}
           </span>
         ) : effect.state === "pending" ? (
-          <span className="inline-flex items-center gap-1.5 text-dim">
+          <span className="inline-flex items-center gap-1.5 text-[12px] text-dim">
             <LoaderCircle className={cn(ICON, "animate-spin")} aria-hidden />
             computing its effect on the finish date…
           </span>
         ) : effect.state === "failed" ? (
-          <span className={bandText("high")}>
+          <span className="text-[14px] text-critical">
             effect could not be computed — {effect.error.userMessage}
           </span>
         ) : (
           <Headline diff={effect.diff} />
         )}
-        <span className="text-dim">
-          {scenario.mutations.length} typed change
-          {scenario.mutations.length === 1 ? "" : "s"}
-          {scenario.mutations.length > 0 && (
-            <>
-              {": "}
-              {scenario.mutations.map((m) => m.describes).join("; ")}
-            </>
-          )}
-        </span>
+        {changes && (
+          <span className="min-w-0 text-[12px] text-dim">{changes}</span>
+        )}
       </div>
 
       {open && (
-        <div className="mt-3 flex flex-col gap-3 border-l-2 border-border pl-4">
+        <div className="mt-3 flex flex-col gap-3 border-l-2 border-line pl-4">
           {scenario.rationale && (
-            <p className="max-w-3xl text-sm">{scenario.rationale}</p>
+            <p className="max-w-3xl text-[14px]">{scenario.rationale}</p>
+          )}
+
+          {/* The typed changes as the engine recorded them, beside the
+              product's reading of each. */}
+          {scenario.mutations.length > 0 && (
+            <div>
+              <div className="mb-1 text-[12px] text-dim">
+                {scenario.mutations.length} typed change
+                {scenario.mutations.length === 1 ? "" : "s"}, in order:
+              </div>
+              <ol className="flex max-w-3xl flex-col divide-y divide-line border-y border-line">
+                {scenario.mutations.map((m, i) => (
+                  <li
+                    key={i}
+                    className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1.5 text-[14px]"
+                  >
+                    <span className="w-4 shrink-0 text-right text-[12px] text-dim">
+                      {i + 1}
+                    </span>
+                    <span className="min-w-0 flex-1">{describeMutation(m)}</span>
+                    {m.describes && (
+                      <span className="text-[12px] text-dim">
+                        recorded as &ldquo;{m.describes}&rdquo;
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ol>
+            </div>
           )}
 
           {evaluating && (
-            <span className="inline-flex items-center gap-1.5 text-xs text-dim">
+            <span className="inline-flex items-center gap-1.5 text-[12px] text-dim">
               <LoaderCircle className={cn(ICON, "animate-spin")} aria-hidden />
               Evaluating against an in-memory copy of its base…
             </span>
@@ -423,23 +506,25 @@ function ScenarioRow({
           )}
 
           {/* ------------------------------------------------- delete */}
-          <div className="border-t border-border pt-2">
+          <div className="border-t border-line pt-2">
             {scenario.status === "applied" ? (
-              <p className="text-xs text-dim">
+              <p className="text-[12px] text-dim">
                 Applied scenarios cannot be deleted: this one is the provenance
                 of a workflow version.
               </p>
             ) : confirming ? (
-              <div className="border-l-2 border-severity-high bg-severity-high/5 py-2 pl-3">
-                <p className="text-sm font-semibold text-severity-high">
+              <div className="border-l-2 border-critical bg-critical/5 py-2 pl-3">
+                <p className="text-[14px] font-semibold text-critical">
                   Delete this scenario?
                 </p>
-                <p className="mt-1 max-w-2xl text-xs text-dim">
+                <p className="mt-1 max-w-2xl text-[12px] text-dim">
                   It is scratch paper over a workflow version. Deleting it
                   removes the scenario and its typed changes and nothing
                   else: no workflow version is touched, and nothing that has
-                  been applied changes. Needs the editor role; a viewer is
-                  refused by the API.
+                  been applied changes.
+                </p>
+                <p className="mt-1 max-w-2xl text-[12px] text-dim">
+                  Needs the editor role; a viewer is refused by the API.
                 </p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Button
@@ -487,12 +572,16 @@ function ScenarioRow({
   );
 }
 
-/** The engine's projected-completion delta, signed, with the direction. */
+/**
+ * The engine's projected-completion delta, signed, with the direction. A
+ * later finish is the one warm colour; earlier or unchanged is the good
+ * green. The text keeps its exact shape: `finish +5d · day 26 → 31`.
+ */
 function Headline({ diff }: { diff: ScenarioDiff }) {
   const pc = diff.comparison.projected_completion;
   if (!diff.validation.valid) {
     return (
-      <span className={bandText("high")}>
+      <span className="text-[14px] text-critical">
         would be refused now — its base has changed under it
       </span>
     );
@@ -501,8 +590,8 @@ function Headline({ diff }: { diff: ScenarioDiff }) {
   return (
     <span
       className={cn(
-        "font-medium",
-        none ? "text-dim" : bandText(pc.delta_days > 0 ? "high" : "low"),
+        "text-[14px] font-medium",
+        pc.delta_days > 0 ? "text-critical" : "text-severity-low",
       )}
       title={`Projected finish day ${pc.before_day} → ${pc.after_day} (${pc.direction})`}
     >

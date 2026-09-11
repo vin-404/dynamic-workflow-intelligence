@@ -22,12 +22,22 @@
  * are hovered or focused. That is a deliberate divergence from the shadcn
  * `Input` default: seventeen rows of outlined boxes reads as a form, and the
  * point of this table is that it reads as data you can type into.
+ *
+ * Design pass (brief §1 Build, §4 Build): resources are two-line cards that
+ * wrap rather than clip; a task's constraint chips sit under the name input
+ * instead of beside it; every label goes through the display map; type sits
+ * on the four-step scale. Nothing here changes a request.
  */
 
 import { useMemo, useState } from "react";
 import { Lock, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { resourceKindLabel, statusLabel } from "@/lib/display";
+import {
+  constraintKindLabel,
+  edgeKindLabel,
+  resourceKindLabel,
+  statusLabel,
+} from "@/lib/display";
 import {
   ApiError,
   Workflow,
@@ -81,27 +91,35 @@ const NONE = "__none__";
 const ICON = "size-3.5 shrink-0";
 
 /**
- * A constraint id on record, not a status.
+ * A constraint on record, not a status.
  *
  * `violet` used to carry this - a constraint badge in a fourth hue, next to
- * three severity states. It is distinguished by *form* now: a bordered mono
- * chip on the inset surface, matching how the other panels spell an
- * identifier, so the token can be deleted.
+ * three severity states. It is distinguished by *form* now: a bordered chip
+ * on the inset surface, in the display map's words ("Mandatory", "Cannot be
+ * split"), so the token can be deleted.
  */
 const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
+  "inline-flex items-center rounded border border-line bg-panel2 px-1.5 py-0.5 text-[12px] text-dim";
 
 /** A borderless cell input: the border arrives on hover and focus. */
 const CELL =
-  "h-7 rounded-md border-transparent bg-transparent px-1.5 text-sm " +
+  "h-7 rounded-md border-transparent bg-transparent px-1.5 text-[14px] " +
   "hover:border-input focus-visible:border-ring " +
   "dark:bg-transparent dark:disabled:bg-transparent";
 
 /** The same idea for a cell's select trigger. */
 const CELL_TRIGGER =
   "h-7 w-full justify-between border-transparent bg-transparent px-1.5 " +
-  "text-sm hover:border-input focus-visible:border-ring dark:bg-transparent " +
+  "text-[14px] hover:border-input focus-visible:border-ring dark:bg-transparent " +
   "dark:hover:bg-transparent";
+
+/** What each task-level constraint means, for a chip's hover text. */
+const CONSTRAINT_HINT: Record<string, string> = {
+  MANDATORY_TASK: "No proposal may remove this task",
+  NON_DIVISIBLE_TASK: "No proposal may split this task across people",
+  FIXED_ASSIGNMENT: "No proposal may reassign this task",
+  MIN_DURATION: "No proposal may shorten this task below its minimum",
+};
 
 function nextTaskKey(workflow: Workflow): string {
   const numbers = workflow.tasks
@@ -125,8 +143,8 @@ function Head({
   note?: string;
 }) {
   return (
-    <div className="mb-2 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
-      <h2 className="text-sm font-medium">{title}</h2>
+    <div className="mb-3 flex flex-wrap items-baseline gap-x-3 gap-y-0.5">
+      <h2 className="text-[18px] font-semibold">{title}</h2>
       <span className="font-mono text-[12px] text-dim">{count}</span>
       {note && <span className="text-[12px] text-dim">{note}</span>}
     </div>
@@ -227,13 +245,15 @@ export default function WorkflowBuilder({
         >
           <p>{error.userMessage}</p>
           {error.cycles && (
-            <p className="mt-1 font-mono text-xs text-severity-medium">
+            <p className="mt-1 font-mono text-[12px] text-severity-medium">
               {error.cycles[0].join(" → ")} → {error.cycles[0][0]}
             </p>
           )}
           {error.constraint && (
-            <p className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-              <span className={TOKEN}>{error.constraint.constraint}</span>
+            <p className="mt-1 flex flex-wrap items-center gap-2 text-[12px]">
+              <span className={TOKEN}>
+                {constraintKindLabel(error.constraint.constraint)}
+              </span>
               <span className="text-dim">
                 {error.constraint.constraint_reason}
               </span>
@@ -345,7 +365,7 @@ function TaskPanel({
       />
 
       {workflow.tasks.length === 0 ? (
-        <p className="max-w-2xl text-sm text-dim">
+        <p className="max-w-2xl text-[14px] text-dim">
           Add the first piece of work below. Effort is the amount of work in
           days, not the elapsed time — the engine derives duration from effort
           and who is on it, and it will not pretend two people halve a task.
@@ -360,7 +380,7 @@ function TaskPanel({
                 ["Effort", "w-20"],
                 ["Divisible", "w-24"],
                 ["Status", "w-32"],
-                ["Assignees", "w-60"],
+                ["Assignees", "w-64"],
               ].map(([label, width]) => (
                 <TableHead
                   key={label}
@@ -453,7 +473,7 @@ function TaskPanel({
       </div>
 
       {templates && templates.length > 0 && workflow.tasks.length === 0 && (
-        <details className="mt-3 text-xs">
+        <details className="mt-3 text-[12px]">
           <summary className="cursor-pointer text-accent">
             Start from this domain&apos;s templates ({templates.length})
           </summary>
@@ -502,21 +522,24 @@ function TaskRow({
   onAssign: (taskKey: string, resourceKey: string) => void;
   onUnassign: (taskKey: string, resourceKey: string) => void;
 }) {
-  const [name, setName] = useState(task.name);
+  const [name, setName] = useState(String(task.name));
   const [effort, setEffort] = useState(String(task.effort));
   const mandatory = constraints.includes("MANDATORY_TASK");
   const locked = constraints.includes("NON_DIVISIBLE_TASK");
+  const chips = Array.from(new Set(constraints));
   const unassigned = workflow.resources.filter(
     (r) => !task.assignees.some((a) => a.key === r.key),
   );
 
   return (
     <TableRow className="border-line/60">
-      <TableCell className="px-1.5 py-1 font-mono text-xs text-dim">
+      <TableCell className="px-1.5 py-1 align-top font-mono text-[12px] leading-7 text-dim">
         {task.key}
       </TableCell>
-      <TableCell className="px-1.5 py-1">
-        <div className="flex items-center gap-1.5">
+      <TableCell className="px-1.5 py-1 align-top">
+        {/* The name keeps the whole column. Constraint chips, when there are
+            any, take a second line beneath it - never a slice of the input. */}
+        <div className="flex flex-col gap-1">
           <Input
             value={name}
             disabled={busy}
@@ -525,29 +548,22 @@ function TaskRow({
             onChange={(e) => setName(e.target.value)}
             onBlur={() => name !== task.name && onPatch(task.key, { name })}
           />
-          {mandatory && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className={cn(TOKEN, "shrink-0 text-dim")}>
-                  mandatory
+          {chips.length > 0 && (
+            <div className="flex flex-wrap gap-1 px-1.5 pb-0.5">
+              {chips.map((kind) => (
+                <span
+                  key={kind}
+                  className={TOKEN}
+                  title={CONSTRAINT_HINT[kind]}
+                >
+                  {constraintKindLabel(kind)}
                 </span>
-              </TooltipTrigger>
-              <TooltipContent>Cannot be removed</TooltipContent>
-            </Tooltip>
-          )}
-          {locked && (
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span className={cn(TOKEN, "shrink-0 text-dim")}>
-                  indivisible
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>Cannot be split</TooltipContent>
-            </Tooltip>
+              ))}
+            </div>
           )}
         </div>
       </TableCell>
-      <TableCell className="px-1.5 py-1">
+      <TableCell className="px-1.5 py-1 align-top">
         <Input
           type="number"
           min={0}
@@ -563,7 +579,7 @@ function TaskRow({
           }
         />
       </TableCell>
-      <TableCell className="px-1.5 py-1">
+      <TableCell className="px-1.5 py-1 align-top">
         <Select
           value={task.divisible ? "yes" : "no"}
           disabled={busy || locked}
@@ -587,7 +603,7 @@ function TaskRow({
           </SelectContent>
         </Select>
       </TableCell>
-      <TableCell className="px-1.5 py-1">
+      <TableCell className="px-1.5 py-1 align-top">
         <Select
           value={task.status}
           disabled={busy}
@@ -611,12 +627,12 @@ function TaskRow({
           </SelectContent>
         </Select>
       </TableCell>
-      <TableCell className="px-1.5 py-1">
-        <div className="flex flex-wrap items-center gap-1">
+      <TableCell className="px-1.5 py-1 align-top">
+        <div className="flex min-h-7 flex-wrap items-center gap-1">
           {task.assignees.map((a) => (
             <span
               key={a.key}
-              className="inline-flex items-center gap-1 text-xs text-foreground"
+              className="inline-flex items-center gap-1 rounded-full border border-line bg-panel2 py-0.5 pr-1.5 pl-2 text-[12px] text-foreground"
             >
               {a.label}
               <Remove
@@ -644,7 +660,7 @@ function TaskRow({
               }
               className={cn(
                 CELL_TRIGGER,
-                "w-6 justify-center rounded-full border-border p-0 text-dim",
+                "w-6 justify-center rounded-full border-line p-0 text-dim",
                 "data-[size=sm]:h-6 data-[size=sm]:rounded-full",
                 "hover:text-foreground [&>svg:last-child]:hidden",
               )}
@@ -668,7 +684,7 @@ function TaskRow({
           </Select>
         </div>
       </TableCell>
-      <TableCell className="px-1.5 py-1">
+      <TableCell className="px-1.5 py-1 align-top leading-7">
         <Remove
           onClick={() => onDelete(task.key)}
           disabled={busy}
@@ -732,41 +748,50 @@ function ResourcePanel({
       />
 
       {workflow.resources.length === 0 ? (
-        <p className="max-w-2xl text-sm text-dim">
+        <p className="max-w-2xl text-[14px] text-dim">
           Nothing is assignable yet. A resource is a person, a team, a machine
           or a budget line — the engine only ever sees a name, a kind and a
           capacity, which is what keeps it domain-agnostic.
         </p>
       ) : (
-        <ul className="grid grid-cols-1 gap-x-6 sm:grid-cols-2 lg:grid-cols-3">
-          {workflow.resources.map((r) => (
-            <li
-              key={r.key}
-              className="flex items-baseline gap-2 border-b border-line/50 py-1 text-sm"
-            >
-              <span className="truncate">{r.name}</span>
-              <span className="flex-1 truncate font-mono text-[12px] text-dim">
-                {resourceKindLabel(r.kind)} · capacity {r.capacity}
-                {r.parent_key
-                  ? ` · in ${
-                      workflow.resources.find((p) => p.key === r.parent_key)
-                        ?.name
-                    }`
-                  : ""}
-              </span>
-              <Remove
-                onClick={() => onDelete(r.key)}
-                disabled={busy}
-                label={`Remove ${r.name}`}
-                title="Remove"
-              />
-            </li>
-          ))}
+        <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+          {/* Two lines, one card each: the name, then the meta. The rows
+              share a height through the grid; the meta wraps rather than
+              clips when a team name runs long. */}
+          {workflow.resources.map((r) => {
+            const parent = r.parent_key
+              ? workflow.resources.find((p) => p.key === r.parent_key)?.name
+              : null;
+            return (
+              <li
+                key={r.key}
+                className="flex min-h-[3.5rem] items-start gap-2 rounded-xl border border-line bg-panel px-3 py-2"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="text-[14px] leading-5 font-medium break-words">
+                    {r.name}
+                  </div>
+                  <div className="text-[12px] leading-4 text-dim">
+                    {resourceKindLabel(r.kind)} · capacity {r.capacity}
+                    {parent ? ` · in ${parent}` : ""}
+                  </div>
+                </div>
+                <Remove
+                  onClick={() => onDelete(r.key)}
+                  disabled={busy}
+                  label={`Remove ${r.name}`}
+                  title="Remove"
+                />
+              </li>
+            );
+          })}
         </ul>
       )}
 
-      <div className="mt-4 grid grid-cols-1 items-end gap-2 sm:grid-cols-5">
-        <Lbl label="Name" className="sm:col-span-2">
+      {/* Five controls, each in its own column, so "Belongs to" has a column
+          of its own instead of sharing one with the button and wrapping. */}
+      <div className="mt-4 grid grid-cols-1 items-end gap-2 sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <Lbl label="Name">
           <Input
             value={name}
             placeholder="Priya, Marketing, Test rig…"
@@ -799,31 +824,29 @@ function ResourcePanel({
             onChange={(e) => setCapacity(Number(e.target.value))}
           />
         </Lbl>
-        <div className="flex items-end gap-2">
-          <Lbl label="Belongs to" className="flex-1">
-            <Select
-              value={parent || NONE}
-              onValueChange={(v) => setParent(v === NONE ? "" : v)}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectGroup>
-                  <SelectItem value={NONE}>—</SelectItem>
-                  {teams.map((t) => (
-                    <SelectItem key={t.key} value={t.key}>
-                      {t.name}
-                    </SelectItem>
-                  ))}
-                </SelectGroup>
-              </SelectContent>
-            </Select>
-          </Lbl>
-          <Button onClick={submit} disabled={busy || !name.trim()}>
-            Add resource
-          </Button>
-        </div>
+        <Lbl label="Belongs to">
+          <Select
+            value={parent || NONE}
+            onValueChange={(v) => setParent(v === NONE ? "" : v)}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                <SelectItem value={NONE}>—</SelectItem>
+                {teams.map((t) => (
+                  <SelectItem key={t.key} value={t.key}>
+                    {t.name}
+                  </SelectItem>
+                ))}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
+        </Lbl>
+        <Button onClick={submit} disabled={busy || !name.trim()}>
+          Add resource
+        </Button>
       </div>
       <p className="mt-2 text-[12px] text-dim">
         A team&apos;s capacity can be lower than its headcount — that gap is
@@ -884,13 +907,13 @@ function DependencyPanel({
       />
 
       {workflow.tasks.length < 2 ? (
-        <p className="text-sm text-dim">
+        <p className="text-[14px] text-dim">
           Add at least two tasks and you can draw the order between them.
         </p>
       ) : (
         <>
           {workflow.dependencies.length === 0 ? (
-            <p className="max-w-2xl text-sm text-dim">
+            <p className="max-w-2xl text-[14px] text-dim">
               Nothing depends on anything yet, so every task starts on day one.
               That is rarely the real plan.
             </p>
@@ -903,23 +926,23 @@ function DependencyPanel({
                 return (
                   <li
                     key={`${d.from_task}-${d.to_task}`}
-                    className="flex items-center gap-2 border-b border-line/50 py-1 text-sm hover:bg-muted/40"
+                    className="flex items-center gap-3 border-b border-line/50 py-1.5 text-[14px] hover:bg-panel2/60"
                   >
-                    <span className="w-24 shrink-0 font-mono text-xs text-dim">
+                    <span className="w-24 shrink-0 font-mono text-[12px] text-dim">
                       {d.from_task} → {d.to_task}
                     </span>
-                    <span className="flex-1 truncate text-xs">
+                    <span className="min-w-0 flex-1 text-[14px]">
                       {nameOf(d.from_task)} before {nameOf(d.to_task)}
                     </span>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <span
                           className={cn(
-                            "shrink-0 font-mono text-[12px]",
+                            "shrink-0 text-[12px]",
                             d.consumes ? "text-foreground" : "text-dim",
                           )}
                         >
-                          {d.consumes ? "artifact" : "ordering"}
+                          {edgeKindLabel(d.consumes)}
                         </span>
                       </TooltipTrigger>
                       <TooltipContent>
@@ -931,14 +954,9 @@ function DependencyPanel({
                     {isProtected ? (
                       <Tooltip>
                         <TooltipTrigger asChild>
-                          <span
-                            className={cn(
-                              TOKEN,
-                              "flex shrink-0 items-center gap-1 text-dim",
-                            )}
-                          >
+                          <span className={cn(TOKEN, "shrink-0 gap-1")}>
                             <Lock className={ICON} />
-                            locked
+                            {constraintKindLabel("IMMUTABLE_DEPENDENCY")}
                           </span>
                         </TooltipTrigger>
                         <TooltipContent>
@@ -958,7 +976,10 @@ function DependencyPanel({
             </ul>
           )}
 
-          <div className="mt-4 grid grid-cols-1 items-end gap-2 sm:grid-cols-4">
+          {/* The kind column is sized for its longest item, "Artifact — it
+              uses the output", so the chosen value is never clipped; the two
+              task pickers share what is left. */}
+          <div className="mt-4 grid grid-cols-1 items-end gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,16rem)_auto]">
             <Lbl label="This must finish">
               <Select
                 value={from || NONE}

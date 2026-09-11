@@ -10,12 +10,14 @@
  *
  * What is actually on screen, and why
  * -----------------------------------
- * The dependency map is the hero: wide main column, narrow inspector rail,
- * exactly as the analyze stage settled it in D-115. The map is the only thing
- * here that answers *when* and *who* at once, and in live mode it is also the
- * only thing that shows the simulated clock moving through the schedule. The
- * rail holds what you glance at - the projected finish and the arriving
- * events - rather than what you work in.
+ * Two headline figures, one per panel, and nothing else at that size (design
+ * brief §3, last bullet): the simulated clock - the calendar date, the day
+ * number in words under it, the transport controls in the same panel - and
+ * the projected finish. Under that strip the dependency map takes the full
+ * width, because it is the only thing here that answers *when* and *who* at
+ * once and the only thing that shows the clock moving through the schedule.
+ * Then the reconstruction line and the findings in the main column, with the
+ * arriving events in the rail - the glance surface, not the work surface.
  *
  * The honesty layer is not decoration here, it is the feature
  * -----------------------------------------------------------
@@ -23,11 +25,12 @@
  * on that simulated day, computed from the events known by then and
  * deliberately not from the later ones, which still exist in the log. A
  * viewer who thinks they are looking at current truth is being misled, so
- * `derived` is rendered in full, permanently, directly under the chart whose
- * numbers it qualifies - not behind a disclosure, not in a footer. The tier
- * genuinely moves during a replay, so `TierBanner` shows the tier *this
- * frame* reached and the checks that consequently could not run. And
- * `projection.is_probability` is `false`, so the projected finish says in
+ * `derived` says so permanently, directly under the chart whose numbers it
+ * qualifies: one sentence always visible, and every caveat the backend sent,
+ * verbatim, one click behind it - relocated, never deleted (brief §2.2, §9).
+ * The tier genuinely moves during a replay, so the evidence line names the
+ * tier *this frame* reached and the checks that consequently could not run.
+ * And `projection.is_probability` is `false`, so the projected finish says in
  * words that it is the schedule's arithmetic and not a likelihood.
  *
  * If the server tells us frames were dropped on the way to this browser, that
@@ -43,10 +46,15 @@
  * leak on the server as well as in the browser.
  */
 
-import { ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-import { CircleSlash, Radio, TriangleAlert } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-Analysis,
+  ChevronRightIcon,
+  CircleSlash,
+  Radio,
+  TriangleAlert,
+} from "lucide-react";
+import {
+  Analysis,
   analyze,
   ApiError,
   controlReplay,
@@ -59,14 +67,24 @@ Analysis,
   ReplayState,
   ReplayTimeline,
   startReplay,
+  UnavailableCheck,
   Workflow,
 } from "@/lib/api";
-import { calendarDate, findingKindLabel, prose, severityLabel, statusLabel, tierLabel, verdictLabel } from "@/lib/display";
-import { severityFill, severityText } from "@/lib/severity";
+import {
+  calendarDate,
+  findingKindLabel,
+  humanize,
+  prose,
+  severityLabel,
+  statusLabel,
+  tierLabel,
+  verdictLabel,
+} from "@/lib/display";
+import { severityClasses, severityFill } from "@/lib/severity";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ErrorNote, Spinner, TierBanner, Worked, days } from "./ui";
+import { ErrorNote, Spinner, days } from "./ui";
 import DependencyGraph, { LiveOverlay } from "@/components/DependencyGraph";
 import Clock from "@/components/Clock";
 import ReplayControls from "@/components/ReplayControls";
@@ -497,14 +515,14 @@ export default function LiveFeed({
           may therefore be behind the replay. Sticky until a seek or a restart
           re-syncs, because a warning that scrolls past in 200ms is not one. */}
       {dropped > 0 && (
-        <div className="border-l-2 border-severity-high bg-severity-high/5 py-2 pl-3 text-sm">
+        <div className="border-l-2 border-severity-high bg-severity-high/5 py-2 pl-3 text-[14px]">
           <div className="flex items-center gap-1.5 font-semibold text-severity-high">
             <TriangleAlert className="size-3.5" aria-hidden />
             {dropped} frame{dropped === 1 ? "" : "s"} never reached this browser
           </div>
           <p className="mt-0.5 text-foreground/90">
             The server dropped them because this connection fell behind the
-            replay. What is on screen may be behind what the engine has
+            replay, so what is on screen may be behind what the engine has
             computed. Seek or restart to re-sync — the numbers here are only
             trustworthy once this notice is gone.
           </p>
@@ -512,8 +530,8 @@ export default function LiveFeed({
       )}
 
       {closedWhy && closedWhy !== "restarted" && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-l-2 border-line py-2 pl-3 text-sm">
-          <CircleSlash className="size-3.5 text-muted-foreground" aria-hidden />
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-l-2 border-line py-2 pl-3 text-[14px]">
+          <CircleSlash className="size-3.5 text-dim" aria-hidden />
           <span>
             {closedWhy === "expired"
               ? "This replay was collected after everybody stopped watching it."
@@ -527,7 +545,7 @@ export default function LiveFeed({
       )}
 
       {!connected && !closedWhy && (
-        <p className="border-l-2 border-line py-1.5 pl-3 text-[13px] text-muted-foreground">
+        <p className="border-l-2 border-line py-1.5 pl-3 text-[14px] text-dim">
           The stream is not connected. Nothing below is updating — it is the
           last frame this browser received, at simulated day{" "}
           {Math.round(frame.clock.sim_day)}.
@@ -535,7 +553,7 @@ export default function LiveFeed({
       )}
 
       {versionMismatch && (
-        <p className="border-l-2 border-severity-medium py-1.5 pl-3 text-[13px]">
+        <p className="border-l-2 border-severity-medium py-1.5 pl-3 text-[14px]">
           The chart&rsquo;s schedule was computed for version{" "}
           <span className="font-mono">{base.version_no}</span> and the replay
           is running over version{" "}
@@ -544,20 +562,16 @@ export default function LiveFeed({
         </p>
       )}
 
-      {/* Tier, and what it consequently could not check. This moves during a
-          replay - the engine reaches tier 0 before it has observed a single
-          transition and tier 2 after - so it is the same shared component the
-          analyze stage uses, re-rendered per frame rather than a static
-          banner. */}
-      <TierBanner
-        tier={frame.tier_reached}
-        checksRun={frame.checks_run}
-        unavailable={frame.unavailable_checks}
-      />
-
-      {/* The transport. Clock left, controls right, one hairline under. */}
-      <div className="flex flex-col gap-4 border-b border-line pb-4 lg:flex-row lg:items-start lg:gap-8">
-        <div className="shrink-0 lg:w-[286px]">
+      {/* ------------------------------------------------------------------
+          THE TOP STRIP - the two headline figures, one per panel.
+          Left: the clock with the transport under it. Right: the projected
+          finish. Nothing else on this stage is set at headline size.
+         ------------------------------------------------------------------ */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+        <section
+          data-panel="live-clock"
+          className="flex flex-col gap-4 rounded-xl border border-line bg-panel px-5 py-4"
+        >
           <Clock
             simDay={simDay}
             simDate={frame.clock.sim_date}
@@ -571,8 +585,6 @@ export default function LiveFeed({
             secondsPerDay={state?.seconds_per_simulated_day}
             speed={state?.speed}
           />
-        </div>
-        <div className="min-w-0 flex-1">
           <ReplayControls
             state={state}
             simDay={simDay}
@@ -601,23 +613,21 @@ export default function LiveFeed({
             }}
             onSpeed={(speed) => send({ action: "speed", speed })}
           />
-        </div>
+        </section>
+
+        <ProjectedFinish projection={p} slipped={slipped} />
       </div>
 
-      {/* Hero and rail, the arrangement D-115 settled: the map takes the
-          width because it is the only thing here that needs it, and the
-          numbers go in the rail because they are what you glance at. */}
+      {/* The map, full width: the only thing here that needs it. */}
       <DependencyGraph analysis={base} live={live} />
 
-      <div className="flex flex-col gap-7 lg:flex-row lg:items-start">
-        <div className="flex min-w-0 flex-1 flex-col gap-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start">
+        <div className="flex min-w-0 flex-1 flex-col gap-4">
           <Reconstruction
             derived={d}
             tier={frame.tier_reached}
-            unavailableCount={frame.unavailable_checks.reduce(
-              (n, g) => n + g.checks.length,
-              0,
-            )}
+            checksRun={frame.checks_run.length}
+            unavailable={frame.unavailable_checks}
           />
 
           <LiveFindings
@@ -625,165 +635,12 @@ export default function LiveFeed({
             flashes={flashes}
             ghosts={ghosts}
             criticalPath={criticalPath}
+            taskNames={taskNames}
             jumped={jumped}
           />
         </div>
 
-        <aside className="flex w-full shrink-0 flex-col gap-4 lg:w-[336px]">
-          {/* ------------------------------------------------------------
-              LIVE INSPECTOR
-              The rail is intentionally compact: status first, evidence
-              second. It is a glance surface, not another dashboard.
-             ------------------------------------------------------------ */}
-
-          <section className="overflow-hidden rounded-xl border border-line bg-panel">
-            <div className="border-b border-line bg-panel2/45 px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-[12px] font-semibold uppercase tracking-[0.14em] text-dim">
-                    Projected finish
-                  </div>
-                  <div className="mt-0.5 text-[12px] text-muted-foreground">
-                    Live replay estimate
-                  </div>
-                </div>
-
-                <span
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[12px] font-medium",
-                    slipped
-                      ? "border-severity-high/25 bg-severity-high/5 text-severity-high"
-                      : "border-severity-low/25 bg-severity-low/5 text-severity-low",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "size-1.5 rounded-full",
-                      slipped
-                        ? "bg-severity-high"
-                        : "bg-severity-low",
-                    )}
-                  />
-                  {slipped ? "At risk" : "On plan"}
-                </span>
-              </div>
-            </div>
-
-            <div className="px-4 py-4">
-              <div className="flex items-end justify-between gap-3">
-                <div className="min-w-0">
-                  <div
-                    className={cn(
-                      "truncate text-[27px] font-semibold leading-none tracking-[-0.025em]",
-                      slipped
-                        ? "text-severity-high"
-                        : "text-foreground",
-                    )}
-                  >
-                    {calendarDate(p.projected_end_date) ?? p.projected_end_date}
-                  </div>
-
-                  <div className="mt-2 font-mono text-[12px] text-muted-foreground">
-                    simulated day {Math.round(p.projected_end_day)}
-                  </div>
-                </div>
-
-                <div
-                  className={cn(
-                    "shrink-0 text-right text-sm font-semibold",
-                    slipped
-                      ? "text-severity-high"
-                      : "text-severity-low",
-                  )}
-                >
-                  {days(p.slip_days, true)}
-                  <div className="mt-0.5 text-[12px] font-normal uppercase tracking-wide text-muted-foreground">
-                    vs plan
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4 grid grid-cols-2 divide-x divide-line rounded-lg border border-line bg-panel2/35">
-                <div className="px-3 py-2.5">
-                  <div className="text-[12px] uppercase tracking-wide text-muted-foreground">
-                    Planned
-                  </div>
-                  <div className="mt-1 font-mono text-[12px]">
-                    d{Math.round(p.planned_end_day)}
-                  </div>
-                  {p.planned_end_date && (
-                    <div className="mt-0.5 text-[12px] text-muted-foreground">
-                      {calendarDate(p.planned_end_date) ?? p.planned_end_date}
-                    </div>
-                  )}
-                </div>
-
-                <div className="px-3 py-2.5">
-                  <div className="text-[12px] uppercase tracking-wide text-muted-foreground">
-                    Deadline
-                  </div>
-                  <div
-                    className={cn(
-                      "mt-1 text-[12px] font-semibold capitalize",
-                      p.verdict === "feasible"
-                        ? "text-severity-low"
-                        : p.verdict === "no_deadline_set"
-                          ? "text-foreground"
-                          : "text-severity-high",
-                    )}
-                  >
-                    {verdictLabel(p.verdict)}
-                  </div>
-                  {p.margin_days !== null && (
-                    <div className="mt-0.5 text-[12px] text-muted-foreground">
-                      {days(p.margin_days, true)} margin
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="mt-4 border-t border-line pt-3">
-                <div className="mb-1.5 flex items-center justify-between">
-                  <span className="text-[12px] font-medium uppercase tracking-wide text-muted-foreground">
-                    Open findings
-                  </span>
-                  <span className="font-mono text-[12px] text-muted-foreground">
-                    {frame.findings.length}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-1.5">
-                  <span className="h-1.5 flex-1 rounded-full bg-severity-high/75" />
-                  <span className="h-1.5 flex-1 rounded-full bg-severity-medium/65" />
-                  <span className="h-1.5 flex-1 rounded-full bg-line" />
-                </div>
-
-                <div className="mt-1.5 flex justify-between font-mono text-[12px] text-muted-foreground">
-                  <span>
-                    {frame.finding_counts_by_severity.high} high
-                  </span>
-                  <span>
-                    {frame.finding_counts_by_severity.medium} medium
-                  </span>
-                  <span>
-                    {frame.finding_counts_by_severity.low} low
-                  </span>
-                </div>
-              </div>
-
-              <p className="mt-4 border-l-2 border-accent/35 pl-2.5 text-[12px] leading-relaxed text-foreground/80">
-                {p.statement}
-              </p>
-
-              {p.is_probability === false && (
-                <p className="mt-2 text-[12px] leading-relaxed text-muted-foreground">
-                  Arithmetic from the critical path, not a probability. The
-                  forecast stage contains the probabilistic view.
-                </p>
-              )}
-            </div>
-          </section>
-
+        <aside className="flex w-full shrink-0 flex-col gap-4 lg:w-[320px]">
           <EventFeed
             events={observedEvents}
             total={d.events_total}
@@ -800,29 +657,22 @@ export default function LiveFeed({
 
 /* ---------------------------------------------------------------- helpers */
 
-function Row({
-  label,
-  children,
-}: {
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="flex items-baseline justify-between gap-3">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="text-right">{children}</dd>
-    </div>
-  );
+const SUMMARY =
+  "flex cursor-pointer list-none items-center gap-1 marker:content-none [&::-webkit-details-marker]:hidden";
+
+/** The first sentence of a piece of engine prose; the rest waits in the disclosure. */
+function firstSentence(text: string): string {
+  const m = /^([\s\S]*?[.!?])(?:\s+(?=[A-Z0-9"(])|$)/.exec(text.trim());
+  return m ? m[1] : text;
 }
 
-/**
- * `step_days` if the payload has it, else the days out of `steps`.
- *
- * `lib/api.ts` types the timeline with `step_days: number[]`; the running
- * backend returns `steps: [{day, date, events}]`. Both are read here rather
- * than one being picked, because `lib/api.ts` is not this agent's file to
- * change and a scrubber with no stops is a scrubber that cannot seek.
- */
+/** "chronic_underestimation: estimates that ..." → the kind as words, the rest verbatim. */
+function checkLine(check: string): string {
+  const colon = check.indexOf(":");
+  if (colon === -1) return findingKindLabel(check);
+  return `${findingKindLabel(check.slice(0, colon))}:${check.slice(colon + 1)}`;
+}
+
 /**
  * The scrubber's stops.
  *
@@ -841,65 +691,229 @@ function readStepDays(timeline: ReplayTimeline): number[] {
     .filter((d): d is number => typeof d === "number");
 }
 
+/* ------------------------------------------------------- projected finish */
+
+/**
+ * The second headline figure. The date is the number; the plan, the deadline
+ * and the slip are the meta under it; the one caveat line says in words that
+ * this is arithmetic and not a likelihood, and the engine's own statement
+ * sits behind the disclosure, verbatim.
+ */
+function ProjectedFinish({
+  projection: p,
+  slipped,
+}: {
+  projection: ReplayFrame["projection"];
+  slipped: boolean;
+}) {
+  const verdictTone =
+    p.verdict === "feasible"
+      ? "text-severity-low"
+      : p.verdict === "no_deadline_set"
+        ? "text-foreground"
+        : "text-severity-high";
+
+  return (
+    <section
+      data-panel="live-projected-finish"
+      className="flex flex-col rounded-xl border border-line bg-panel px-5 py-4"
+    >
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-[14px] font-medium">Projected finish</h2>
+        <span
+          className={cn(
+            "inline-flex h-6 items-center gap-1.5 rounded-full border px-2.5 text-[12px] font-medium",
+            slipped
+              ? "border-severity-high/25 bg-severity-high/5 text-severity-high"
+              : "border-severity-low/25 bg-severity-low/5 text-severity-low",
+          )}
+        >
+          <span
+            aria-hidden
+            className={cn(
+              "size-1.5 rounded-full",
+              slipped ? "bg-severity-high" : "bg-severity-low",
+            )}
+          />
+          {slipped ? "At risk" : "On plan"}
+        </span>
+      </div>
+
+      <div
+        className={cn(
+          "mt-3 text-[36px] font-semibold leading-none tracking-[-0.02em]",
+          slipped ? "text-critical" : "text-foreground",
+        )}
+      >
+        {calendarDate(p.projected_end_date) ?? p.projected_end_date}
+      </div>
+
+      <div className="mt-2 text-[14px]">
+        Ends on day {Math.round(p.projected_end_day)}
+        <span className="text-dim">
+          {" · "}
+          <span className={cn(slipped && "font-medium text-critical")}>
+            {days(p.slip_days, true)}
+          </span>{" "}
+          against the plan
+        </span>
+      </div>
+
+      <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-1 border-t border-line pt-3 text-[12px]">
+        <div>
+          <dt className="text-dim">Planned</dt>
+          <dd className="mt-0.5 text-foreground">
+            Day {Math.round(p.planned_end_day)}
+            {p.planned_end_date && (
+              <span className="text-dim">
+                {" · "}
+                {calendarDate(p.planned_end_date) ?? p.planned_end_date}
+              </span>
+            )}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-dim">Deadline</dt>
+          <dd className="mt-0.5">
+            <span className={cn("font-medium", verdictTone)}>
+              {verdictLabel(p.verdict)}
+            </span>
+            {p.margin_days !== null && (
+              <span className="text-dim">
+                {" · "}
+                {days(p.margin_days, true)} margin
+              </span>
+            )}
+          </dd>
+        </div>
+      </dl>
+
+      {/* The caveat line, always visible. `is_probability` is false on every
+          frame today; if the engine ever sends true, this line is wrong and
+          must not show. */}
+      {p.is_probability === false && (
+        <p className="mt-3 text-[12px] text-dim">
+          Arithmetic from the critical path, not a likelihood — no probability
+          is claimed here; the forecast stage has the probabilistic view.
+        </p>
+      )}
+
+      <details className="group mt-2">
+        <summary className={cn(SUMMARY, "text-[12px] text-accent hover:underline")}>
+          <ChevronRightIcon
+            aria-hidden
+            className="size-3.5 transition-transform group-open:rotate-90"
+          />
+          How this was projected
+        </summary>
+        <p className="mt-2 border-l border-line pl-3 text-[12px] leading-relaxed text-foreground/90">
+          {prose(p.statement)}
+        </p>
+      </details>
+    </section>
+  );
+}
+
 /* --------------------------------------------------------- the honesty bit */
 
 /**
  * What this frame is, and what it is not.
  *
  * Permanently on screen, immediately under the chart whose numbers it
- * qualifies, and every sentence the backend sent - not a summary of them, and
- * not behind a disclosure. `caveats` is rendered by iteration rather than by
- * key, so a caveat the backend adds tomorrow appears here without a frontend
- * change; the day someone adds one must not be the day it stops showing.
+ * qualifies. One sentence is always visible - the frame was computed at this
+ * simulated day from this many of the events - with the evidence tier beside
+ * it; every sentence the backend sent, and the tier note, sit one click
+ * behind, verbatim. `caveats` is rendered by iteration rather than by key, so
+ * a caveat the backend adds tomorrow appears here without a frontend change;
+ * the day someone adds one must not be the day it stops showing.
  */
 function Reconstruction({
   derived,
   tier,
-  unavailableCount,
+  checksRun,
+  unavailable,
 }: {
   derived: ReplayFrame["derived"];
   tier: number;
-  unavailableCount: number;
+  checksRun: number;
+  unavailable: UnavailableCheck[];
 }) {
+  const couldNot = unavailable.reduce((n, g) => n + g.checks.length, 0);
+  const evidence = tierLabel(tier).toLowerCase();
+
   return (
-    <section className="border-t border-line pt-2">
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[13px]">
-        <span className="font-medium">
+    <section className="rounded-xl border border-line bg-panel px-5 py-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+        <h2 className="text-[18px] font-semibold">
           {derived.is_reconstruction
             ? "Reconstruction, not current truth"
             : "Current state"}
-        </span>
-        <span className="font-mono text-muted-foreground">
-          computed at simulated day {derived.computed_at_simulated_day} ·{" "}
-          {derived.events_known} of {derived.events_total} events known ·{" "}
-          {derived.events_pending} pending · evidence{" "}
-          {tierLabel(tier).toLowerCase()}
-          {unavailableCount > 0 ? ` · ${unavailableCount} checks could not run` : ""}
+        </h2>
+        <span className="text-[12px] text-dim">
+          <span className="font-medium text-foreground">Evidence {evidence}</span>
+          {" · "}
+          {checksRun} {checksRun === 1 ? "check" : "checks"} ran
+          {couldNot > 0 ? `, ${couldNot} could not` : ""}
         </span>
       </div>
-      <ul className="mt-1.5 flex flex-col gap-1">
-        {/* Not part of `caveats`, and it belongs with them: the tier at the
-            top of this stage is the tier *this frame* reached, and it climbs
-            as the replay observes transitions. A reader who took it for the
-            project's standing tier would over-read an early frame. */}
-        <li className="border-l border-line pl-2.5 text-[12px] leading-snug text-muted-foreground">
-          The evidence level above ({tierLabel(tier).toLowerCase()}) is what
-          this frame reached, not this project&rsquo;s level today. It is
-          recomputed on every simulated day
-          and climbs as the replay observes transitions
-          {unavailableCount > 0
-            ? `, so the ${unavailableCount} checks listed as unavailable above are the ones this day's evidence could not support.`
-            : "."}
-        </li>
-        {derived.caveats.map((c) => (
-          <li
-            key={c}
-            className="border-l border-line pl-2.5 text-[12px] leading-snug text-muted-foreground"
-          >
-            {c}
-          </li>
-        ))}
-      </ul>
+
+      <p className="mt-1 text-[14px]">
+        Computed at simulated day {derived.computed_at_simulated_day} from the{" "}
+        {derived.events_known} of {derived.events_total} events known by then,
+        with {derived.events_pending} events pending — the later ones exist in
+        the log and are deliberately not used.
+      </p>
+
+      <details className="group mt-2">
+        <summary className={cn(SUMMARY, "text-[12px] text-accent hover:underline")}>
+          <ChevronRightIcon
+            aria-hidden
+            className="size-3.5 transition-transform group-open:rotate-90"
+          />
+          Why these numbers are what they are
+        </summary>
+        <div className="mt-2 flex flex-col gap-3 border-l border-line pl-3 text-[12px]">
+          <ul className="flex flex-col gap-1.5 text-dim">
+            {/* Not part of `caveats`, and it belongs with them: the tier on
+                this stage is the tier *this frame* reached, and it climbs as
+                the replay observes transitions. A reader who took it for the
+                project's standing tier would over-read an early frame. */}
+            <li>
+              The evidence level ({evidence}) is what this frame reached, not
+              this project&rsquo;s level today. It is recomputed on every
+              simulated day and climbs as the replay observes transitions
+              {couldNot > 0
+                ? `, so the ${couldNot} checks listed as unavailable below are the ones this day's evidence could not support.`
+                : "."}
+            </li>
+            {derived.caveats.map((c) => (
+              <li key={c}>{c}</li>
+            ))}
+          </ul>
+
+          {unavailable.length > 0 && (
+            <div className="flex flex-col gap-3 border-t border-line pt-3">
+              <div className="font-medium text-foreground/90">
+                What this frame cannot assess yet, and why
+              </div>
+              {unavailable.map((gap) => (
+                <div key={gap.tier}>
+                  <div className="font-medium text-foreground/90">
+                    {tierLabel(gap.tier)} — needs {gap.requires}
+                  </div>
+                  <ul className="mt-1 space-y-0.5 text-dim">
+                    {gap.checks.map((c) => (
+                      <li key={c}>· {checkLine(c)}</li>
+                    ))}
+                  </ul>
+                  <p className="mt-1 text-dim">{gap.why}</p>
+                  <p className="mt-0.5 text-accent">{gap.unlocked_by}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </details>
     </section>
   );
 }
@@ -911,59 +925,80 @@ function LiveFindings({
   flashes,
   ghosts,
   criticalPath,
+  taskNames,
   jumped,
 }: {
   frame: ReplayFrame;
   flashes: Record<string, Flash>;
   ghosts: { key: string; flash: Flash }[];
   criticalPath: Set<string>;
+  taskNames: Record<string, string>;
   jumped: boolean;
 }) {
   const delta = frame.delta;
   const day = Math.round(frame.clock.sim_day);
+  const counts = frame.finding_counts_by_severity;
+  const maxImpact = Math.max(
+    1,
+    ...frame.findings.map((f) => f.impact_score),
+  );
 
   return (
-    <section>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="text-sm font-medium">
-          What the engine says at simulated day {day}
-        </h2>
-        <p className="font-mono text-[12px] text-dim">
-          {frame.findings.length} open · {delta.appeared.length} appeared ·{" "}
+    <section className="flex flex-col gap-3">
+      <div>
+        <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
+          <h2 className="text-[18px] font-semibold">
+            Findings at simulated day {day}
+          </h2>
+          <span className="text-[12px] text-dim">
+            {frame.findings.length} open · {counts.high} high · {counts.medium}{" "}
+            medium · {counts.low} low
+          </span>
+        </div>
+        <p className="mt-0.5 text-[12px] text-dim">
+          Since the last frame: {delta.appeared.length} appeared ·{" "}
           {delta.cleared.length} cleared · {delta.severity_changed.length}{" "}
-          changed severity · {delta.unchanged} unchanged
+          changed severity · {delta.unchanged} unchanged.
         </p>
+        {jumped && (
+          <p
+            className="mt-0.5 text-[12px] text-dim"
+            title={
+              frame.reason === "start"
+                ? "Nothing is highlighted, because nothing has changed yet."
+                : "Nothing is highlighted for a jump."
+            }
+          >
+            {frame.reason === "start"
+              ? "This is the replay's first frame, so everything the engine found at this simulated day is counted as having appeared."
+              : `That was a ${frame.reason}, so the counts above are the difference from where the replay was, not things that happened on this simulated day.`}
+          </p>
+        )}
       </div>
 
-      {jumped && (
-        <p className="mt-1 text-[12px] text-muted-foreground">
-          {frame.reason === "start"
-            ? "This is the replay's first frame, so everything the engine found at this simulated day is counted as having appeared. Nothing is highlighted, because nothing has changed yet."
-            : `That was a ${frame.reason}, so the counts above are the difference from where the replay was, not things that happened on this simulated day. Nothing is highlighted for a jump.`}
-        </p>
-      )}
-
       {frame.findings.length === 0 && ghosts.length === 0 ? (
-        <p className="mt-2 border-t border-line pt-2 text-[13px] text-muted-foreground">
+        <p className="rounded-xl border border-line bg-panel px-5 py-4 text-[14px] text-dim">
           Nothing is open at this simulated day. That is a real result, not an
-          empty screen — with {frame.checks_run.length} checks run over the
-          events known by day {day}.
+          empty screen — {frame.checks_run.length} checks ran over the events
+          known by day {day}.
         </p>
       ) : (
-        <div className="mt-2 divide-y divide-line border-t border-line">
+        <div className="flex flex-col gap-3">
           {/* Cleared findings stay for the length of the highlight, struck
               through, then leave. A finding that vanishes silently is a
               finding nobody saw clear, and "findings clear on their own" is
               half of what this screen is for. */}
           {ghosts.map(({ key, flash }) => (
-            <ClearedRow key={key} flash={flash} />
+            <ClearedCard key={key} flash={flash} />
           ))}
           {frame.findings.map((f) => (
-            <FindingRow
+            <FindingCard
               key={findingId(f)}
               finding={f}
               flash={flashes[`f:${findingId(f)}`]}
               onCriticalPath={f.task_ids.some((k) => criticalPath.has(k))}
+              taskNames={taskNames}
+              maxImpact={maxImpact}
             />
           ))}
         </div>
@@ -982,99 +1017,206 @@ function LiveFindings({
 const FLASH_ROW =
   "transition-colors duration-150 motion-reduce:transition-none";
 
-function FindingRow({
+/**
+ * One finding, laid out as the Bottlenecks stage lays its cards out: kind,
+ * severity chip, task, tier on the top line; "Do this:" the loudest line;
+ * one sentence of cause; the impact as a number with a bar proportional to
+ * the largest impact on screen; the engine's full explanation, worked
+ * arithmetic and evidence fields behind one disclosure, verbatim.
+ */
+function FindingCard({
   finding,
   flash,
   onCriticalPath,
+  taskNames,
+  maxImpact,
 }: {
   finding: Finding;
   flash?: Flash;
   onCriticalPath: boolean;
+  taskNames: Record<string, string>;
+  maxImpact: number;
 }) {
+  const explanation = prose(finding.explanation);
+  const cause = firstSentence(explanation);
+  const impact = Math.round(finding.impact_score);
+  const share = Math.max(0, Math.min(1, finding.impact_score / maxImpact));
+  const few = finding.task_ids.length <= 2;
+
   return (
-    <div
+    <article
       className={cn(
-        "flex gap-2.5 px-1 py-2",
+        "rounded-xl border bg-panel p-4",
         FLASH_ROW,
+        finding.severity === "high" ? "border-critical/40" : "border-line",
         flash && "bg-foreground/[0.055]",
       )}
     >
-      <span
-        aria-hidden
-        className={cn(
-          "w-0.5 shrink-0 self-stretch rounded-full",
-          severityFill(finding.severity),
-        )}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
-          <span className="font-mono text-xs">{finding.task_ids.join(" ")}</span>
-          <span className="text-[13px] font-medium">
-            {findingKindLabel(finding.kind)}
-          </span>
-          <span className={cn("text-[12px]", severityText(finding.severity))}>
-            {severityLabel(finding.severity).toLowerCase()}
-          </span>
-          {onCriticalPath && (
-            <span className="text-[12px] text-accent">critical path</span>
-          )}
-          <span className="text-[12px] text-muted-foreground">
-            {tierLabel(finding.tier)}
-          </span>
-          {flash && (
-            <Badge variant="outline" className="text-[12px]">
-              {flash.kind === "appeared"
-                ? `appeared d${Math.round(flash.day)}`
-                : `${severityLabel(flash.from).toLowerCase()} → ${severityLabel(flash.severity).toLowerCase()} at d${Math.round(flash.day)}`}
+      <div className="flex items-start gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-dim">
+            <Badge
+              variant="outline"
+              className={cn("text-[12px]", severityClasses(finding.severity))}
+            >
+              {severityLabel(finding.severity)}
             </Badge>
-          )}
-          <span className="ml-auto flex items-baseline gap-2">
-            <Worked>{finding.impact.worked}</Worked>
-            <span className="text-[13px] font-semibold">
-              {Math.round(finding.impact_score)}
+
+            <span className="font-medium text-foreground">
+              {findingKindLabel(finding.kind)}
             </span>
-          </span>
+
+            <span aria-hidden>·</span>
+
+            {few ? (
+              finding.task_ids.map((key) => (
+                <span key={key} className="inline-flex items-baseline gap-1">
+                  <span className="font-mono">{key}</span>
+                  {taskNames[key] && <span>{taskNames[key]}</span>}
+                </span>
+              ))
+            ) : (
+              <span>{finding.task_ids.length} tasks</span>
+            )}
+
+            <span aria-hidden>·</span>
+            <span>{tierLabel(finding.tier)}</span>
+
+            {onCriticalPath && (
+              <span
+                className="font-medium text-critical"
+                title="Zero slack in this frame's schedule."
+              >
+                zero-slack chain
+              </span>
+            )}
+
+            {flash && (
+              <span className="font-medium text-accent">
+                {flash.kind === "appeared"
+                  ? `appeared on day ${Math.round(flash.day)}`
+                  : `${severityLabel(flash.from).toLowerCase()} → ${severityLabel(flash.severity).toLowerCase()} on day ${Math.round(flash.day)}`}
+              </span>
+            )}
+          </div>
+
+          <p className="mt-2 text-[14px] font-semibold leading-snug">
+            <span>Do this: </span>
+            {prose(finding.suggested_action)}
+          </p>
+
+          <p className="mt-1 text-[14px] leading-snug text-dim">{cause}</p>
         </div>
-        <p className="mt-1 text-[13px] leading-snug text-foreground/90">
-          {prose(finding.explanation)}
-        </p>
-        <p className="mt-0.5 text-[13px] leading-snug">
-          <span className="text-muted-foreground">Do this: </span>
-          {prose(finding.suggested_action)}
-        </p>
+
+        <div className="w-20 shrink-0 text-right">
+          <div className="text-[18px] font-semibold leading-none">{impact}</div>
+          <div className="mt-0.5 text-[12px] text-dim">impact</div>
+          <div className="mt-1.5 h-1 w-full overflow-hidden rounded-full bg-panel2">
+            <div
+              className={cn(
+                "h-full rounded-full",
+                finding.severity === "high" ? "bg-critical" : "bg-dim/60",
+              )}
+              style={{ width: `${Math.round(share * 100)}%` }}
+            />
+          </div>
+        </div>
       </div>
-    </div>
+
+      <details className="group mt-3">
+        <summary className={cn(SUMMARY, "text-[12px] text-accent hover:underline")}>
+          <ChevronRightIcon
+            aria-hidden
+            className="size-3.5 transition-transform group-open:rotate-90"
+          />
+          Evidence
+        </summary>
+
+        <div className="mt-2 flex flex-col gap-2 border-l border-line pl-3 text-[12px]">
+          {explanation !== cause && (
+            <p className="leading-relaxed text-foreground/90">{explanation}</p>
+          )}
+
+          <p className="text-dim">
+            <span className="font-medium text-foreground/90">Impact:</span>{" "}
+            <span className="font-mono">{finding.impact.worked}</span>
+            <span className="ml-2 font-mono">{finding.impact.formula}</span>
+          </p>
+
+          <dl className="grid grid-cols-1 gap-x-6 gap-y-1 sm:grid-cols-2">
+            {Object.entries(finding.evidence).map(([key, value]) => (
+              <div key={key} className="flex gap-1.5">
+                <dt className="shrink-0 text-dim">{humanize(key)}:</dt>
+                <dd className="min-w-0 font-mono break-words">
+                  {Array.isArray(value) ? value.join(", ") : String(value)}
+                </dd>
+              </div>
+            ))}
+          </dl>
+
+          {!few && (
+            <p className="text-dim">
+              Tasks: <span className="font-mono">{finding.task_ids.join(", ")}</span>
+            </p>
+          )}
+
+          {finding.downstream_affected.length > 0 && (
+            <p className="text-dim">
+              Downstream:{" "}
+              <span className="font-mono">
+                {finding.downstream_affected.join(", ")}
+              </span>
+            </p>
+          )}
+        </div>
+      </details>
+    </article>
   );
 }
 
-function ClearedRow({ flash }: { flash: Flash }) {
+function ClearedCard({ flash }: { flash: Flash }) {
   const gone = flash.cleared;
   if (!gone) return null;
+  const said = prose(gone.explanation_was);
+  const first = firstSentence(said);
   return (
-    <div className={cn("flex gap-2.5 px-1 py-2 opacity-70", FLASH_ROW)}>
-      <span
-        aria-hidden
-        className={cn(
-          "w-0.5 shrink-0 self-stretch rounded-full opacity-40",
-          severityFill(flash.severity),
-        )}
-      />
-      <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 line-through decoration-1">
-          <span className="font-mono text-xs">{gone.task_ids.join(" ")}</span>
-          <span className="text-[13px] font-medium">
-            {findingKindLabel(gone.kind)}
-          </span>
-          <span className={cn("text-[12px]", severityText(flash.severity))}>
-            was {severityLabel(flash.severity).toLowerCase()}
-          </span>
-        </div>
-        <p className="mt-1 text-[13px] leading-snug text-muted-foreground">
-          Cleared at simulated day {Math.round(flash.day)}. It said:{" "}
-          {prose(gone.explanation_was)}
-        </p>
+    <article
+      className={cn("rounded-xl border border-line bg-panel p-4 opacity-70", FLASH_ROW)}
+    >
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-dim line-through decoration-1">
+        <Badge
+          variant="outline"
+          className={cn("text-[12px]", severityClasses(flash.severity))}
+        >
+          {severityLabel(flash.severity)}
+        </Badge>
+        <span className="font-medium text-foreground">
+          {findingKindLabel(gone.kind)}
+        </span>
+        <span aria-hidden>·</span>
+        <span className="font-mono">{gone.task_ids.join(" ")}</span>
       </div>
-    </div>
+      <p className="mt-2 text-[14px] leading-snug text-dim">
+        <span className="font-semibold text-foreground">
+          Cleared on day {Math.round(flash.day)}.
+        </span>{" "}
+        It said: {first}
+      </p>
+      {first !== said && (
+        <details className="group mt-2">
+          <summary className={cn(SUMMARY, "text-[12px] text-accent hover:underline")}>
+            <ChevronRightIcon
+              aria-hidden
+              className="size-3.5 transition-transform group-open:rotate-90"
+            />
+            What it said in full
+          </summary>
+          <p className="mt-2 border-l border-line pl-3 text-[12px] leading-relaxed text-foreground/90">
+            {said}
+          </p>
+        </details>
+      )}
+    </article>
   );
 }
 
@@ -1097,59 +1239,50 @@ function EventFeed({
 }) {
   return (
     <section className="overflow-hidden rounded-xl border border-line bg-panel">
-      <div className="border-b border-line bg-panel2/45 px-4 py-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-1.5 text-[12px] font-semibold tracking-[0.12em] text-dim uppercase">
-            <Radio
-              className={cn(
-                "size-3",
-                connected ? "text-accent" : "opacity-40",
-              )}
-              aria-hidden
-            />
-            Events observed
-          </div>
-          <span className="font-mono text-[12px] text-muted-foreground">
-            {known} / {total}
-          </span>
-        </div>
+      <div className="flex items-baseline justify-between gap-3 border-b border-line px-5 py-3">
+        <h2 className="flex items-center gap-2 text-[18px] font-semibold">
+          <Radio
+            className={cn("size-4", connected ? "text-accent" : "text-dim")}
+            aria-hidden
+          />
+          Events observed
+        </h2>
+        <span className="text-[12px] text-dim">
+          {known} of {total}
+        </span>
       </div>
 
       {events.length === 0 ? (
-        <p className="px-4 py-4 text-[12px] leading-relaxed text-muted-foreground">
+        <p className="px-5 py-4 text-[14px] leading-relaxed text-dim">
           {total === 0
-            ? `This project has no event log at all, so there is nothing to replay and no observed evidence to reason from. That is why the evidence above is only "${tierLabel(0).toLowerCase()}" and why so many checks could not run.`
+            ? `This project has no event log at all, so there is nothing to replay and no observed evidence to reason from. That is why the evidence is only "${tierLabel(0).toLowerCase()}" and why so many checks could not run.`
             : `No transition has been observed at this simulated day yet. All ${total} in this project's log happen later and are not reflected in any number on this screen.`}
         </p>
       ) : (
-        <ul className="flex max-h-[420px] flex-col divide-y divide-line overflow-y-auto">
+        <ul className="flex max-h-[520px] flex-col divide-y divide-line overflow-y-auto">
           {events.map((e) => {
             const flash = flashes[`e:${e.day}|${e.task_key}|${e.to_status}`];
             return (
               <li
                 key={`${e.day}|${e.task_key}|${e.to_status}`}
                 className={cn(
-                  "px-1 py-1.5 text-[12px]",
+                  "px-5 py-2.5",
                   FLASH_ROW,
                   flash && "bg-foreground/[0.055]",
                 )}
               >
-                <div className="flex items-baseline gap-1.5">
-                  <span className="font-mono text-[12px] text-muted-foreground">
-                    d{Math.round(e.day)}
-                  </span>
-                  <span className="font-mono text-[12px]">{e.task_key}</span>
-                  <span className="ml-auto font-mono text-[12px] text-muted-foreground">
-                    {calendarDate(e.date) ?? e.date}
-                  </span>
+                <div className="flex items-baseline gap-2 text-[12px] text-dim">
+                  <span>Day {Math.round(e.day)}</span>
+                  <span className="font-mono text-foreground">{e.task_key}</span>
+                  <span className="ml-auto">{calendarDate(e.date) ?? e.date}</span>
                 </div>
-                <div className="truncate text-foreground/90">
+                <div className="truncate text-[14px]">
                   {e.task_name || taskNames[e.task_key] || e.task_key}
                 </div>
-                <div className="text-[12px] text-muted-foreground">
-                  {statusLabel(e.from_status).toLowerCase()} →{" "}
-                  <span className="text-foreground/90">
-                    {statusLabel(e.to_status).toLowerCase()}
+                <div className="text-[12px] text-dim">
+                  {statusLabel(e.from_status)} →{" "}
+                  <span className="text-foreground">
+                    {statusLabel(e.to_status)}
                   </span>
                   {e.actor ? ` · ${e.actor}` : ""}
                 </div>

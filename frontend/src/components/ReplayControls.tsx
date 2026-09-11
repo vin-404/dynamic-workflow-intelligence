@@ -12,16 +12,15 @@
  *
  * The component does not make requests itself. All actions are callbacks
  * supplied by LiveFeed, while displayed state comes from the replay stream.
+ *
+ * Presentation: this sits beside the clock in the clock's panel, so it says
+ * nothing the clock already says - the state chip lives there. The speed
+ * control shows a short pace ("1 day every 1s") so it cannot clip at 1280px;
+ * the full sentence and the API's unit are in its title and in the list.
  */
 
 import { useMemo, useRef, useState } from "react";
-import {
-  Activity,
-  Pause,
-  Play,
-  RotateCcw,
-  Zap,
-} from "lucide-react";
+import { Pause, Play, RotateCcw, Zap } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 
@@ -36,7 +35,7 @@ import {
 
 import { ReplayState } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { formatPace } from "@/components/Clock";
+import { formatPace, shortPace } from "@/components/Clock";
 
 /**
  * Speed ladder.
@@ -73,31 +72,15 @@ export default function ReplayControls({
     at: number;
   } | null>(null);
 
-  const start =
-    state?.start_day ??
-    stepDays[0] ??
-    0;
+  const start = state?.start_day ?? stepDays[0] ?? 0;
 
-  const horizon =
-    state?.horizon_day ??
-    stepDays[stepDays.length - 1] ??
-    1;
+  const horizon = state?.horizon_day ?? stepDays[stepDays.length - 1] ?? 1;
 
-  const span = Math.max(
-    1e-9,
-    horizon - start,
-  );
+  const span = Math.max(1e-9, horizon - start);
 
-  const shown =
-    dragDay ?? simDay;
+  const shown = dragDay ?? simDay;
 
-  const pct = Math.min(
-    100,
-    Math.max(
-      0,
-      ((shown - start) / span) * 100,
-    ),
-  );
+  const pct = Math.min(100, Math.max(0, ((shown - start) / span) * 100));
 
   const snap = useMemo(() => {
     return (day: number) => {
@@ -108,10 +91,7 @@ export default function ReplayControls({
       let best = stepDays[0];
 
       for (const d of stepDays) {
-        if (
-          Math.abs(d - day) <
-          Math.abs(best - day)
-        ) {
+        if (Math.abs(d - day) < Math.abs(best - day)) {
           best = d;
         }
       }
@@ -120,17 +100,15 @@ export default function ReplayControls({
     };
   }, [stepDays]);
 
-  const finished =
-    state?.finished ?? false;
+  const finished = state?.finished ?? false;
 
-  const paused =
-    state?.paused ?? false;
+  const paused = state?.paused ?? false;
 
-  const stopped =
-    state?.stopped ?? false;
+  const stopped = state?.stopped ?? false;
 
-  const disabled =
-    !state || stopped;
+  const disabled = !state || stopped;
+
+  const speed = state?.speed ?? 60;
 
   function commit() {
     if (dragDay === null) {
@@ -143,77 +121,34 @@ export default function ReplayControls({
     onSeek(target);
   }
 
-  function onKey(
-    e: React.KeyboardEvent<HTMLInputElement>,
-  ) {
+  function onKey(e: React.KeyboardEvent<HTMLInputElement>) {
     if (!stepDays.length) {
       return;
     }
 
-    const recent =
-      keyTarget.current;
+    const recent = keyTarget.current;
 
     const here =
-      recent &&
-      Date.now() - recent.at < 500
+      recent && Date.now() - recent.at < 500
         ? recent.day
-        : snap(
-            dragDay ?? simDay,
-          );
+        : snap(dragDay ?? simDay);
 
-    const at =
-      stepDays.indexOf(here);
+    const at = stepDays.indexOf(here);
 
-    let next: number | null =
-      null;
+    let next: number | null = null;
 
-    if (
-      e.key === "ArrowRight" ||
-      e.key === "ArrowUp"
-    ) {
-      next =
-        stepDays[
-          Math.min(
-            stepDays.length - 1,
-            at + 1,
-          )
-        ];
-    } else if (
-      e.key === "ArrowLeft" ||
-      e.key === "ArrowDown"
-    ) {
-      next =
-        stepDays[
-          Math.max(0, at - 1)
-        ];
-    } else if (
-      e.key === "PageUp"
-    ) {
-      next =
-        stepDays[
-          Math.min(
-            stepDays.length - 1,
-            at + 5,
-          )
-        ];
-    } else if (
-      e.key === "PageDown"
-    ) {
-      next =
-        stepDays[
-          Math.max(0, at - 5)
-        ];
-    } else if (
-      e.key === "Home"
-    ) {
+    if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+      next = stepDays[Math.min(stepDays.length - 1, at + 1)];
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+      next = stepDays[Math.max(0, at - 1)];
+    } else if (e.key === "PageUp") {
+      next = stepDays[Math.min(stepDays.length - 1, at + 5)];
+    } else if (e.key === "PageDown") {
+      next = stepDays[Math.max(0, at - 5)];
+    } else if (e.key === "Home") {
       next = stepDays[0];
-    } else if (
-      e.key === "End"
-    ) {
-      next =
-        stepDays[
-          stepDays.length - 1
-        ];
+    } else if (e.key === "End") {
+      next = stepDays[stepDays.length - 1];
     }
 
     if (next === null) {
@@ -229,33 +164,17 @@ export default function ReplayControls({
       at: Date.now(),
     };
 
-    if (
-      next !== here ||
-      dragDay !== null
-    ) {
+    if (next !== here || dragDay !== null) {
       onSeek(next);
     }
   }
 
-  const modeLabel = finished
-    ? "Complete"
-    : paused
-      ? "Paused"
-      : "Running";
-
-  const modeClass = finished
-    ? "border-line bg-panel2 text-dim"
-    : paused
-      ? "border-line bg-panel2 text-dim"
-      : "border-accent/30 bg-accent/10 text-accent";
+  const watching = state?.subscribers ?? 0;
 
   return (
-    <div
-      className="flex flex-col gap-3"
-      aria-busy={pending}
-    >
+    <div className="flex flex-col gap-3" aria-busy={pending}>
       {/* --------------------------------------------------
-          CONTROL HEADER
+          CONTROL ROW
           -------------------------------------------------- */}
 
       <div className="flex flex-wrap items-center gap-2">
@@ -272,9 +191,7 @@ export default function ReplayControls({
             <Pause data-icon="inline-start" />
           )}
 
-          {paused || finished
-            ? "Play"
-            : "Pause"}
+          {paused || finished ? "Play" : "Pause"}
         </Button>
 
         <Button
@@ -290,40 +207,30 @@ export default function ReplayControls({
         </Button>
 
         <Select
-          value={String(
-            state?.speed ?? 60,
-          )}
+          value={String(speed)}
           disabled={disabled}
-          onValueChange={(value) =>
-            onSpeed(Number(value))
-          }
+          onValueChange={(value) => onSpeed(Number(value))}
         >
           <SelectTrigger
             size="sm"
             aria-label="Replay speed"
-            className="h-8 w-[150px]"
+            title={`${formatPace(60 / speed)} · ${speed} simulated days per real minute`}
+            className="h-8 min-w-[176px] text-[14px]"
           >
             <div className="flex items-center gap-2">
-              <Zap className="size-3.5 text-accent" />
-              <SelectValue />
+              <Zap className="size-3.5 text-accent" aria-hidden />
+              <SelectValue>{shortPace(60 / speed)}</SelectValue>
             </div>
           </SelectTrigger>
 
           <SelectContent>
             <SelectGroup>
-              {SPEEDS.map((speed) => (
-                <SelectItem
-                  key={speed}
-                  value={String(speed)}
-                >
-                  <span>
-                    {formatPace(
-                      60 / speed,
-                    )}
-                  </span>
+              {SPEEDS.map((s) => (
+                <SelectItem key={s} value={String(s)}>
+                  <span className="text-[14px]">{formatPace(60 / s)}</span>
 
-                  <span className="ml-2 font-mono text-xs text-muted-foreground">
-                    {speed}/min
+                  <span className="ml-2 text-[12px] text-dim">
+                    {s} days per minute
                   </span>
                 </SelectItem>
               ))}
@@ -331,79 +238,17 @@ export default function ReplayControls({
           </SelectContent>
         </Select>
 
-        <div
-          className={cn(
-            "ml-0 flex h-8 items-center gap-1.5 rounded-md border px-2.5 font-mono text-[12px] uppercase tracking-[0.08em]",
-            modeClass,
-          )}
-        >
-          <span
-            className={cn(
-              "size-1.5 rounded-full",
-              finished
-                ? "bg-dim"
-                : paused
-                  ? "bg-dim"
-                  : "animate-pulse bg-accent",
-            )}
-          />
-
-          {modeLabel}
-        </div>
-
-        <div className="ml-auto flex items-center gap-3 font-mono text-[12px] text-muted-foreground">
-          <span className="hidden sm:inline">
-            {stepDays.length} stops
-          </span>
-
-          <span className="hidden sm:inline text-line">
-            /
-          </span>
-
-          <span>
-            {state?.events_total ?? 0} events
-          </span>
-
-          <span className="hidden sm:inline text-line">
-            /
-          </span>
-
-          <span className="flex items-center gap-1">
-            <Activity className="size-3" />
-            {state?.subscribers ?? 0}
-          </span>
-        </div>
+        <span className="ml-auto text-[12px] text-dim">
+          {stepDays.length} stops · {state?.events_total ?? 0} events ·{" "}
+          {watching} {watching === 1 ? "viewer" : "viewers"}
+        </span>
       </div>
 
       {/* --------------------------------------------------
           TIMELINE
           -------------------------------------------------- */}
 
-      <div className="rounded-lg border border-line bg-panel px-3 py-2.5">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="text-[12px] font-medium uppercase tracking-[0.12em] text-dim">
-              Replay timeline
-            </span>
-
-            <span className="font-mono text-[12px] text-muted-foreground">
-              d{Math.round(shown)}
-            </span>
-          </div>
-
-          <span className="font-mono text-[12px] text-muted-foreground">
-            {dragDay !== null
-              ? `seeking d${Math.round(
-                  snap(dragDay),
-                )}`
-              : `d${Math.round(
-                  start,
-                )} — d${Math.round(
-                  horizon,
-                )}`}
-          </span>
-        </div>
-
+      <div>
         <div className="relative h-8 w-full select-none">
           {/* Rail */}
 
@@ -421,26 +266,17 @@ export default function ReplayControls({
           {/* Timeline stops */}
 
           {stepDays.map((day) => {
-            const events =
-              eventDaysByDay[day] ??
-              0;
+            const events = eventDaysByDay[day] ?? 0;
 
-            const position =
-              ((day - start) /
-                span) *
-              100;
+            const position = ((day - start) / span) * 100;
 
             return (
               <span
                 key={day}
                 title={
                   events
-                    ? `day ${day} · ${events} event${
-                        events === 1
-                          ? ""
-                          : "s"
-                      }`
-                    : `day ${day} · no event, but the clock still steps here`
+                    ? `Day ${day} · ${events} event${events === 1 ? "" : "s"}`
+                    : `Day ${day} · no event, but the clock still steps here`
                 }
                 className={cn(
                   "absolute w-px -translate-x-1/2 rounded-full",
@@ -460,18 +296,19 @@ export default function ReplayControls({
           <input
             type="range"
             aria-label="Scrub to a simulated day"
+            // The site-wide rule `.flowtrace-site input { background: var(--panel) !important }`
+            // paints this strip opaque, hiding the rail and the stops under it.
+            // A class cannot beat `!important` and React's style prop cannot
+            // carry it, so the one property is set with the same priority.
+            ref={(el) =>
+              el?.style.setProperty("background", "transparent", "important")
+            }
             min={start}
             max={horizon}
             step="any"
             value={shown}
             disabled={disabled}
-            onChange={(event) =>
-              setDragDay(
-                Number(
-                  event.target.value,
-                ),
-              )
-            }
+            onChange={(event) => setDragDay(Number(event.target.value))}
             onPointerUp={commit}
             onPointerCancel={commit}
             onKeyDown={onKey}
@@ -502,40 +339,19 @@ export default function ReplayControls({
 
         {/* Timeline labels */}
 
-        <div className="flex items-center justify-between font-mono text-[12px] text-muted-foreground">
-          <span>
-            d{Math.round(start)}
-          </span>
+        <div className="flex items-baseline justify-between gap-3 text-[12px] text-dim">
+          <span>Day {Math.round(start)}</span>
 
-          <span>
+          <span className={cn(dragDay !== null && "text-foreground")}>
             {dragDay !== null
-              ? `seek → d${Math.round(
-                  snap(dragDay),
-                )}`
-              : "event marks show replay stops"}
+              ? `Seek to day ${Math.round(snap(dragDay))}`
+              : pending
+                ? "Syncing the replay…"
+                : "Drag to seek · arrow keys step a day · Home and End jump to the ends"}
           </span>
 
-          <span>
-            d{Math.round(horizon)}
-          </span>
+          <span>Day {Math.round(horizon)}</span>
         </div>
-      </div>
-
-      {/* --------------------------------------------------
-          KEYBOARD HINT
-          -------------------------------------------------- */}
-
-      <div className="flex items-center justify-between text-[12px] text-muted-foreground">
-        <span>
-          Drag to seek · ← → move between
-          events · Home / End jump
-        </span>
-
-        {pending && (
-          <span className="font-mono text-accent">
-            syncing replay…
-          </span>
-        )}
       </div>
     </div>
   );

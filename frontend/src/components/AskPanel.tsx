@@ -19,6 +19,12 @@
  * "AI" badge, and the reserved accent is spent on neither the method label nor
  * the mutation kinds: a sentence being read by a regex is not an achievement
  * to advertise, and neither is one being read by a model.
+ *
+ * Presentation (design brief §4, "What if"): the input comes first, and the
+ * provider state is a muted line *beneath* it rather than a badge beside it.
+ * The interpreter's exact payloads are still on the page, behind a disclosure,
+ * so the sentence the reader sees is the display map's and the record is one
+ * click away.
  */
 
 import { useState } from "react";
@@ -36,17 +42,25 @@ import MutationVocabulary from "./MutationVocabulary";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { bandClasses, severityText } from "@/lib/severity";
+import { bandClasses } from "@/lib/severity";
 import { cn } from "@/lib/utils";
-import { describeMutation } from "@/lib/display";
+import {
+  constraintKindLabel,
+  describeMutation,
+  mutationKindLabel,
+} from "@/lib/display";
 import DiffView from "./DiffView";
 import { ErrorNote } from "./ui";
 
 /** One inline icon size across every panel. */
 const ICON = "size-3.5 shrink-0";
-/** A constraint id, a mutation kind: an identifier on record, not a status. */
-const TOKEN =
-  "rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[12px]";
+/** A constraint's kind, named through the display map: a chip, not a token. */
+const CHIP =
+  "rounded border border-line bg-panel2 px-1.5 py-0.5 text-[12px] text-foreground";
+/** The one disclosure style on this stage: a link in the accent, no marker. */
+const SUMMARY =
+  "inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-accent " +
+  "marker:content-none hover:underline [&::-webkit-details-marker]:hidden";
 
 /** Phrasings the deterministic matcher handles, so the box is never a guessing
  *  game about what it accepts. */
@@ -56,18 +70,40 @@ const EXAMPLES = [
   "split T14 across 3 people",
 ];
 
-function Head({
-  children,
-  right,
-}: {
-  children: React.ReactNode;
-  right?: React.ReactNode;
-}) {
+/**
+ * Which interpreter will read the sentence, said under the box in one muted
+ * line. Reads the live status; when the status itself cannot be read that is
+ * reported as its own fact rather than assumed to mean "no model".
+ */
+function ProviderLine() {
+  const { status, failed } = useAiStatus();
+  if (failed) {
+    return (
+      <p className="text-[12px] text-severity-medium">
+        Could not read the AI layer&apos;s status, so which interpreter reads
+        this is unknown.
+      </p>
+    );
+  }
+  if (!status) {
+    return (
+      <p className="text-[12px] text-dim">Checking which interpreter reads this…</p>
+    );
+  }
+  if (status.available) {
+    return (
+      <p className="text-[12px] text-dim" title={`Model: ${status.model}`}>
+        Interpreting with the model {status.model}
+      </p>
+    );
+  }
   return (
-    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-border pb-1.5">
-      <h2 className="text-[13px] font-semibold tracking-tight">{children}</h2>
-      {right}
-    </div>
+    <p
+      className="text-[12px] text-dim"
+      title={`Every capability works without a model; this box uses a pattern matcher. ${status.degraded_behaviour.interpreter}${status.needs ? ` A model would need: ${status.needs}` : ""}`}
+    >
+      Interpreting with the built-in pattern matcher — no model configured
+    </p>
   );
 }
 
@@ -80,8 +116,6 @@ export default function AskPanel({
   onScenarioCreated?: () => void;
 }) {
   const [utterance, setUtterance] = useState("");
-  // Shared with every other AI-touched panel on the page: one request.
-  const { status, failed: statusFailed } = useAiStatus();
   const [result, setResult] = useState<Interpretation | null>(null);
   const [simulation, setSimulation] = useState<SimulationResponse | null>(null);
   const [error, setError] = useState<ApiError | null>(null);
@@ -128,67 +162,53 @@ export default function AskPanel({
 
   return (
     <div className="flex flex-col gap-6">
-      <section>
-        <Head
-          right={
-            status ? (
-              <span
-                className={cn(TOKEN, "text-dim")}
-                title={
-                  status.available
-                    ? `Model: ${status.model}`
-                    : `Every capability works without a model; this box uses a pattern matcher. ${status.degraded_behaviour.interpreter}${status.needs ? ` A model would need: ${status.needs}` : ""}`
-                }
-              >
-                {status.available ? status.model : "no model configured"}
-              </span>
-            ) : statusFailed ? (
-              <span className="text-[12px] text-severity-medium">
-                AI status unreadable
-              </span>
-            ) : null
-          }
-        >
-          Ask in your own words
-        </Head>
+      <section className="flex flex-col gap-3">
+        <h2 className="text-[18px] font-semibold">Ask in your own words</h2>
 
-        <div className="flex gap-2">
-          <Input
-            value={utterance}
-            onChange={(e) => setUtterance(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") ask(utterance);
-            }}
-            placeholder="e.g. Anitha is unavailable from day 14 to day 21"
-            aria-label="Describe a change in your own words"
-            className="max-w-xl"
-          />
-          <Button
-            variant="secondary"
-            onClick={() => ask(utterance)}
-            disabled={busy || !utterance.trim()}
-          >
-            {busy ? "Reading…" : "Interpret"}
-          </Button>
+        <div>
+          <div className="flex flex-wrap gap-2">
+            <Input
+              value={utterance}
+              onChange={(e) => setUtterance(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") ask(utterance);
+              }}
+              placeholder="e.g. Anitha is unavailable from day 14 to day 21"
+              aria-label="Describe a change in your own words"
+              className="max-w-xl text-[14px]"
+            />
+            <Button
+              variant="secondary"
+              onClick={() => ask(utterance)}
+              disabled={busy || !utterance.trim()}
+            >
+              {busy ? "Reading…" : "Interpret"}
+            </Button>
+          </div>
+          <div className="mt-1.5">
+            <ProviderLine />
+          </div>
         </div>
 
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-dim">
+        <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-dim">
           <span>Try:</span>
           {EXAMPLES.map((e) => (
             <button
               key={e}
+              type="button"
               onClick={() => {
                 setUtterance(e);
                 ask(e);
               }}
-              className="rounded border border-border px-1.5 py-0.5 font-mono text-[12px] transition-colors hover:bg-muted hover:text-foreground"
+              className="rounded border border-line px-1.5 py-0.5 text-[12px] transition-colors hover:bg-panel2 hover:text-foreground"
             >
               {e}
             </button>
           ))}
         </div>
 
-        <p className="mt-3 max-w-2xl text-xs text-dim">
+        {/* The panel's one caveat, always visible. */}
+        <p className="max-w-2xl text-[14px] text-dim">
           This turns a sentence into typed changes and shows you them. It never
           edits your workflow — you see what it understood first, and applying
           is a separate step.
@@ -199,8 +219,10 @@ export default function AskPanel({
         <ErrorNote hint={error.hint} requestId={error.requestId}>
           <p>{error.userMessage}</p>
           {error.constraint && (
-            <p className="mt-2 flex flex-wrap items-baseline gap-x-2 text-xs">
-              <span className={TOKEN}>{error.constraint.constraint}</span>
+            <p className="mt-2 flex flex-wrap items-baseline gap-x-2 text-[12px]">
+              <span className={CHIP}>
+                {constraintKindLabel(error.constraint.constraint)}
+              </span>
               <span className="text-dim">
                 {error.constraint.constraint_reason}
               </span>
@@ -210,71 +232,91 @@ export default function AskPanel({
       )}
 
       {result && (
-        <section>
-          <Head
-            right={
-              <span className="flex flex-wrap items-center gap-1.5">
-                <MethodLabel role="interpreter" method={result.method} />
-                <Badge
-                  variant="outline"
-                  className={cn(
-                    "font-normal",
-                    bandClasses(result.applied ? "high" : "low"),
-                  )}
-                >
-                  {result.applied ? "applied" : "nothing applied"}
-                </Badge>
-              </span>
-            }
-          >
-            {result.understood ? "What it understood" : "It did not understand"}
-          </Head>
+        <section className="flex flex-col gap-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+            <h2 className="text-[18px] font-semibold">
+              {result.understood ? "What it understood" : "It did not understand"}
+            </h2>
+            <span className="flex flex-wrap items-center gap-1.5">
+              <MethodLabel role="interpreter" method={result.method} />
+              <Badge
+                variant="outline"
+                className={cn(
+                  "font-normal",
+                  bandClasses(result.applied ? "high" : "low"),
+                )}
+              >
+                {result.applied ? "applied" : "nothing applied"}
+              </Badge>
+            </span>
+          </div>
 
           {result.understood ? (
             <>
-              <p className="mb-3 max-w-3xl text-sm">{result.intent}</p>
-              {/* Sentences keep their sentence case; small caps are for
-                  column heads, not for claims. */}
-              <div className="mb-1.5 text-[12px] text-dim">
-                As typed changes from the closed set:
+              <p className="max-w-3xl text-[14px]">{result.intent}</p>
+              <div>
+                {/* Sentences keep their sentence case; small caps are for
+                    column heads, not for claims. */}
+                <div className="mb-1.5 text-[12px] text-dim">
+                  As typed changes from the closed set:
+                </div>
+                <ol className="flex max-w-3xl flex-col divide-y divide-line border-y border-line">
+                  {result.mutations.map((m, i) => (
+                    <li
+                      key={i}
+                      className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 py-1.5 text-[14px]"
+                    >
+                      <span className="w-4 shrink-0 text-right text-[12px] text-dim">
+                        {i + 1}
+                      </span>
+                      <span className="min-w-0 flex-1 font-medium">
+                        {describeMutation(m)}
+                      </span>
+                      <span className="text-[12px] text-dim">
+                        {mutationKindLabel(m.kind)}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+                {/* The interpreter's exact record - the fields it filled in -
+                    relocated from the row to a disclosure. */}
+                <details className="group mt-2">
+                  <summary className={SUMMARY}>
+                    <ChevronRight
+                      className={cn(ICON, "transition-transform group-open:rotate-90")}
+                      aria-hidden
+                    />
+                    The exact changes, as recorded
+                  </summary>
+                  <ol className="mt-1.5 flex flex-col items-start gap-1 pl-4">
+                    {result.mutations.map((m, i) => (
+                      <li
+                        key={i}
+                        className="max-w-full rounded border border-line bg-panel2 px-2 py-1 font-mono text-[12px] break-all text-dim"
+                      >
+                        {JSON.stringify(m.payload)}
+                      </li>
+                    ))}
+                  </ol>
+                </details>
               </div>
-              <ol className="mb-1.5 flex flex-col items-start gap-1">
-                {result.mutations.map((m, i) => (
-                  <li
-                    key={i}
-                    className="max-w-full rounded border border-border bg-muted px-2 py-1 text-[12px] break-all"
-                  >
-                    <span className="font-medium" title={m.kind}>
-                      {describeMutation(m)}
-                    </span>{" "}
-                    <span className="font-mono text-dim">
-                      {JSON.stringify(m.payload)}
-                    </span>
-                  </li>
-                ))}
-              </ol>
               <MutationVocabulary
-                className="mb-3"
                 highlight={result.mutations.map((m) => m.kind)}
               />
             </>
           ) : (
-            <p className="mb-3 max-w-3xl text-sm">
+            <p className="max-w-3xl text-[14px]">
               {result.clarification_needed ||
                 "That is not a change this system can express."}
             </p>
           )}
 
           {result.unsupported.length > 0 && (
-            <div className="mb-3 text-xs">
-              <div className="mb-1 text-[12px] text-dim">
-                It could not express:
-              </div>
-              <ul className="flex flex-col gap-0.5">
+            <div>
+              <div className="mb-1 text-[12px] text-dim">It could not express:</div>
+              <ul className="flex flex-col gap-0.5 text-[14px] text-dim">
                 {result.unsupported.map((u, i) => (
-                  <li key={i} className="text-dim">
-                    {u}
-                  </li>
+                  <li key={i}>{u}</li>
                 ))}
               </ul>
             </div>
@@ -283,8 +325,8 @@ export default function AskPanel({
           {/* Understood, but the workflow refuses it. The refusal is the
               answer, so it gets the constraint and the reason on record. */}
           {result.understood && !result.validation.valid && (
-            <div className="rounded-md border border-severity-high/30 bg-severity-high/5 p-2.5 text-sm">
-              <div className={cn("mb-1 font-medium", severityText("high"))}>
+            <div className="rounded-xl border border-critical/30 bg-critical/5 p-3 text-[14px]">
+              <div className="mb-1 font-medium text-critical">
                 The workflow refuses this change.
               </div>
               <ul className="flex flex-col gap-1.5">
@@ -292,8 +334,10 @@ export default function AskPanel({
                   <li key={i}>
                     <div>{r.reason}</div>
                     {r.constraint && (
-                      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 text-xs">
-                        <span className={TOKEN}>{r.constraint}</span>
+                      <div className="mt-1 flex flex-wrap items-baseline gap-x-2 text-[12px]">
+                        <span className={CHIP}>
+                          {constraintKindLabel(r.constraint)}
+                        </span>
                         <span className="text-dim">{r.constraint_reason}</span>
                       </div>
                     )}
@@ -304,29 +348,29 @@ export default function AskPanel({
           )}
 
           {result.scenario_id && (
-            <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
               <Button
                 onClick={() => simulate(result.scenario_id as string)}
                 disabled={simulating}
               >
                 {simulating ? "Running…" : "Simulate this"}
               </Button>
-              <span className="text-xs text-dim">
+              <span className="text-[12px] text-dim">
                 Saved as a pending scenario. Your workflow is untouched until
                 you apply it.
               </span>
             </div>
           )}
 
-          <details className="group mt-3">
-            <summary className="inline-flex cursor-pointer list-none items-center gap-1 text-[12px] text-dim hover:text-foreground [&::-webkit-details-marker]:hidden">
+          <details className="group">
+            <summary className={SUMMARY}>
               <ChevronRight
                 className={cn(ICON, "transition-transform group-open:rotate-90")}
                 aria-hidden
               />
               Why you are being shown the typed changes
             </summary>
-            <p className="mt-1.5 max-w-2xl pl-4 text-xs text-dim">
+            <p className="mt-1.5 max-w-2xl pl-4 text-[14px] text-dim">
               The sentence is only used to pick changes from a closed set the
               engine already validates. Nothing that fails validation is
               stored, and the model never writes to your workflow — so a
@@ -337,7 +381,7 @@ export default function AskPanel({
       )}
 
       {simulating && (
-        <div className="flex items-center gap-1.5 text-xs text-dim">
+        <div className="flex items-center gap-1.5 text-[12px] text-dim">
           <LoaderCircle className={cn(ICON, "animate-spin")} aria-hidden />
           Evaluating the scenario
         </div>

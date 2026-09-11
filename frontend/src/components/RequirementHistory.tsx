@@ -2,7 +2,8 @@
 
 /**
  * Requirement versions — who changed what, when, and against which
- * consumption set.
+ * consumption set — as a vertical timeline: one dot on the rail per recorded
+ * wording, newest first, the wording in force today at the top.
  *
  * The empty state is the one that matters and it must not be read as
  * "this requirement never changed". History begins when the first change is
@@ -29,8 +30,7 @@ import {
   requirementDiff,
   requirementHistory,
 } from "@/lib/api";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import When from "@/components/When";
 import { ErrorNote } from "./ui";
@@ -48,6 +48,57 @@ interface CurrentWording {
   text?: string;
   consumed_by?: string[];
   recorded_in_history?: boolean;
+}
+
+type Segment = { op?: unknown; kind?: unknown; text?: unknown };
+
+/* ---------------------------------------------------------------- bits */
+
+const CHIP =
+  "inline-flex items-center rounded-full border px-2 py-0.5 text-[12px] leading-4 whitespace-nowrap";
+
+/**
+ * One side of the wording comparison. The API sends a single merged segment
+ * list; the "before" column is that list without its additions and the
+ * "after" column is it without its removals, so both columns are the API's
+ * own segments and nothing is re-diffed here.
+ */
+function WordingSide({
+  segments,
+  side,
+}: {
+  segments: Segment[];
+  side: "before" | "after";
+}) {
+  return (
+    <p className="text-[14px] leading-relaxed">
+      {segments.map((seg, i) => {
+        const op = String(seg.op ?? seg.kind ?? "equal");
+        const text = String(seg.text ?? "");
+        if (op === "removed") {
+          if (side === "after") return null;
+          return (
+            <span key={i} className="mr-1 bg-critical/10 text-critical line-through">
+              {text}
+            </span>
+          );
+        }
+        if (op === "added") {
+          if (side === "before") return null;
+          return (
+            <span key={i} className="mr-1 bg-severity-low/10 text-severity-low">
+              {text}
+            </span>
+          );
+        }
+        return (
+          <span key={i} className="mr-1">
+            {text}
+          </span>
+        );
+      })}
+    </p>
+  );
 }
 
 /* ----------------------------------------------------------------- main */
@@ -134,116 +185,145 @@ export default function RequirementHistory({
     );
   }
 
+  // Newest first, as the panel has always read. The current wording leads
+  // when history has no row for it; when it does, the top revision *is* it.
+  const ordered = revisions.slice().reverse();
+  const showCurrentDot = !!current && !current.recorded_in_history;
+
   return (
-    <div className="flex flex-col gap-4 rounded-xl border border-line bg-panel p-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 border-b border-line pb-1">
-        <h3 className="text-[12px] font-medium tracking-wider text-dim uppercase">
+    <section className="flex flex-col gap-4 rounded-xl border border-line bg-panel p-5">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
+        <h3 className="text-[18px] font-semibold">
           Recorded wordings of {requirementKey}
         </h3>
-        <span className="text-xs text-dim">
+        <span className="text-[12px] text-dim">
           {history.revision_count ?? revisions.length} recorded ·{" "}
           {history.changes_recorded ?? 0} applied through this system
         </span>
       </div>
 
-      {/* The wording in force now, whether or not history knows about it. */}
-      {current && (
-        <div className="flex flex-col gap-1 rounded-lg bg-panel2/60 p-3">
-          <div className="flex flex-wrap items-baseline gap-x-2">
-            <span className="font-mono text-xs">v{current.version_no}</span>
-            <Badge variant="outline" className="h-4 px-1.5">
-              current
-            </Badge>
-            {!current.recorded_in_history && (
-              <span className="text-xs text-dim">
+      <ol className="relative ml-1.5 border-l border-line">
+        {/* The wording in force now, whether or not history knows about it. */}
+        {showCurrentDot && current && (
+          <li className={cn("relative pl-6", ordered.length ? "pb-5" : "pb-0")}>
+            <span
+              aria-hidden
+              className="absolute top-[5px] -left-[6px] h-[11px] w-[11px] rounded-full border-2 border-panel bg-accent"
+            />
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span className={cn(CHIP, "border-accent text-accent")}>
+                v{current.version_no}
+              </span>
+              <span className={cn(CHIP, "border-line bg-panel2 text-dim")}>
+                current
+              </span>
+              <span className="text-[12px] text-dim">
                 not in the revision table
               </span>
-            )}
-          </div>
-          <p className="text-sm">{current.text}</p>
-          <p className="text-xs text-dim">
-            consumed by{" "}
-            {current.consumed_by?.length
-              ? current.consumed_by.join(", ")
-              : "nothing"}
-          </p>
-        </div>
-      )}
+            </div>
+            <p className="mt-1 text-[14px]">{current.text}</p>
+            <p className="mt-0.5 text-[12px] text-dim">
+              consumed by{" "}
+              {current.consumed_by?.length
+                ? current.consumed_by.join(", ")
+                : "nothing"}
+            </p>
+          </li>
+        )}
 
-      {revisions.length > 0 && (
-        <ul>
-          {revisions
-            .slice()
-            .reverse()
-            .map((rev, i, all) => {
-              const previous = all[i + 1];
-              return (
-                <li
-                  key={rev.version_no}
-                  className="border-b border-line py-3 last:border-0"
+        {ordered.map((rev, i, all) => {
+          const previous = all[i + 1];
+          const last = i === all.length - 1;
+          const isCurrent =
+            !!current?.recorded_in_history &&
+            current.version_no === rev.version_no;
+          const open =
+            !!previous &&
+            pair?.[0] === previous.version_no &&
+            pair?.[1] === rev.version_no;
+          return (
+            <li
+              key={rev.version_no}
+              className={cn("relative pl-6", last ? "pb-0" : "pb-5")}
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  "absolute top-[5px] -left-[6px] h-[11px] w-[11px] rounded-full border-2 border-panel",
+                  isCurrent ? "bg-accent" : "bg-dim",
+                )}
+              />
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span
+                  className={cn(
+                    CHIP,
+                    isCurrent
+                      ? "border-accent text-accent"
+                      : "border-line bg-panel2 text-dim",
+                  )}
                 >
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
-                    <div className="flex flex-wrap items-baseline gap-x-2">
-                      <span className="font-mono text-xs">
-                        v{rev.version_no}
-                      </span>
-                      <span className="text-xs text-dim">
-                        {rev.attributed && rev.changed_by
-                          ? rev.changed_by
-                          : "author unknown"}
-                      </span>
-                      {rev.backfilled && (
-                        <Badge variant="outline" className="h-4 px-1.5">
-                          backfilled
-                        </Badge>
-                      )}
-                    </div>
-                    <span className="text-xs text-dim">
-                      {rev.backfilled ? (
-                        "instant unknown"
-                      ) : (
-                        <When iso={rev.recorded_at} />
-                      )}
-                    </span>
-                  </div>
-                  <p className="mt-0.5 text-sm">{rev.text}</p>
-                  {rev.consumed_by && (
-                    <p className="mt-0.5 text-xs text-dim">
-                      consumed then by{" "}
-                      {rev.consumed_by.length > 0
-                        ? rev.consumed_by.join(", ")
-                        : "nothing"}
-                    </p>
+                  v{rev.version_no}
+                </span>
+                {isCurrent && (
+                  <span className={cn(CHIP, "border-line bg-panel2 text-dim")}>
+                    current
+                  </span>
+                )}
+                {rev.backfilled && (
+                  <span className={cn(CHIP, "border-line bg-panel2 text-dim")}>
+                    backfilled
+                  </span>
+                )}
+                <span className="text-[12px] text-dim">
+                  {rev.attributed && rev.changed_by
+                    ? rev.changed_by
+                    : "author unknown"}
+                </span>
+                <span aria-hidden className="text-[12px] text-dim">
+                  ·
+                </span>
+                <span className="text-[12px] text-dim">
+                  {rev.backfilled ? (
+                    "instant unknown"
+                  ) : (
+                    <When iso={rev.recorded_at} precise />
                   )}
-                  {rev.provenance_note && (
-                    <p className="mt-0.5 text-xs text-dim">
-                      {rev.provenance_note}
-                    </p>
+                </span>
+              </div>
+
+              <p className="mt-1 text-[14px]">{rev.text}</p>
+
+              {rev.consumed_by && (
+                <p className="mt-0.5 text-[12px] text-dim">
+                  consumed then by{" "}
+                  {rev.consumed_by.length > 0
+                    ? rev.consumed_by.join(", ")
+                    : "nothing"}
+                </p>
+              )}
+              {rev.provenance_note && (
+                <p className="mt-0.5 text-[12px] text-dim">
+                  {rev.provenance_note}
+                </p>
+              )}
+
+              {previous && (
+                <button
+                  type="button"
+                  aria-pressed={open}
+                  onClick={() => showDiff(previous.version_no, rev.version_no)}
+                  className={cn(
+                    "mt-1 text-[14px] text-accent hover:underline",
+                    open && "font-semibold",
                   )}
-                  {previous && (
-                    <Button
-                      size="xs"
-                      /* The open pair is marked by the button's own selected
-                         variant. The accent stays reserved (D-117). */
-                      variant={
-                        pair?.[0] === previous.version_no &&
-                        pair?.[1] === rev.version_no
-                          ? "secondary"
-                          : "ghost"
-                      }
-                      className="mt-1 -ml-2"
-                      onClick={() =>
-                        showDiff(previous.version_no, rev.version_no)
-                      }
-                    >
-                      Diff v{previous.version_no} → v{rev.version_no}
-                    </Button>
-                  )}
-                </li>
-              );
-            })}
-        </ul>
-      )}
+                >
+                  Diff v{previous.version_no} → v{rev.version_no}
+                </button>
+              )}
+            </li>
+          );
+        })}
+      </ol>
 
       {diffError && (
         <ErrorNote hint={diffError.hint} requestId={diffError.requestId}>
@@ -252,43 +332,33 @@ export default function RequirementHistory({
       )}
 
       {diff && (
-        <div className="border-l-2 border-line pl-3">
-          <p className="text-[12px] font-medium tracking-wider text-dim uppercase">
+        <div className="flex flex-col gap-2 border-t border-line pt-3">
+          <h4 className="text-[14px] font-semibold">
             v{diff.from_version} → v{diff.to_version}
-          </p>
-          <p className="mt-1 text-sm leading-relaxed">
-            {diff.text_diff.segments.map((seg, i) => {
-              const op = String(seg.op ?? seg.kind ?? "equal");
-              const text = String(seg.text ?? "");
-              if (op === "removed")
-                return (
-                  <span
-                    key={i}
-                    className="mr-1 bg-severity-high/10 text-severity-high line-through"
-                  >
-                    {text}
-                  </span>
-                );
-              if (op === "added")
-                return (
-                  <span
-                    key={i}
-                    className="mr-1 bg-severity-low/10 text-severity-low"
-                  >
-                    {text}
-                  </span>
-                );
-              return (
-                <span key={i} className="mr-1">
-                  {text}
-                </span>
-              );
-            })}
-          </p>
-          <p className="mt-1 text-xs text-dim">
-            {diff.text_diff.note}
-          </p>
-          <p className="mt-1 text-xs">
+          </h4>
+          {/* Before | after, side by side, from the API's own segments. */}
+          <div className="grid gap-3 md:grid-cols-2">
+            <div className="rounded-lg bg-panel2/60 p-3">
+              <p className="mb-1 text-[12px] text-dim">
+                before · v{diff.from_version}
+              </p>
+              <WordingSide
+                segments={diff.text_diff.segments as Segment[]}
+                side="before"
+              />
+            </div>
+            <div className="rounded-lg bg-panel2/60 p-3">
+              <p className="mb-1 text-[12px] text-dim">
+                after · v{diff.to_version}
+              </p>
+              <WordingSide
+                segments={diff.text_diff.segments as Segment[]}
+                side="after"
+              />
+            </div>
+          </div>
+          <p className="text-[12px] text-dim">{diff.text_diff.note}</p>
+          <p className="text-[12px]">
             <span className="text-dim">
               Consumed then: {diff.consumed_by_then.join(", ") || "nothing"} ·
               consumed now: {diff.consumed_by_now.join(", ") || "nothing"}.{" "}
@@ -300,18 +370,17 @@ export default function RequirementHistory({
               </span>
             )}
           </p>
-          {diff.note && (
-            <p className="mt-1 text-xs text-dim">{diff.note}</p>
-          )}
+          {diff.note && <p className="text-[12px] text-dim">{diff.note}</p>}
         </div>
       )}
 
-      {/* Rendered full or empty. An empty list is silence, not evidence. */}
+      {/* Rendered full or empty. An empty list is silence, not evidence. The
+          walkthrough reads it, so it stays visible rather than disclosed. */}
       {history.note && (
-        <p className="border-t border-line pt-2 text-xs text-dim">
+        <p className="border-t border-line pt-3 text-[14px] text-dim">
           {history.note}
         </p>
       )}
-    </div>
+    </section>
   );
 }
